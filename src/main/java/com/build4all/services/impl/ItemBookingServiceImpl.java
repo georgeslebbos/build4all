@@ -34,8 +34,6 @@ public class ItemBookingServiceImpl implements ItemBookingService {
         throw new UnsupportedOperationException("createCashBookingByBusiness is not implemented yet.");
     }
 
-    // ---- Simple lookups used by ActivityController ----------------------------
-
     @Override
     public boolean hasUserAlreadyBooked(Long itemId, Long userId) {
         return bookingsRepo.existsByItem_IdAndUser_Id(itemId, userId);

@@ -17,7 +17,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 @RestController
-@RequestMapping("/api/activity-types")
+@RequestMapping("/api/item-types")
 public class InterestController {
 
     private final InterestsRepository interestsRepository;

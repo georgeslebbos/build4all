@@ -19,8 +19,8 @@ public class ItemType {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "item_type_name") // renamed from activity_name
-    @JsonProperty("activity_type") // keep this if frontend expects it
+    @Column(name = "item_type_name")
+    @JsonProperty("item_type")
     private String name;
 
     @Enumerated(EnumType.STRING)

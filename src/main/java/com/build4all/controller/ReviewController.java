@@ -46,11 +46,11 @@ public class ReviewController {
         return ResponseEntity.ok(reviews != null ? reviews : Collections.emptyList());
     }
 
-    @Operation(summary = "Get reviews by activity ID")
-    @GetMapping("/activity/{activityId}")
-    public ResponseEntity<?> getReviewsByActivity(
+    @Operation(summary = "Get reviews by item ID")
+    @GetMapping("/item/{itemId}")
+    public ResponseEntity<?> getReviewsByItem(
             @RequestHeader("Authorization") String token,
-            @PathVariable Long activityId) {
+            @PathVariable Long itemId) {
 
         String jwt = token.substring(7);
         String role = jwtUtil.extractRole(jwt);
@@ -60,7 +60,7 @@ public class ReviewController {
         }
 
         try {
-            List<Review> reviews = reviewService.getReviewsByItem(activityId);
+            List<Review> reviews = reviewService.getReviewsByItem(itemId);
             return ResponseEntity.ok(reviews != null ? reviews : Collections.emptyList());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Something went wrong.");
@@ -110,12 +110,12 @@ public class ReviewController {
         return ResponseEntity.ok(reviews != null ? reviews : Collections.emptyList());
     }
 
-    @GetMapping("/check-completed/{activityId}")
-    public ResponseEntity<?> hasCompletedActivity(
+    @GetMapping("/check-completed/{itemId}")
+    public ResponseEntity<?> hasCompletedItem(
             @RequestHeader("Authorization") String token,
-            @PathVariable Long activityId) {
+            @PathVariable Long itemId) {
         try {
-            boolean hasCompleted = reviewService.hasUserCompletedItem(activityId, token);
+            boolean hasCompleted = reviewService.hasUserCompletedItem(itemId, token);
             return ResponseEntity.ok(hasCompleted);
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(e.getMessage());
@@ -125,19 +125,19 @@ public class ReviewController {
     @GetMapping("/completed-activities")
     public ResponseEntity<?> getCompletedActivitiesForUser(@RequestHeader("Authorization") String token) {
         try {
-            List<Long> activityIds = reviewService.getCompletedItemIdsForUser(token);
-            return ResponseEntity.ok(activityIds != null ? activityIds : Collections.emptyList());
+            List<Long> itemIds = reviewService.getCompletedItemIdsForUser(token);
+            return ResponseEntity.ok(itemIds != null ? itemIds : Collections.emptyList());
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(e.getMessage());
         }
     }
 
-    @GetMapping("/should-show-modal/{activityId}")
+    @GetMapping("/should-show-modal/{itemId}")
     public ResponseEntity<?> shouldShowReviewModal(
             @RequestHeader("Authorization") String token,
-            @PathVariable Long activityId) {
+            @PathVariable Long itemId) {
         try {
-            boolean result = reviewService.shouldShowReviewModal(activityId, token);
+            boolean result = reviewService.shouldShowReviewModal(itemId, token);
             return ResponseEntity.ok(result);
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(e.getMessage());
@@ -145,10 +145,10 @@ public class ReviewController {
     }
 
     @GetMapping("/suggest")
-    public ResponseEntity<?> suggestReviewActivity(@RequestHeader("Authorization") String token) {
+    public ResponseEntity<?> suggestReviewItem(@RequestHeader("Authorization") String token) {
         try {
-            Long activityId = reviewService.getFirstCompletedUnreviewedItem(token);
-            return ResponseEntity.ok(activityId); // ✅ 200 OK with null if nothing found
+            Long itemId = reviewService.getFirstCompletedUnreviewedItem(token);
+            return ResponseEntity.ok(itemId); // ✅ 200 OK with null if nothing found
         } catch (Exception e) {
             e.printStackTrace();
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

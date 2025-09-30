@@ -29,7 +29,7 @@ public class AdminController {
 
     @Autowired private AdminStatsService statsService;
     @Autowired private AdminUserService adminUserService;
-    @Autowired private AdminItemService adminActivityService;
+    @Autowired private AdminItemService adminItemService;
     @Autowired private UsersRepository usersRepository;
     @Autowired private AdminUsersRepository adminUsersRepository;
     @Autowired private ReviewRepository reviewRepository;
@@ -156,7 +156,7 @@ public class AdminController {
                 return ResponseEntity.status(401).body("Unauthorized");
             }
 
-            List<AdminItemDTO> activities = adminActivityService.getAllItems();
+            List<AdminItemDTO> activities = adminItemService.getAllItems();
             return ResponseEntity.ok(activities);
         } catch (Exception e) {
             return ResponseEntity.status(401).body("Invalid or expired token");
@@ -307,7 +307,7 @@ public class AdminController {
         return ResponseEntity.ok("Password updated successfully.");
     }
 
-    @Operation(summary = "Update notification preferences", description = "Update admin notification settings for activity and feedback alerts")
+    @Operation(summary = "Update notification preferences", description = "Update admin notification settings for item and feedback alerts")
     @ApiResponses(value = {
     	    @ApiResponse(responseCode = "200", description = "Successful"),
     	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
@@ -330,7 +330,7 @@ public class AdminController {
             return ResponseEntity.status(404).body("Admin user not found.");
         }
 
-        admin.setNotifyActivityUpdates(dto.isNotifyActivityUpdates());
+        admin.setNotifyItemUpdates(dto.isNotifyItemUpdates());
         admin.setNotifyUserFeedback(dto.isNotifyUserFeedback());
         adminUsersRepository.save(admin);
 
@@ -386,7 +386,7 @@ public class AdminController {
                 "lastName", admin.getLastName(),
                 "username", admin.getUsername(),
                 "email", admin.getEmail(),
-                "notifyActivityUpdates", admin.getNotifyActivityUpdates(),
+                "notifyItemUpdates", admin.getNotifyItemUpdates(),
                 "notifyUserFeedback", admin.getNotifyUserFeedback()
         ));
     }

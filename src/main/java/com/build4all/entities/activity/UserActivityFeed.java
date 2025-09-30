@@ -1,9 +1,13 @@
-package com.build4all.entities;
+package com.build4all.entities.activity;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
+
+import com.build4all.entities.FeedType;
+import com.build4all.entities.Item;
+import com.build4all.entities.Users;
 
 @Entity
 @Table(name = "user_activity_feed")

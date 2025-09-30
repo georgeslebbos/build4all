@@ -1,7 +1,9 @@
-package com.build4all.entities;
+package com.build4all.entities.activity;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
+
+import com.build4all.entities.Item;
 
 @Entity
 @Table(name = "activities")

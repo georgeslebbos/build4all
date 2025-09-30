@@ -2,7 +2,7 @@ package com.build4all.dto;
 
 public class AdminNotificationPreferencesDTO {
     private String username; // ✅ Add this field
-    private boolean notifyActivityUpdates;
+    private boolean notifyItemUpdates;
     private boolean notifyUserFeedback;
 
     // Getters and Setters
@@ -14,12 +14,12 @@ public class AdminNotificationPreferencesDTO {
         this.username = username;
     }
 
-    public boolean isNotifyActivityUpdates() {
-        return notifyActivityUpdates;
+    public boolean isNotifyItemUpdates() {
+        return notifyItemUpdates;
     }
 
-    public void setNotifyActivityUpdates(boolean notifyActivityUpdates) {
-        this.notifyActivityUpdates = notifyActivityUpdates;
+    public void setNotifyItemUpdates(boolean notifyItemUpdates) {
+        this.notifyItemUpdates = notifyItemUpdates;
     }
 
     public boolean isNotifyUserFeedback() {

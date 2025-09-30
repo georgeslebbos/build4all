@@ -4,16 +4,16 @@ import java.math.BigDecimal;
 
 public class BookingPriceResponse {
     private Long bookingId;
-    private String activityName;
+    private String itemName;
     private int numberOfParticipants;
     private BigDecimal totalPrice;
     private String currencySymbol;
 
     // Constructor
-    public BookingPriceResponse(Long bookingId, String activityName, int numberOfParticipants,
+    public BookingPriceResponse(Long bookingId, String itemName, int numberOfParticipants,
                                  BigDecimal totalPrice, String currencySymbol) {
         this.bookingId = bookingId;
-        this.activityName = activityName;
+        this.itemName = itemName;
         this.numberOfParticipants = numberOfParticipants;
         this.totalPrice = totalPrice;
         this.currencySymbol = currencySymbol;
@@ -28,12 +28,12 @@ public class BookingPriceResponse {
         this.bookingId = bookingId;
     }
 
-    public String getActivityName() {
-        return activityName;
+    public String getItemName() {
+        return itemName;
     }
 
-    public void setActivityName(String activityName) {
-        this.activityName = activityName;
+    public void setItemName(String itemName) {
+        this.itemName = itemName;
     }
 
     public int getNumberOfParticipants() {

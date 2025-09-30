@@ -9,7 +9,6 @@ import java.time.LocalDateTime;
 
 /**
  * Abstract Item class
- * Shared properties for Product, Service, Activity
  */
 @Entity
 @Table(name = "items")

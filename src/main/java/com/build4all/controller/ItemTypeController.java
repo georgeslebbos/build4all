@@ -75,11 +75,11 @@ public class ItemTypeController {
     @PostMapping("/seed-defaults")
     public String seedDefaults() {
         itemTypeService.ensureItemTypes();
-        return "Default activity types and interests seeded successfully.";
+        return "Default item types and interests seeded successfully.";
     }
     
     @GetMapping("/guest")
-    public List<ItemTypeDTO> getAllActivityTypes() {
+    public List<ItemTypeDTO> getAllItemTypes() {
         return  itemTypeRepository.findAllByOrderByNameAsc()
             .stream()
             .map(type -> {

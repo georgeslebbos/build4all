@@ -4,7 +4,7 @@ import java.time.LocalDateTime;
 
 public class ReviewDTO {
     private Long id;
-    private Long itemId; // ✅ renamed from activityId
+    private Long itemId;
 
     private Integer rating;
     private String feedback;

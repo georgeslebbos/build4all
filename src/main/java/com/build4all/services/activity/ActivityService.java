@@ -1,13 +1,13 @@
-package com.build4all.services;
+package com.build4all.services.activity;
 
-import com.build4all.entities.Activity;
 import com.build4all.entities.Businesses;
 import com.build4all.entities.ItemBooking;
 import com.build4all.entities.ItemType;
-import com.build4all.repositories.ActivitiesRepository;
+import com.build4all.entities.activity.Activity;
 import com.build4all.repositories.BusinessesRepository;
 import com.build4all.repositories.ItemBookingsRepository;
 import com.build4all.repositories.ItemTypeRepository;
+import com.build4all.repositories.activity.ActivitiesRepository;
 
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;

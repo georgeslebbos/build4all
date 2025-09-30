@@ -1,17 +1,17 @@
-package com.build4all.controller;
+package com.build4all.controller.activity;
 
-import com.build4all.dto.ActivityDetailsDTO;
-import com.build4all.entities.Activity;
+import com.build4all.dto.activity.ActivityDetailsDTO;
 import com.build4all.entities.BusinessUser;
 import com.build4all.entities.Businesses;
 import com.build4all.entities.ItemBooking;
 import com.build4all.entities.Users;
+import com.build4all.entities.activity.Activity;
 import com.build4all.security.JwtUtil;
-import com.build4all.services.ActivityService;
 import com.build4all.services.BusinessUserService;
 import com.build4all.services.ItemBookingService;
 import com.build4all.services.StripeService;
 import com.build4all.services.UserService;
+import com.build4all.services.activity.ActivityService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import org.springframework.format.annotation.DateTimeFormat;

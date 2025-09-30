@@ -1,7 +1,8 @@
-package com.build4all.repositories;
+package com.build4all.repositories.activity;
 
-import com.build4all.dto.AdminActivityDTO;
-import com.build4all.entities.Activity;
+import com.build4all.dto.activity.AdminActivityDTO;
+import com.build4all.entities.activity.Activity;
+
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;

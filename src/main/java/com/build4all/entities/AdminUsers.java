@@ -40,8 +40,8 @@ public class AdminUsers {
     @OnDelete(action = OnDeleteAction.CASCADE)
     private Role role;
 
-    @Column(name = "notify_activity_updates")
-    private Boolean notifyActivityUpdates = true;
+    @Column(name = "notify_item_updates")
+    private Boolean notifyItemUpdates = true;
 
     @Column(name = "notify_user_feedback")
     private Boolean notifyUserFeedback = true;
@@ -152,12 +152,12 @@ public class AdminUsers {
         this.updatedAt = updatedAt;
     }
 
-    public Boolean getNotifyActivityUpdates() {
-        return notifyActivityUpdates;
+    public Boolean getNotifyItemUpdates() {
+        return notifyItemUpdates;
     }
 
-    public void setNotifyActivityUpdates(Boolean notifyActivityUpdates) {
-        this.notifyActivityUpdates = notifyActivityUpdates;
+    public void setNotifyItemUpdates(Boolean notifyItemUpdates) {
+        this.notifyItemUpdates = notifyItemUpdates;
     }
 
     public Boolean getNotifyUserFeedback() {

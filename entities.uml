@@ -17,13 +17,13 @@
     <node x="1337.4247131931152" y="651.0">com.build4all.entities.PostLikes</node>
     <node x="759.625" y="3060.0">com.build4all.entities.Product</node>
     <node x="1099.9247131931152" y="3872.0">com.build4all.entities.BookingCancellationRequest</node>
-    <node x="919.625" y="3027.0">com.build4all.entities.Activity</node>
+    <node x="919.625" y="3027.0">com.build4all.entities.activity.Activity</node>
     <node x="1797.959767367748" y="2884.0">com.build4all.entities.Businesses</node>
     <node x="393.77549394518655" y="11.0">com.build4all.entities.Currency</node>
     <node x="1511.1075525812619" y="2268.0">com.build4all.entities.ItemType</node>
     <node x="1164.4247131931152" y="4174.0">com.build4all.entities.BookingCancellationRequest.State</node>
     <node x="109.08476736774833" y="684.0">com.build4all.entities.UserStatus</node>
-    <node x="1181.75" y="3016.0">com.build4all.entities.UserActivityFeed</node>
+    <node x="1181.75" y="3016.0">com.build4all.entities.activity.UserActivityFeed</node>
     <node x="877.7149458253671" y="651.0">com.build4all.entities.Friendship</node>
     <node x="1493.1075525812619" y="2028.0">com.build4all.entities.Interests</node>
     <node x="2213.232552581262" y="3481.0">com.build4all.entities.AdminUsers</node>
@@ -95,7 +95,7 @@
       <point x="2002.709767367748" y="3356.0" />
       <point x="68.25" y="225.0" />
     </edge>
-    <edge source="com.build4all.entities.UserActivityFeed" target="com.build4all.entities.FeedType" relationship="TO_ONE">
+    <edge source="com.build4all.entities.activity.UserActivityFeed" target="com.build4all.entities.FeedType" relationship="TO_ONE">
       <point x="-50.25" y="-93.0" />
       <point x="1232.0" y="2862.0" />
       <point x="1162.5" y="2862.0" />
@@ -195,7 +195,7 @@
       <point x="1419.3171606118533" y="960.0" />
       <point x="66.25" y="-313.0" />
     </edge>
-    <edge source="com.build4all.entities.UserActivityFeed" target="com.build4all.entities.Users" relationship="TO_ONE">
+    <edge source="com.build4all.entities.activity.UserActivityFeed" target="com.build4all.entities.Users" relationship="TO_ONE">
       <point x="-50.25" y="-93.0" />
       <point x="1232.0" y="2862.0" />
       <point x="1162.5" y="2862.0" />
@@ -275,7 +275,7 @@
       <point x="329.5" y="574.0" />
       <point x="-45.25" y="-93.0" />
     </edge>
-    <edge source="com.build4all.entities.UserActivityFeed" target="com.build4all.entities.Item" relationship="TO_ONE">
+    <edge source="com.build4all.entities.activity.UserActivityFeed" target="com.build4all.entities.Item" relationship="TO_ONE">
       <point x="-50.25" y="-93.0" />
       <point x="1232.0" y="2862.0" />
       <point x="1162.5" y="2862.0" />
@@ -403,7 +403,7 @@
       <point x="440.27549394518655" y="227.0" />
       <point x="-46.5" y="82.0" />
     </edge>
-    <edge source="com.build4all.entities.UserActivityFeed" target="com.build4all.entities.FeedType" relationship="DEPENDENCY">
+    <edge source="com.build4all.entities.activity.UserActivityFeed" target="com.build4all.entities.FeedType" relationship="DEPENDENCY">
       <point x="50.25" y="-93.0" />
       <point x="1332.5" y="2862.0" />
       <point x="1339.0" y="2862.0" />
@@ -635,7 +635,7 @@
       <point x="1829.584767367748" y="920.0" />
       <point x="-46.5" y="115.0" />
     </edge>
-    <edge source="com.build4all.entities.UserActivityFeed" target="com.build4all.entities.Item" relationship="DEPENDENCY">
+    <edge source="com.build4all.entities.activity.UserActivityFeed" target="com.build4all.entities.Item" relationship="DEPENDENCY">
       <point x="50.25" y="-93.0" />
       <point x="1332.5" y="2862.0" />
       <point x="1339.0" y="2862.0" />
@@ -787,7 +787,7 @@
       <point x="1350.875" y="237.0" />
       <point x="-50.5" y="-137.0" />
     </edge>
-    <edge source="com.build4all.entities.Activity" target="com.build4all.entities.Item" relationship="GENERALIZATION">
+    <edge source="com.build4all.entities.activity.Activity" target="com.build4all.entities.Item" relationship="GENERALIZATION">
       <point x="0.0" y="-82.0" />
       <point x="1020.125" y="2862.0" />
       <point x="984.1330465264485" y="2862.0" />
@@ -1095,7 +1095,7 @@
       <point x="2002.709767367748" y="3356.0" />
       <point x="68.25" y="225.0" />
     </edge>
-    <edge source="com.build4all.entities.UserActivityFeed" target="com.build4all.entities.Users" relationship="DEPENDENCY">
+    <edge source="com.build4all.entities.activity.UserActivityFeed" target="com.build4all.entities.Users" relationship="DEPENDENCY">
       <point x="50.25" y="-93.0" />
       <point x="1332.5" y="2862.0" />
       <point x="1339.0" y="2862.0" />

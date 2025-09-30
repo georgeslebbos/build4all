@@ -14,7 +14,7 @@ public class Review {
     private Long id;
 
     @ManyToOne
-    @JoinColumn(name = "item_id", nullable = false) // renamed from activity_id
+    @JoinColumn(name = "item_id", nullable = false)
     @OnDelete(action = OnDeleteAction.CASCADE)
     private Item item;
 

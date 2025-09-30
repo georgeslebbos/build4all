@@ -710,7 +710,7 @@ public class BusinessService {
         newManager.setPasswordHash(passwordEncoder.encode(password));
         newManager.setRole(managerRole);
         newManager.setBusiness(business);
-        newManager.setNotifyActivityUpdates(true);
+        newManager.setNotifyItemUpdates(true);
         newManager.setNotifyUserFeedback(true);
         newManager.setCreatedAt(LocalDateTime.now());
         newManager.setUpdatedAt(LocalDateTime.now());

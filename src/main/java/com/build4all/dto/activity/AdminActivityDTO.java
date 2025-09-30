@@ -1,4 +1,4 @@
-package com.build4all.dto;
+package com.build4all.dto.activity;
 
 import java.time.LocalDateTime;
 

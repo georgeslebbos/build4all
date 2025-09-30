@@ -70,7 +70,7 @@ public class ItemService {
 
         // Because Item is abstract, you will persist a concrete subclass elsewhere.
         // If you use Item directly via a concrete subclass, construct that subclass here instead.
-        // Assuming you have a concrete mapped subclass like Product/Service/Activity later.
+        // Assuming you have a concrete mapped subclass like sub item later.
         // If not, make Item concrete (remove abstract) or use a factory outside.
        // Item item = new com.build4all.entities.Product(); // <-- replace with your concrete subclass
         Item item = new com.build4all.entities.GenericItem();
@@ -216,55 +216,4 @@ public class ItemService {
             Files.deleteIfExists(oldImagePath);
         } catch (Exception ignore) { }
     }
-    
- // inside ItemService
-    public Item createActivityWithImage(
-            String name,
-            Long itemTypeId,
-            String description,
-            String location,
-            Double latitude,
-            Double longitude,
-            int maxParticipants,
-            BigDecimal price,
-            LocalDateTime startDatetime,
-            LocalDateTime endDatetime,
-            String status,
-            Long businessId,
-            MultipartFile image
-    ) throws IOException {
-
-        String imageUrl = storeImageIfPresent(image);
-
-        Businesses business = businessService.findById(businessId);
-        if (business == null) throw new IllegalArgumentException("Business not found");
-
-        ItemType type = itemTypeRepository.findById(itemTypeId)
-                .orElseThrow(() -> new IllegalArgumentException("Invalid item type"));
-
-        Currency currency = currencyRepository.findByCurrencyType("CAD")
-                .orElseThrow(() -> new RuntimeException("Default currency not found"));
-
-        // ⬇️ concrete subclass with activity fields
-        com.build4all.entities.Activity activity = new com.build4all.entities.Activity();
-        // base (Item) fields
-        activity.setItemName(name);
-        activity.setItemType(type);
-        activity.setDescription(description);
-        activity.setPrice(price);
-        activity.setStatus((status != null && !status.isBlank()) ? status : "Upcoming");
-        activity.setImageUrl(imageUrl);
-        activity.setBusiness(business);
-        activity.setCurrency(currency);
-        // activity-specific fields
-        activity.setLocation(location);
-        activity.setLatitude(latitude);
-        activity.setLongitude(longitude);
-        activity.setMaxParticipants(maxParticipants);
-        activity.setStartDatetime(startDatetime);
-        activity.setEndDatetime(endDatetime);
-
-        return itemsRepository.save(activity);
-    }
-
 }
