@@ -1,4 +1,6 @@
-package com.build4all.entities;
+package com.build4all.entities.product;
+
+import com.build4all.entities.Item;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

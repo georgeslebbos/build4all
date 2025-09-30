@@ -1,7 +1,8 @@
-package com.build4all.controller;
+package com.build4all.controller.product;
 
-import com.build4all.entities.Product;
-import com.build4all.services.ProductService;
+import com.build4all.entities.product.Product;
+import com.build4all.services.product.ProductService;
+
 import org.springframework.format.annotation.DateTimeFormat; // not used, safe to remove
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;

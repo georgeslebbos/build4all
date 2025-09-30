@@ -15,7 +15,7 @@
     <node x="2391.192160611853" y="2939.0">com.build4all.entities.PendingBusiness</node>
     <node x="1220.5671606118533" y="982.0">com.build4all.entities.Users</node>
     <node x="1337.4247131931152" y="651.0">com.build4all.entities.PostLikes</node>
-    <node x="759.625" y="3060.0">com.build4all.entities.Product</node>
+    <node x="759.625" y="3060.0">com.build4all.entities.product.Product</node>
     <node x="1099.9247131931152" y="3872.0">com.build4all.entities.BookingCancellationRequest</node>
     <node x="919.625" y="3027.0">com.build4all.entities.activity.Activity</node>
     <node x="1797.959767367748" y="2884.0">com.build4all.entities.Businesses</node>
@@ -869,7 +869,7 @@
       <point x="1866.209767367748" y="3376.0" />
       <point x="-68.25" y="225.0" />
     </edge>
-    <edge source="com.build4all.entities.Product" target="com.build4all.entities.Item" relationship="GENERALIZATION">
+    <edge source="com.build4all.entities.product.Product" target="com.build4all.entities.Item" relationship="GENERALIZATION">
       <point x="0.0" y="-49.0" />
       <point x="829.625" y="2862.0" />
       <point x="984.1330465264485" y="2862.0" />

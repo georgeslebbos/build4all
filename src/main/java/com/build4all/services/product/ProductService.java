@@ -1,10 +1,13 @@
 // src/main/java/com/build4all/services/ProductService.java
-package com.build4all.services;
+package com.build4all.services.product;
 
 import com.build4all.entities.*;
+import com.build4all.entities.product.Product;
 import com.build4all.repositories.CurrencyRepository;
 import com.build4all.repositories.ItemTypeRepository;
-import com.build4all.repositories.ProductRepository;
+import com.build4all.repositories.product.ProductRepository;
+import com.build4all.services.BusinessService;
+
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
