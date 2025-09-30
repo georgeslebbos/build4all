@@ -1,0 +1,179 @@
+package com.build4all.services;
+
+import com.build4all.entities.Activity;
+import com.build4all.entities.Businesses;
+import com.build4all.entities.ItemBooking;
+import com.build4all.entities.ItemType;
+import com.build4all.repositories.ActivitiesRepository;
+import com.build4all.repositories.BusinessesRepository;
+import com.build4all.repositories.ItemBookingsRepository;
+import com.build4all.repositories.ItemTypeRepository;
+
+import jakarta.transaction.Transactional;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.nio.file.*;
+import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.List;
+import java.util.UUID;
+
+@Service
+@Transactional
+public class ActivityService {
+
+    private final ActivitiesRepository activityRepository;
+    private final ItemTypeRepository itemTypeRepository;
+    private final BusinessesRepository businessesRepository;
+    private final ItemBookingsRepository bookingsRepository;
+
+    private final Path uploadRoot = Paths.get("uploads");
+
+    public ActivityService(ActivitiesRepository activityRepository,
+                           ItemTypeRepository itemTypeRepository,
+                           BusinessesRepository businessesRepository,
+                           ItemBookingsRepository bookingsRepository) {
+        this.activityRepository = activityRepository;
+        this.itemTypeRepository = itemTypeRepository;
+        this.businessesRepository = businessesRepository;
+        this.bookingsRepository = bookingsRepository;
+        try {
+            if (!Files.exists(uploadRoot)) Files.createDirectories(uploadRoot);
+        } catch (IOException ignored) {}
+    }
+
+    public Activity createActivityWithImage(String name,
+                                            Long itemTypeId,
+                                            String description,
+                                            String location,
+                                            Double latitude,
+                                            Double longitude,
+                                            int maxParticipants,
+                                            BigDecimal price,
+                                            LocalDateTime startDatetime,
+                                            LocalDateTime endDatetime,
+                                            String status,
+                                            Long businessId,
+                                            MultipartFile image) throws IOException {
+
+        ItemType type = itemTypeRepository.findById(itemTypeId)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid itemTypeId"));
+        Businesses business = businessesRepository.findById(businessId)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid businessId"));
+
+        Activity a = new Activity();
+        a.setItemName(name); // base Item field
+        a.setItemType(type);
+        a.setDescription(description);
+        a.setPrice(price);
+        a.setStatus(StringUtils.hasText(status) ? status : "Upcoming");
+        a.setBusiness(business);
+
+        // activity-specific
+        a.setLocation(location);
+        a.setLatitude(latitude);
+        a.setLongitude(longitude);
+        a.setMaxParticipants(maxParticipants);
+        a.setStartDatetime(startDatetime);
+        a.setEndDatetime(endDatetime);
+
+        if (image != null && !image.isEmpty()) {
+            a.setImageUrl(storeImage(image));
+        }
+
+        return activityRepository.save(a);
+    }
+
+    public Activity updateActivityWithImage(Long id,
+                                            String name,
+                                            Long itemTypeId,
+                                            String description,
+                                            String location,
+                                            Double latitude,
+                                            Double longitude,
+                                            int maxParticipants,
+                                            BigDecimal price,
+                                            LocalDateTime startDatetime,
+                                            LocalDateTime endDatetime,
+                                            String status,
+                                            Long businessId,
+                                            MultipartFile image,
+                                            boolean imageRemoved) throws IOException {
+
+        Activity a = activityRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Activity not found"));
+
+        ItemType type = itemTypeRepository.findById(itemTypeId)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid itemTypeId"));
+        Businesses business = businessesRepository.findById(businessId)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid businessId"));
+
+        a.setItemName(name);
+        a.setItemType(type);
+        a.setDescription(description);
+        a.setPrice(price);
+        if (StringUtils.hasText(status)) a.setStatus(status);
+        a.setBusiness(business);
+
+        a.setLocation(location);
+        a.setLatitude(latitude);
+        a.setLongitude(longitude);
+        a.setMaxParticipants(maxParticipants);
+        a.setStartDatetime(startDatetime);
+        a.setEndDatetime(endDatetime);
+
+        if (imageRemoved) a.setImageUrl(null);
+        if (image != null && !image.isEmpty()) {
+            a.setImageUrl(storeImage(image));
+        }
+
+        return activityRepository.save(a);
+    }
+
+    public Activity findById(Long id) { return activityRepository.findById(id).orElse(null); }
+    public List<Activity> findAll() { return activityRepository.findAll(); }
+    public Activity save(Activity a) { return activityRepository.save(a); }
+    public void deleteActivity(Long id) { activityRepository.deleteById(id); }
+    public List<Activity> findByBusinessId(Long businessId) { return activityRepository.findByBusinessId(businessId); }
+    public List<Activity> findByItemTypeId(Long typeId) { return activityRepository.findByItemTypeId(typeId); }
+
+    public boolean isAvailable(Long itemId, int requestedParticipants) {
+        Activity a = activityRepository.findById(itemId)
+                .orElseThrow(() -> new IllegalArgumentException("Item not found"));
+
+        List<String> active = Arrays.asList("Pending", "Completed", "Paid", "Confirmed");
+        int alreadyBooked = bookingsRepository.sumQuantityByItemIdAndBookingStatuses(itemId, active);
+        int capacityLeft  = Math.max(0, a.getMaxParticipants() - alreadyBooked);
+
+        return requestedParticipants <= capacityLeft;
+    }
+
+    public List<Activity> findItemsByUserInterests(Long userId) {
+        return activityRepository.findUpcomingByUserInterests(userId, LocalDateTime.now());
+    }
+
+    /**
+     * Cash booking creation is not implemented here to avoid a hard dependency on an ItemBookingService.
+     * The controller already catches UnsupportedOperationException and returns 501.
+     */
+    public ItemBooking createCashBookingByBusiness(Long itemId, Long businessUserId, int participants, boolean wasPaid) {
+        throw new UnsupportedOperationException("Cash booking flow is not implemented in ActivityService");
+    }
+
+    // ---- storage helper
+
+    private String storeImage(MultipartFile image) throws IOException {
+        String original = org.springframework.util.StringUtils.cleanPath(image.getOriginalFilename());
+        String ext = "";
+        int dot = original.lastIndexOf('.');
+        if (dot >= 0) ext = original.substring(dot);
+        String fileName = UUID.randomUUID() + ext;
+        Path dest = uploadRoot.resolve(fileName);
+        Files.copy(image.getInputStream(), dest, StandardCopyOption.REPLACE_EXISTING);
+        return "/uploads/" + fileName;
+    }
+}
