@@ -270,17 +270,24 @@ public class AuthController {
             @RequestPart(required = false) MultipartFile banner
     ) {
         try {
-            // 🔧 Complete the profile
-            Businesses updatedBusiness = businessService.completeBusinessProfile(
-                    businessId, businessName, description, websiteUrl, logo, banner
-            );
-            
-            if (businessService.existsByBusinessName(businessName)) {
+            // 1) Validate input
+            if (businessId == null || businessName == null || businessName.isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "businessId and businessName are required"));
+            }
+
+            // 2) Uniqueness check BEFORE saving, excluding the current business
+            boolean nameTakenByOther = businessService
+                    .existsByBusinessNameIgnoreCaseAndIdNot(businessName.trim(), businessId);
+            if (nameTakenByOther) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Business name already in use"));
             }
 
+            // 3) Complete the profile
+            Businesses updatedBusiness = businessService.completeBusinessProfile(
+                    businessId, businessName.trim(), description, websiteUrl, logo, banner
+            );
 
-            // ✅ Build business response
+            // 4) Build response
             Map<String, Object> businessData = new HashMap<>();
             businessData.put("id", updatedBusiness.getId());
             businessData.put("businessName", updatedBusiness.getBusinessName());
@@ -293,7 +300,6 @@ public class AuthController {
             businessData.put("status", updatedBusiness.getStatus());
             businessData.put("isPublicProfile", updatedBusiness.getIsPublicProfile());
 
-            
             return ResponseEntity.ok(Map.of(
                     "message", "Business profile completed successfully.",
                     "business", businessData
@@ -304,6 +310,7 @@ public class AuthController {
                     .body(Map.of("error", e.getMessage()));
         }
     }
+
 
     @PostMapping("/resend-user-code")
     public ResponseEntity<?> resendUserCode(@RequestBody Map<String, String> request) {

@@ -740,6 +740,10 @@ public class BusinessService {
 		// TODO Auto-generated method stub
 		return null;
 	}
+	
+    public boolean existsByBusinessNameIgnoreCaseAndIdNot(String name, Long id) {
+        return businessRepository.existsByBusinessNameIgnoreCaseAndIdNot(name, id);
+    }
 
 
 }

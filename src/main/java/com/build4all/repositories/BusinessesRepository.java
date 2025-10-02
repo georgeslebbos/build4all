@@ -37,4 +37,6 @@ public interface BusinessesRepository extends JpaRepository<Businesses, Long> {
     List<Businesses> findByIsPublicProfileTrueAndStatus(BusinessStatus status);
 
     boolean existsByBusinessNameIgnoreCase(String businessName);
+    
+    boolean existsByBusinessNameIgnoreCaseAndIdNot(String businessName, Long id);
 }
