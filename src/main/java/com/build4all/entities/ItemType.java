@@ -31,6 +31,10 @@ public class ItemType {
     @Enumerated(EnumType.STRING)
     @Column(name = "icon_library")
     private IconLibraryEnum iconLib;
+      
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "project_id", nullable = false)
+    private Project project;
 
     @JsonIgnore
     @ManyToOne
@@ -79,6 +83,9 @@ public class ItemType {
 
     public IconLibraryEnum getIconLib() { return iconLib; }
     public void setIconLib(IconLibraryEnum iconLib) { this.iconLib = iconLib; }
+    
+    public Project getProject() { return project; }
+    public void setProject(Project project) { this.project = project; }
 
     public Interests getInterest() { return interest; }
     public void setInterest(Interests interest) { this.interest = interest; }

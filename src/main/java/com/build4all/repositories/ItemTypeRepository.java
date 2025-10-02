@@ -14,4 +14,10 @@ public interface ItemTypeRepository extends JpaRepository<ItemType, Long> {
     List<ItemType> findAllByOrderByNameAsc();
 
     Optional<ItemType> findByName(String name);
+    
+ // NEW: help filter by project
+    List<ItemType> findByProject_IdOrderByNameAsc(Long projectId);
+
+    // Optional rule: if you want uniqueness per project (not global)
+    boolean existsByNameIgnoreCaseAndProject_Id(String name, Long projectId);
 }

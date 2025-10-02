@@ -2,53 +2,43 @@ package com.build4all.config;
 
 import com.build4all.entities.Interests;
 import com.build4all.entities.ItemType;
+import com.build4all.entities.Project;
 import com.build4all.enums.*;
 import com.build4all.repositories.InterestsRepository;
 import com.build4all.repositories.ItemTypeRepository;
+import com.build4all.repositories.ProjectRepository;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 @Component
 public class ItemTypeSeeder {
 
     private final ItemTypeRepository itemTypeRepository;
     private final InterestsRepository interestsRepository;
+    private final ProjectRepository projectRepository;
 
     public ItemTypeSeeder(ItemTypeRepository itemTypeRepository,
-                          InterestsRepository interestsRepository) {
+                          InterestsRepository interestsRepository,
+                          ProjectRepository projectRepository) {
         this.itemTypeRepository = itemTypeRepository;
         this.interestsRepository = interestsRepository;
+        this.projectRepository = projectRepository;
     }
 
-    @PostConstruct
-    public void seedItemTypes() {
-        for (ItemTypeEnum enumValue : ItemTypeEnum.values()) {
-            String itemTypeName = enumValue.getDisplayName();
-
-            if (itemTypeRepository.findByName(itemTypeName).isEmpty()) {
-
-                String interestName = enumValue.getInterest().name();
-
-                Interests interestEntity = interestsRepository.findByName(interestName)
-                        .orElseGet(() -> interestsRepository.save(new Interests(interestName)));
-
-                ItemIconEnum iconEnum = getIconForItem(enumValue);
-                IconLibraryEnum iconLibEnum = getIconLibraryForItem(enumValue); // always Ionicons
-
-                ItemType newType = new ItemType(
-                        itemTypeName,
-                        iconEnum,
-                        iconLibEnum,
-                        interestEntity
-                );
-
-                itemTypeRepository.save(newType);
-            }
-        }
+    private Project ensureDefaultProject() {
+        return projectRepository.findByProjectNameIgnoreCase("Default Project")
+            .orElseGet(() -> {
+                Project p = new Project();
+                p.setProjectName("Default Project");
+                p.setDescription("Auto-created for item types");
+                p.setActive(true);
+                return projectRepository.save(p);
+            });
     }
 
-    private ItemIconEnum getIconForItem(ItemTypeEnum type) {
-        return switch (type) {
+    private ItemIconEnum iconFor(ItemTypeEnum t) {
+        return switch (t) {
             case HIKING -> ItemIconEnum.TREE;
             case FOOTBALL -> ItemIconEnum.FOOTBALL_BALL;
             case YOGA -> ItemIconEnum.SPA;
@@ -68,37 +58,60 @@ public class ItemTypeSeeder {
         };
     }
 
-    // 🚨 Ionicons-only now
-    private IconLibraryEnum getIconLibraryForItem(ItemTypeEnum type) {
-        return IconLibraryEnum.Ionicons;
-    }
-
     @PostConstruct
-    public void updateExistingItemTypesWithIcons() {
-        for (ItemType type : itemTypeRepository.findAll()) {
+    @Transactional
+    public void seedAndNormalize() {
+        // 1) Ensure default project exists BEFORE touching item types
+        Project defaultProject = ensureDefaultProject();
+
+        // 2) Ensure interests exist
+        for (InterestEnum ie : InterestEnum.values()) {
+            interestsRepository.findByName(ie.name())
+                .orElseGet(() -> interestsRepository.save(new Interests(ie.name())));
+        }
+
+        // 3) Seed missing item types (always attach project!)
+        for (ItemTypeEnum e : ItemTypeEnum.values()) {
+            String name = e.getDisplayName();
+            if (itemTypeRepository.findByName(name).isEmpty()) {
+                Interests interest = interestsRepository.findByName(e.getInterest().name())
+                        .orElseThrow(); // should exist from step 2
+
+                ItemType t = new ItemType();
+                t.setName(name);
+                t.setInterest(interest);
+                t.setIcon(iconFor(e));
+                t.setIconLib(IconLibraryEnum.Ionicons);
+                t.setProject(defaultProject);                  // <-- important
+                itemTypeRepository.save(t);
+            }
+        }
+
+        // 4) Normalize existing rows (backfill project/icon/iconLib)
+        for (ItemType t : itemTypeRepository.findAll()) {
             boolean changed = false;
 
-            // normalize icon enum if missing
-            if (type.getIcon() == null) {
-                try {
-                    ItemTypeEnum typeEnum = ItemTypeEnum.valueOf(type.getName().toUpperCase().replace(" ", "_"));
-                    type.setIcon(getIconForItem(typeEnum));
-                    changed = true;
-                } catch (IllegalArgumentException e) {
-                    System.out.println("⚠️ No matching enum for: " + type.getName());
-                }
-            }
-
-            // force Ionicons for everyone
-            if (type.getIconLib() != IconLibraryEnum.Ionicons) {
-                type.setIconLib(IconLibraryEnum.Ionicons);
+            if (t.getProject() == null) {
+                t.setProject(defaultProject);                  // <-- backfill
                 changed = true;
             }
 
-            if (changed) {
-                itemTypeRepository.save(type);
-                System.out.println("✅ Normalized " + type.getName() + " to Ionicons.");
+            if (t.getIconLib() != IconLibraryEnum.Ionicons) {
+                t.setIconLib(IconLibraryEnum.Ionicons);
+                changed = true;
             }
+
+            if (t.getIcon() == null) {
+                try {
+                    ItemTypeEnum e = ItemTypeEnum.valueOf(
+                        t.getName().toUpperCase().replace(" ", "_")
+                    );
+                    t.setIcon(iconFor(e));
+                    changed = true;
+                } catch (IllegalArgumentException ignored) {}
+            }
+
+            if (changed) itemTypeRepository.save(t);
         }
     }
 }
