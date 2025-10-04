@@ -1,6 +1,6 @@
 package com.build4all.repositories;
 
-import com.build4all.entities.Interests;
+import com.build4all.entities.Interest;
 import com.build4all.entities.UserInterests;
 
 import java.util.List;
@@ -17,7 +17,7 @@ import com.build4all.entities.Users;
 public interface UserInterestsRepository extends JpaRepository<UserInterests, UserInterestId> {
 
 	 @Query("SELECT ui.interest FROM UserInterests ui WHERE ui.id.user.id = :userId")
-	    List<Interests> findInterestsByUserId(@Param("userId") Long userId);
+	    List<Interest> findInterestsByUserId(@Param("userId") Long userId);
 
 	 List<UserInterests> findByInterestIdIn(List<Long> myInterestIds);
 

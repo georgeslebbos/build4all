@@ -20,4 +20,6 @@ public interface ItemTypeRepository extends JpaRepository<ItemType, Long> {
 
     // Optional rule: if you want uniqueness per project (not global)
     boolean existsByNameIgnoreCaseAndProject_Id(String name, Long projectId);
+    
+    boolean existsByNameIgnoreCase(String name);
 }

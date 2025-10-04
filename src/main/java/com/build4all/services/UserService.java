@@ -2,13 +2,13 @@ package com.build4all.services;
 
 import com.build4all.entities.AdminUsers;
 
-import com.build4all.entities.Interests;
+import com.build4all.entities.Interest;
 import com.build4all.entities.PendingUser;
 import com.build4all.entities.UserInterests;
 import com.build4all.entities.Users;
 import com.build4all.entities.UserStatus;
 import org.springframework.transaction.annotation.Transactional;
-import com.build4all.repositories.InterestsRepository;
+import com.build4all.repositories.InterestRepository;
 import com.build4all.repositories.UserStatusRepository;
 import com.build4all.repositories.PendingUserRepository;
 import com.build4all.repositories.UserInterestsRepository;
@@ -50,7 +50,7 @@ public class UserService {
     private UserInterestsRepository userInterestsRepository;
 
     @Autowired
-    private InterestsRepository interestsRepository;
+    private InterestRepository interestRepository;
     
     @Autowired
     private PendingUserRepository pendingUserRepository;
@@ -484,7 +484,7 @@ public class UserService {
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         for (Long interestId : interestIds) {
-            Interests interest = interestsRepository.findById(interestId)
+            Interest interest = interestRepository.findById(interestId)
                     .orElseThrow(() -> new RuntimeException("Interest not found"));
 
             UserInterests.UserInterestId compositeKey = new UserInterests.UserInterestId(user, interest);
@@ -796,10 +796,10 @@ public class UserService {
 	    Users user = userRepository.findById(userId)
 	            .orElseThrow(() -> new RuntimeException("User not found"));
 
-	    Interests oldInterest = interestsRepository.findById(oldInterestId)
+	    Interest oldInterest = interestRepository.findById(oldInterestId)
 	            .orElseThrow(() -> new RuntimeException("Old interest not found"));
 
-	    Interests newInterest = interestsRepository.findByNameIgnoreCase(newInterestName)
+	    Interest newInterest = interestRepository.findByNameIgnoreCase(newInterestName)
 	            .orElseThrow(() -> new RuntimeException("New interest not found"));
 
 	    UserInterests.UserInterestId oldKey = new UserInterests.UserInterestId(user, oldInterest);
@@ -828,7 +828,7 @@ public class UserService {
 	    Users user = userRepository.findById(userId)
 	            .orElseThrow(() -> new RuntimeException("User not found"));
 
-	    Interests interest = interestsRepository.findById(interestId)
+	    Interest interest = interestRepository.findById(interestId)
 	            .orElseThrow(() -> new RuntimeException("Interest not found"));
 
 	    UserInterests.UserInterestId key = new UserInterests.UserInterestId(user, interest);
@@ -852,7 +852,7 @@ public class UserService {
 
 	    // 🛠️ Add new ones
 	    for (Long interestId : newInterestIds) {
-	        Interests interest = interestsRepository.findById(interestId)
+	        Interest interest = interestRepository.findById(interestId)
 	                .orElseThrow(() -> new RuntimeException("Interest not found"));
 
 	        UserInterests.UserInterestId compositeKey = new UserInterests.UserInterestId(user, interest);

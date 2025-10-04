@@ -1,121 +1,105 @@
 package com.build4all.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import com.build4all.dto.ItemTypeDTO;
 import com.build4all.entities.ItemType;
 import com.build4all.repositories.ItemTypeRepository;
 import com.build4all.services.ItemTypeService;
-import com.build4all.enums.ItemTypeEnum;
 
-import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/item-types")
 public class ItemTypeController {
 
-    @Autowired
-    private ItemTypeRepository itemTypeRepository;
+    private final ItemTypeRepository itemTypeRepository;
+    private final ItemTypeService itemTypeService;
 
-    @Autowired
-    private ItemTypeService itemTypeService;
+    public ItemTypeController(ItemTypeRepository itemTypeRepository, ItemTypeService itemTypeService) {
+        this.itemTypeRepository = itemTypeRepository;
+        this.itemTypeService = itemTypeService;
+    }
 
+    // 🔹 GET ALL
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-        @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-        @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-        @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-        @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+        @ApiResponse(responseCode = "200", description = "Successful")
     })
     @GetMapping
     public List<ItemType> getAll() {
-        return itemTypeRepository.findAllByOrderByNameAsc();
+        return itemTypeRepository.findAll();
     }
 
+    // 🔹 DELETE
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-        @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-        @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-        @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-        @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+        @ApiResponse(responseCode = "200", description = "Successful")
     })
     @DeleteMapping("/{id}")
     public void delete(@PathVariable Long id) {
         itemTypeRepository.deleteById(id);
     }
 
+    // 🔹 CREATE
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-        @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-        @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-        @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-        @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+        @ApiResponse(responseCode = "201", description = "Created")
     })
-    @PostMapping("/seed-defaults")
-    public String seedDefaults() {
-        itemTypeService.ensureItemTypes();
-        return "Default item types and interests seeded successfully.";
+    @PostMapping
+    public ItemType create(@RequestBody ItemType itemType) {
+        return itemTypeRepository.save(itemType);
     }
 
-    // OPTIONAL: filter by project
+    // 🔹 UPDATE
+    @PutMapping("/{id}")
+    public ResponseEntity<ItemType> update(@PathVariable Long id, @RequestBody ItemType itemType) {
+        return itemTypeRepository.findById(id)
+                .map(existing -> {
+                    existing.setName(itemType.getName());
+                    existing.setIcon(itemType.getIcon());
+                    existing.setIconLibrary(itemType.getIconLibrary());
+                    existing.setProject(itemType.getProject());
+                    existing.setInterest(itemType.getInterest());
+                    return ResponseEntity.ok(itemTypeRepository.save(existing));
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    // 🔹 BY PROJECT
     @GetMapping("/by-project/{projectId}")
     public List<ItemTypeDTO> getByProject(@PathVariable Long projectId) {
         return itemTypeRepository.findByProject_IdOrderByNameAsc(projectId)
-            .stream()
-            .map(type -> {
-                String rawName = type.getName();
-                String displayName = Arrays.stream(ItemTypeEnum.values())
-                    .filter(e -> e.name().equals(rawName))
-                    .findFirst()
-                    .map(ItemTypeEnum::getDisplayName)
-                    .orElse(rawName);
-
-                return new ItemTypeDTO(
-                    type.getId(),
-                    rawName,
-                    displayName,
-                    type.getIcon() != null ? type.getIcon().name() : null,
-                    type.getIconLib() != null ? type.getIconLib().name() : null,
-                    type.getProject() != null ? type.getProject().getId() : null,              // <-- NEW
-                    type.getProject() != null ? type.getProject().getProjectName() : null      // <-- NEW
-                );
-            })
-            .toList();
+                .stream()
+                .map(type -> new ItemTypeDTO(
+                        type.getId(),
+                        type.getName(),
+                        type.getName(),  // Display name = DB value now
+                        type.getIcon(),
+                        type.getIconLibrary(),
+                        type.getProject() != null ? type.getProject().getId() : null,
+                        type.getProject() != null ? type.getProject().getProjectName() : null
+                ))
+                .collect(Collectors.toList());
     }
 
+    // 🔹 GUEST VIEW
     @GetMapping("/guest")
     public List<ItemTypeDTO> getAllItemTypes() {
-        return itemTypeRepository.findAllByOrderByNameAsc()
-            .stream()
-            .map(type -> {
-                String rawName = type.getName();
-                String displayName = Arrays.stream(ItemTypeEnum.values())
-                    .filter(e -> e.name().equals(rawName))
-                    .findFirst()
-                    .map(ItemTypeEnum::getDisplayName)
-                    .orElse(rawName);
-
-        return new ItemTypeDTO(
-            type.getId(),
-            rawName,
-            displayName,
-            type.getIcon() != null ? type.getIcon().name() : null,
-            type.getIconLib() != null ? type.getIconLib().name() : null,
-            type.getProject() != null ? type.getProject().getId() : null,              // <-- NEW
-            type.getProject() != null ? type.getProject().getProjectName() : null      // <-- NEW
-        );
-            })
-            .toList();
+        return itemTypeRepository.findAll()
+                .stream()
+                .map(type -> new ItemTypeDTO(
+                        type.getId(),
+                        type.getName(),
+                        type.getName(), // Display name from DB
+                        type.getIcon(),
+                        type.getIconLibrary(),
+                        type.getProject() != null ? type.getProject().getId() : null,
+                        type.getProject() != null ? type.getProject().getProjectName() : null
+                ))
+                .collect(Collectors.toList());
     }
 }

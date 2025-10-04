@@ -24,11 +24,11 @@ public class UserInterests {
 
         @ManyToOne
         @JoinColumn(name = "interest_id", referencedColumnName = "interest_id", nullable = false)
-        private Interests interest;
+        private Interest interest;
 
         public UserInterestId() {}
 
-        public UserInterestId(Users user, Interests interest) {
+        public UserInterestId(Users user, Interest interest) {
             this.user = user;
             this.interest = interest;
         }
@@ -41,11 +41,11 @@ public class UserInterests {
             this.user = user;
         }
 
-        public Interests getInterest() {
+        public Interest getInterest() {
             return interest;
         }
 
-        public void setInterest(Interests interest) {
+        public void setInterest(Interest interest) {
             this.interest = interest;
         }
 
@@ -69,7 +69,7 @@ public class UserInterests {
     @ManyToOne
     @MapsId("interest")
     @JoinColumn(name = "interest_id", referencedColumnName = "interest_id", insertable = false, updatable = false)
-    private Interests interest;
+    private Interest interest;
 
     // ✅ Add created_at and updated_at as the last two columns
     @Column(name = "created_at", updatable = false)
@@ -96,11 +96,11 @@ public class UserInterests {
         this.id = id;
     }
 
-    public Interests getInterest() {
+    public Interest getInterest() {
         return interest;
     }
 
-    public void setInterest(Interests interest) {
+    public void setInterest(Interest interest) {
         this.interest = interest;
     }
 

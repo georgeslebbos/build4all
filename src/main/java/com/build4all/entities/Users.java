@@ -119,7 +119,7 @@ public class Users {
 
     @JsonIgnore
     @OneToMany(mappedBy = "id.user", cascade = CascadeType.REMOVE, orphanRemoval = true)
-    private List<UserInterests> interests;
+    private List<UserInterests> interest;
 
 
 
