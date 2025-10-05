@@ -1,7 +1,10 @@
 package com.build4all.entities;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "projects", uniqueConstraints = @UniqueConstraint(columnNames = "project_name"))
@@ -16,7 +19,7 @@ public class Project {
     @Column(length = 1000)
     private String description;
 
-    @Column(name = "is_active", nullable = true)
+    @Column(name = "is_active")
     private boolean active = true;
 
     @Column(name = "created_at", updatable = false)
@@ -25,18 +28,28 @@ public class Project {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt = LocalDateTime.now();
 
+    @OneToMany(mappedBy = "project", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonIgnore
+    private Set<AdminUserProject> adminLinks = new HashSet<>();
+
     @PreUpdate
     public void touch() { this.updatedAt = LocalDateTime.now(); }
 
     // getters/setters
     public Long getId() { return id; }
+
     public String getProjectName() { return projectName; }
     public void setProjectName(String projectName) { this.projectName = projectName; }
+
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
+
     public boolean getActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
+
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
-    
+
+    public Set<AdminUserProject> getAdminLinks() { return adminLinks; }
+    public void setAdminLinks(Set<AdminUserProject> adminLinks) { this.adminLinks = adminLinks; }
 }

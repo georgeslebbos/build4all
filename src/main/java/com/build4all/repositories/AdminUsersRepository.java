@@ -22,18 +22,15 @@ public interface AdminUsersRepository extends JpaRepository<AdminUsers, Long> {
     
     Optional<AdminUsers> findByUsernameOrEmail(String username, String email);
     
-    @Modifying
-    @Transactional
-    @Query("DELETE FROM AdminUsers au WHERE au.business.id = :businessId")
-    void deleteByBusinessId(@Param("businessId") Long businessId);
-    
     List<AdminUsers> findByEmailAndBusiness(String email, Businesses business);
 
 	List<AdminUsers> findAllByEmail(String email);
 
 	boolean existsByEmail(String superAdminEmail);
 
-
+	Optional<AdminUsers> findByAdminId(Long adminId);
+	
+	void deleteByBusinessId(Long adminId);
 
 	int countByRoleNameIgnoreCase(String string);
 
