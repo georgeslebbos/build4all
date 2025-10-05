@@ -7,18 +7,15 @@ public class ItemTypeDTO {
     private String displayName;
     private String icon;
     private String iconLib;
-    private Long projectId;
-    private String projectName;
+    private Long categoryId;    // required
 
-	public ItemTypeDTO(Long id, String name, String displayName, String icon, String iconLib, Long projectId,
-			String projectName) {
+	public ItemTypeDTO(Long id, String name, String displayName, String icon, String iconLib, Long categoryId) {
 		this.id = id;
 		this.name = name;
 		this.displayName = displayName;
 		this.icon = icon;
 		this.iconLib = iconLib;
-		this.projectId = projectId;
-		this.projectName = projectName;
+		this.categoryId = categoryId;
 	}
 
     // Getters & Setters
@@ -37,20 +34,12 @@ public class ItemTypeDTO {
     public String getIconLib() { return iconLib; }
     public void setIconLib(String iconLib) { this.iconLib = iconLib; }
 
-	public Long getProjectId() {
-		return projectId;
+	public Long getCategoryId() {
+		return categoryId;
 	}
 
-	public void setProjectId(Long projectId) {
-		this.projectId = projectId;
-	}
-
-	public String getProjectName() {
-		return projectName;
-	}
-
-	public void setProjectName(String projectName) {
-		this.projectName = projectName;
+	public void setCategoryId(Long categoryId) {
+		this.categoryId = categoryId;
 	}
     
     

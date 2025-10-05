@@ -23,22 +23,17 @@ public class ItemType {
 
     @Column(name = "icon_library")
     private String iconLibrary;
-
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "project_id", nullable = false)
-    private Project project;
   
     @ManyToOne
-    @JoinColumn(name = "interest_id", nullable = true)
-    private Interest interest;
+    @JoinColumn(name = "category_id", nullable = true)
+    private Category category;
 
     public ItemType() {}
-    public ItemType(String name, String icon, String iconLibrary, Project project, Interest interest) {
+    public ItemType(String name, String icon, String iconLibrary, Category category) {
         this.name = name;
         this.icon = icon;
         this.iconLibrary = iconLibrary;
-        this.project = project;
-        this.interest = interest;
+        this.category = category;
     }
 
     // --- Getters & Setters ---
@@ -54,9 +49,6 @@ public class ItemType {
     public String getIconLibrary() { return iconLibrary; }
     public void setIconLibrary(String iconLibrary) { this.iconLibrary = iconLibrary; }
 
-    public Project getProject() { return project; }
-    public void setProject(Project project) { this.project = project; }
-
-    public Interest getInterest() { return interest; }
-    public void setInterest(Interest interest) { this.interest = interest; }
+    public Category getCategory() { return category; }
+    public void setCategory(Category category) { this.category = category; }
 }

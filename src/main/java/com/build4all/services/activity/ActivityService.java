@@ -152,8 +152,8 @@ public class ActivityService {
         return requestedParticipants <= capacityLeft;
     }
 
-    public List<Activity> findItemsByUserInterests(Long userId) {
-        return activityRepository.findUpcomingByUserInterests(userId, LocalDateTime.now());
+    public List<Activity> findItemsByUserCategories(Long userId) {
+        return activityRepository.findUpcomingByUserCategories(userId, LocalDateTime.now());
     }
 
     /**

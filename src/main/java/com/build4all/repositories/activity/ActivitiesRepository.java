@@ -23,13 +23,13 @@ public interface ActivitiesRepository extends JpaRepository<Activity, Long> {
             SELECT a
             FROM Activity a
             WHERE a.itemType.id IN (
-               SELECT ui.interest.id
-               FROM UserInterests ui
+               SELECT ui.category.id
+               FROM UserCategories ui
                WHERE ui.id.user.id = :userId
             )
             AND a.endDatetime > :now
             """)
-    List<Activity> findUpcomingByUserInterests(@Param("userId") Long userId,
+    List<Activity> findUpcomingByUserCategories(@Param("userId") Long userId,
                                                @Param("now") LocalDateTime now);
 
     @EntityGraph(attributePaths = {"business"})

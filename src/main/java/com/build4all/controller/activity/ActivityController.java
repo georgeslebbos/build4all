@@ -310,8 +310,8 @@ public class ActivityController {
         return ResponseEntity.ok(upcoming.stream().map(this::toDto).toList());
     }
 
-    @GetMapping("/interest-based/{userId}")
-    public ResponseEntity<?> interestBased(@RequestHeader("Authorization") String auth,
+    @GetMapping("/category-based/{userId}")
+    public ResponseEntity<?> categoryBased(@RequestHeader("Authorization") String auth,
                                            @PathVariable Long userId) {
         try {
             String token = strip(auth);
@@ -323,14 +323,14 @@ public class ActivityController {
             if (u == null || !u.getId().equals(userId))
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Token does not match requested user ID"));
 
-            List<Activity> items = activityService.findItemsByUserInterests(userId);
+            List<Activity> items = activityService.findItemsByUserCategories(userId);
             LocalDateTime now = LocalDateTime.now();
             List<Activity> pending = items.stream()
                     .filter(a -> a.getEndDatetime() != null && a.getEndDatetime().isAfter(now))
                     .filter(a -> !"Terminated".equalsIgnoreCase(a.getStatus()))
                     .toList();
             if (pending.isEmpty())
-                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "No pending items found for user's interests"));
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "No pending items found for user's categorys"));
             return ResponseEntity.ok(pending.stream().map(this::toDto).toList());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(

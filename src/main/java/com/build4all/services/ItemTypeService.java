@@ -1,86 +1,109 @@
 package com.build4all.services;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-
+import com.build4all.entities.Category;
 import com.build4all.entities.ItemType;
-import com.build4all.entities.Interest;
-import com.build4all.entities.Project;
+import com.build4all.repositories.CategoryRepository;
 import com.build4all.repositories.ItemTypeRepository;
-import com.build4all.repositories.InterestRepository;
-import com.build4all.repositories.ProjectRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
 @Service
 public class ItemTypeService {
 
-    @Autowired private ItemTypeRepository itemTypeRepository;
-    @Autowired private InterestRepository interestRepository;
-    @Autowired private ProjectRepository projectRepository;
+    private final ItemTypeRepository itemTypeRepository;
+    private final CategoryRepository categoryRepository;
 
-    // Configure which project to attach ItemTypes to
-    @Value("${app.default-project-id:1}")
-    private Long defaultProjectId;
-
-    /**
-     * Ensure default Project exists and backfill missing project links.
-     */
-    public void normalizeItemTypes() {
-        // Ensure default project exists
-        Project targetProject = projectRepository.findById(defaultProjectId)
-            .orElseGet(() -> {
-                Project p = new Project();
-                p.setProjectName("Default Project");
-                p.setDescription("Auto-created for ItemTypes.");
-                p.setActive(true);
-                return projectRepository.save(p);
-            });
-
-        // Ensure all ItemTypes have a project assigned
-        for (ItemType type : itemTypeRepository.findAll()) {
-            if (type.getProject() == null) {
-                type.setProject(targetProject);
-                itemTypeRepository.save(type);
-            }
-        }
+    public ItemTypeService(ItemTypeRepository itemTypeRepository,
+                           CategoryRepository categoryRepository) {
+        this.itemTypeRepository = itemTypeRepository;
+        this.categoryRepository = categoryRepository;
     }
 
     /**
-     * Return all ItemTypes with their Interests and Project.
+     * Return all ItemTypes (Category carries the Project).
      */
+    @Transactional(readOnly = true)
     public List<ItemType> getAllItemTypes() {
         return itemTypeRepository.findAll();
     }
 
     /**
-     * Create a new ItemType.
+     * Create a new ItemType under a Category.
+     * Project is implied via category.getProject().
      */
-    public ItemType createItemType(String name, String icon, String iconLib, Long interestId, Long projectId) {
-        Project project = projectRepository.findById(projectId)
-            .orElseThrow(() -> new RuntimeException("Project not found: " + projectId));
-
-        Interest interest = null;
-        if (interestId != null) {
-            interest = interestRepository.findById(interestId)
-                .orElseThrow(() -> new RuntimeException("Interest not found: " + interestId));
+    @Transactional
+    public ItemType createItemType(String name,
+                                   String icon,
+                                   String iconLib,
+                                   Long categoryId) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("ItemType name is required");
+        }
+        if (categoryId == null) {
+            throw new IllegalArgumentException("categoryId is required");
         }
 
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new IllegalArgumentException("Category not found: " + categoryId));
+
         ItemType type = new ItemType();
-        type.setName(name);
+        type.setName(name.trim());
         type.setIcon(icon);
         type.setIconLibrary(iconLib);
-        type.setInterest(interest);
-        type.setProject(project);
+        type.setCategory(category); // Project is accessible via category.getProject()
 
         return itemTypeRepository.save(type);
     }
 
     /**
-     * Delete an ItemType.
+     * Update an existing ItemType.
      */
+    @Transactional
+    public ItemType updateItemType(Long id,
+                                   String name,
+                                   String icon,
+                                   String iconLib,
+                                   Long categoryId) {
+        ItemType existing = itemTypeRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("ItemType not found: " + id));
+
+        if (name != null && !name.isBlank()) {
+            existing.setName(name.trim());
+        }
+        if (icon != null) {
+            existing.setIcon(icon);
+        }
+        if (iconLib != null) {
+            existing.setIconLibrary(iconLib);
+        }
+        if (categoryId != null) {
+            Category category = categoryRepository.findById(categoryId)
+                    .orElseThrow(() -> new IllegalArgumentException("Category not found: " + categoryId));
+            existing.setCategory(category); // project is implied by the category
+        }
+
+        return itemTypeRepository.save(existing);
+    }
+
+    /**
+     * Delete an ItemType by id.
+     */
+    @Transactional
     public void deleteItemType(Long id) {
         itemTypeRepository.deleteById(id);
     }
+
+    /*
+     * Optional: if some callers still pass a projectId, you can validate it matches
+     * the category’s project to avoid mismatches, e.g.:
+     *
+     * private void ensureCategoryBelongsToProject(Category category, Long expectedProjectId) {
+     *     if (expectedProjectId == null) return;
+     *     if (category.getProject() == null || !category.getProject().getId().equals(expectedProjectId)) {
+     *         throw new IllegalArgumentException("Category does not belong to project id: " + expectedProjectId);
+     *     }
+     * }
+     */
 }

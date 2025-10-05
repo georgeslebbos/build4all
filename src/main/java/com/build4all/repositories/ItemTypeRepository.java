@@ -8,18 +8,14 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ItemTypeRepository extends JpaRepository<ItemType, Long> {
 
-    boolean existsByName(String type);
-
-    // Correct query method - Spring Data will implement it for you
+    boolean existsByNameIgnoreCaseAndCategory_Id(String name, Long categoryId);
+    Optional<ItemType> findByName(String name);
     List<ItemType> findAllByOrderByNameAsc();
 
-    Optional<ItemType> findByName(String name);
-    
- // NEW: help filter by project
-    List<ItemType> findByProject_IdOrderByNameAsc(Long projectId);
+    // filter by project through the category
+    List<ItemType> findByCategory_Project_IdOrderByNameAsc(Long projectId);
 
-    // Optional rule: if you want uniqueness per project (not global)
-    boolean existsByNameIgnoreCaseAndProject_Id(String name, Long projectId);
-    
-    boolean existsByNameIgnoreCase(String name);
+    // optional helpers
+    List<ItemType> findByCategory_Id(Long categoryId);
+    boolean existsByNameIgnoreCase(String name); // if you still use it elsewhere
 }

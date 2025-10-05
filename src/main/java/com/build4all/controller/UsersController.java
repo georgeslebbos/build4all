@@ -250,13 +250,13 @@ public class UsersController {
     	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
     	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
     	})
-    @PostMapping("/{userId}/interests")
-    public ResponseEntity<?> addUserInterests(
+    @PostMapping("/{userId}/categoriess")
+    public ResponseEntity<?> addUserCategories(
             @PathVariable Long userId,
-            @RequestBody List<Long> interestIds
+            @RequestBody List<Long> categoryIds
     ) {
-        userService.addUserInterests(userId, interestIds);
-        return ResponseEntity.ok(Map.of("message", "User interests added successfully"));
+        userService.addUserCategories(userId, categoryIds);
+        return ResponseEntity.ok(Map.of("message", "User categories added successfully"));
     }
     
     @ApiResponses(value = {
@@ -409,7 +409,7 @@ public class UsersController {
     	        // Optional (if you validate the token manually):
     	        // String userIdFromToken = jwtUtil.extractUserId(token);
 
-    	        List<Users> suggestions = userService.suggestFriendsByInterest(userId);
+    	        List<Users> suggestions = userService.suggestFriendsByCategory(userId);
     	        List<UserDto> result = suggestions.stream().map(UserDto::new).toList();
     	        return ResponseEntity.ok(result);
     	    } catch (Exception e) {
@@ -530,51 +530,51 @@ public class UsersController {
         }
     }
     
-    @GetMapping("/{userId}/interests")
-    public ResponseEntity<?> getUserInterests(@PathVariable Long userId) {
+    @GetMapping("/{userId}/categories")
+    public ResponseEntity<?> getUserCategories(@PathVariable Long userId) {
         try {
-            List<String> interests = userService.getUserInterests(userId); // returns interest names or DTOs
-            return ResponseEntity.ok(interests);
+            List<String> categories = userService.getUserCategories(userId); // returns category names or DTOs
+            return ResponseEntity.ok(categories);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Failed to fetch interests");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Failed to fetch categories");
         }
     }
 
     
-    @PutMapping("/{userId}/interests/{interestId}")
-    public ResponseEntity<?> updateUserInterest(
+    @PutMapping("/{userId}/categories/{categoryId}")
+    public ResponseEntity<?> updateUserCategory(
             @PathVariable Long userId,
-            @PathVariable Long interestId,
+            @PathVariable Long categoryId,
             @RequestBody Map<String, String> body) {
         try {
-            String newInterestName = body.get("name");
-            if (newInterestName == null || newInterestName.isBlank()) {
-                return ResponseEntity.badRequest().body("Interest name is required");
+            String newCategoryName = body.get("name");
+            if (newCategoryName == null || newCategoryName.isBlank()) {
+                return ResponseEntity.badRequest().body("Category name is required");
             }
 
-            boolean updated = userService.updateUserInterest(userId, interestId, newInterestName);
+            boolean updated = userService.updateUserCategory(userId, categoryId, newCategoryName);
             if (updated) {
-                return ResponseEntity.ok("Interest updated successfully");
+                return ResponseEntity.ok("Category updated successfully");
             } else {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Interest not found for this user");
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Category not found for this user");
             }
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error updating interest");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error updating category");
         }
     }
 
     
-    @DeleteMapping("/{userId}/interests/{interestId}")
-    public ResponseEntity<?> deleteUserInterest(@PathVariable Long userId, @PathVariable Long interestId) {
+    @DeleteMapping("/{userId}/categories/{categoryId}")
+    public ResponseEntity<?> deleteUserCategory(@PathVariable Long userId, @PathVariable Long categoryId) {
         try {
-            boolean deleted = userService.deleteUserInterest(userId, interestId);
+            boolean deleted = userService.deleteUserCategory(userId, categoryId);
             if (deleted) {
-                return ResponseEntity.ok("Interest removed successfully");
+                return ResponseEntity.ok("Category removed successfully");
             } else {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Interest not found for this user");
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Category not found for this user");
             }
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Failed to delete interest");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Failed to delete category");
         }
     }
     
@@ -587,13 +587,13 @@ public class UsersController {
     	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
     	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
     	})
-    @PostMapping("/{userId}/UpdateInterest")
-    public ResponseEntity<?> replaceUserInterests(
+    @PostMapping("/{userId}/UpdateCategory")
+    public ResponseEntity<?> replaceUserCategories(
             @PathVariable Long userId,
-            @RequestBody List<Long> interestIds
+            @RequestBody List<Long> categoryIds
     ) {
-        userService.replaceUserInterests(userId, interestIds);
-        return ResponseEntity.ok(Map.of("message", "User interests added successfully"));
+        userService.replaceUserCategories(userId, categoryIds);
+        return ResponseEntity.ok(Map.of("message", "User categoriess added successfully"));
     }
     
     

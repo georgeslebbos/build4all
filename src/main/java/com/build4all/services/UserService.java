@@ -2,16 +2,16 @@ package com.build4all.services;
 
 import com.build4all.entities.AdminUsers;
 
-import com.build4all.entities.Interest;
+import com.build4all.entities.Category;
 import com.build4all.entities.PendingUser;
-import com.build4all.entities.UserInterests;
+import com.build4all.entities.UserCategories;
 import com.build4all.entities.Users;
 import com.build4all.entities.UserStatus;
 import org.springframework.transaction.annotation.Transactional;
-import com.build4all.repositories.InterestRepository;
+import com.build4all.repositories.CategoryRepository;
 import com.build4all.repositories.UserStatusRepository;
 import com.build4all.repositories.PendingUserRepository;
-import com.build4all.repositories.UserInterestsRepository;
+import com.build4all.repositories.UserCategoriesRepository;
 import com.build4all.repositories.UsersRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -47,10 +47,10 @@ public class UserService {
     private PasswordEncoder passwordEncoder;
     
     @Autowired
-    private UserInterestsRepository userInterestsRepository;
+    private UserCategoriesRepository userCategoriesRepository;
 
     @Autowired
-    private InterestRepository interestRepository;
+    private CategoryRepository categoryRepository;
     
     @Autowired
     private PendingUserRepository pendingUserRepository;
@@ -479,21 +479,21 @@ public class UserService {
         return true;
     }    
     
-    public void addUserInterests(Long userId, List<Long> interestIds) {
+    public void addUserCategories(Long userId, List<Long> categoryIds) {
         Users user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        for (Long interestId : interestIds) {
-            Interest interest = interestRepository.findById(interestId)
-                    .orElseThrow(() -> new RuntimeException("Interest not found"));
+        for (Long categoryId : categoryIds) {
+            Category category = categoryRepository.findById(categoryId)
+                    .orElseThrow(() -> new RuntimeException("Category not found"));
 
-            UserInterests.UserInterestId compositeKey = new UserInterests.UserInterestId(user, interest);
+            UserCategories.UserCategoryId compositeKey = new UserCategories.UserCategoryId(user, category);
 
-            if (!userInterestsRepository.existsById(compositeKey)) {
-                UserInterests userInterest = new UserInterests();
-                userInterest.setId(compositeKey);
-                userInterest.setInterest(interest);
-                userInterestsRepository.save(userInterest);
+            if (!userCategoriesRepository.existsById(compositeKey)) {
+                UserCategories userCategory = new UserCategories();
+                userCategory.setId(compositeKey);
+                userCategory.setCategory(category);
+                userCategoriesRepository.save(userCategory);
             }
         }
     }
@@ -533,22 +533,22 @@ public class UserService {
         return false; // no image to delete
     }
 
-    public List<Users> suggestFriendsByInterest(Long userId) {
+    public List<Users> suggestFriendsByCategory(Long userId) {
         Users currentUser = userRepository.findById(userId)
             .orElseThrow(() -> new RuntimeException("User not found"));
 
-        // Get current user's interest IDs
-        List<Long> myInterestIds = userInterestsRepository.findById_User_Id(userId)
+        // Get current user's category IDs
+        List<Long> myCategoryIds = userCategoriesRepository.findById_User_Id(userId)
             .stream()
-            .map(ui -> ui.getId().getInterest().getId())
+            .map(ui -> ui.getId().getCategory().getId())
             .toList();
 
-        if (myInterestIds.isEmpty()) return List.of();
+        if (myCategoryIds.isEmpty()) return List.of();
 
-        // Get users who share interests
-        List<UserInterests> sharedInterests = userInterestsRepository.findByInterestIdIn(myInterestIds);
+        // Get users who share categories
+        List<UserCategories> sharedCategories = userCategoriesRepository.findByCategoryIdIn(myCategoryIds);
 
-        Set<Users> potentialFriends = sharedInterests.stream()
+        Set<Users> potentialFriends = sharedCategories.stream()
             .map(ui -> ui.getId().getUser())
             .filter(user -> !user.getId().equals(userId))
             .collect(Collectors.toSet());
@@ -779,44 +779,42 @@ public class UserService {
        return userRepository.existsByUsernameIgnoreCase(username);
 	}
 	
-
-	
-	public List<String> getUserInterests(Long userId) {
+	public List<String> getUserCategories(Long userId) {
 	    Users user = userRepository.findById(userId)
 	            .orElseThrow(() -> new RuntimeException("User not found"));
 
-	    return userInterestsRepository.findById_User_Id(userId).stream()
-	            .map(ui -> ui.getId().getInterest().getName()) // 🧠 just the name
+	    return userCategoriesRepository.findById_User_Id(userId).stream()
+	            .map(ui -> ui.getId().getCategory().getName()) // 🧠 just the name
 	            .toList();
 	}
 
 
 	@Transactional
-	public boolean updateUserInterest(Long userId, Long oldInterestId, String newInterestName) {
+	public boolean updateUserCategory(Long userId, Long oldCategoryId, String newCategoryName) {
 	    Users user = userRepository.findById(userId)
 	            .orElseThrow(() -> new RuntimeException("User not found"));
 
-	    Interest oldInterest = interestRepository.findById(oldInterestId)
-	            .orElseThrow(() -> new RuntimeException("Old interest not found"));
+	    Category oldCategory = categoryRepository.findById(oldCategoryId)
+	            .orElseThrow(() -> new RuntimeException("Old category not found"));
 
-	    Interest newInterest = interestRepository.findByNameIgnoreCase(newInterestName)
-	            .orElseThrow(() -> new RuntimeException("New interest not found"));
+	    Category newCategory = categoryRepository.findByNameIgnoreCase(newCategoryName)
+	            .orElseThrow(() -> new RuntimeException("New category not found"));
 
-	    UserInterests.UserInterestId oldKey = new UserInterests.UserInterestId(user, oldInterest);
-	    if (!userInterestsRepository.existsById(oldKey)) {
+	    UserCategories.UserCategoryId oldKey = new UserCategories.UserCategoryId(user, oldCategory);
+	    if (!userCategoriesRepository.existsById(oldKey)) {
 	        return false;
 	    }
 
 	    // Delete old
-	    userInterestsRepository.deleteById(oldKey);
+	    userCategoriesRepository.deleteById(oldKey);
 
 	    // Add new if not already added
-	    UserInterests.UserInterestId newKey = new UserInterests.UserInterestId(user, newInterest);
-	    if (!userInterestsRepository.existsById(newKey)) {
-	        UserInterests newUserInterest = new UserInterests();
-	        newUserInterest.setId(newKey);
-	        newUserInterest.setInterest(newInterest);
-	        userInterestsRepository.save(newUserInterest);
+	    UserCategories.UserCategoryId newKey = new UserCategories.UserCategoryId(user, newCategory);
+	    if (!userCategoriesRepository.existsById(newKey)) {
+	        UserCategories newUserCategory = new UserCategories();
+	        newUserCategory.setId(newKey);
+	        newUserCategory.setCategory(newCategory);
+	        userCategoriesRepository.save(newUserCategory);
 	    }
 
 	    return true;
@@ -824,16 +822,16 @@ public class UserService {
 
 	
 	@Transactional
-	public boolean deleteUserInterest(Long userId, Long interestId) {
+	public boolean deleteUserCategory(Long userId, Long categoryId) {
 	    Users user = userRepository.findById(userId)
 	            .orElseThrow(() -> new RuntimeException("User not found"));
 
-	    Interest interest = interestRepository.findById(interestId)
-	            .orElseThrow(() -> new RuntimeException("Interest not found"));
+	    Category category = categoryRepository.findById(categoryId)
+	            .orElseThrow(() -> new RuntimeException("Category not found"));
 
-	    UserInterests.UserInterestId key = new UserInterests.UserInterestId(user, interest);
-	    if (userInterestsRepository.existsById(key)) {
-	        userInterestsRepository.deleteById(key);
+	    UserCategories.UserCategoryId key = new UserCategories.UserCategoryId(user, category);
+	    if (userCategoriesRepository.existsById(key)) {
+	        userCategoriesRepository.deleteById(key);
 	        return true;
 	    }
 
@@ -842,26 +840,26 @@ public class UserService {
 
 
 	@Transactional
-	public void replaceUserInterests(Long userId, List<Long> newInterestIds) {
+	public void replaceUserCategories(Long userId, List<Long> newCategoryIds) {
 	    Users user = userRepository.findById(userId)
 	        .orElseThrow(() -> new RuntimeException("User not found"));
 
-	    // 🔥 Delete all current interests
-	    List<UserInterests> existing = userInterestsRepository.findById_User_Id(userId);
-	    userInterestsRepository.deleteAll(existing);
+	    // 🔥 Delete all current categories
+	    List<UserCategories> existing = userCategoriesRepository.findById_User_Id(userId);
+	    userCategoriesRepository.deleteAll(existing);
 
 	    // 🛠️ Add new ones
-	    for (Long interestId : newInterestIds) {
-	        Interest interest = interestRepository.findById(interestId)
-	                .orElseThrow(() -> new RuntimeException("Interest not found"));
+	    for (Long categoryId : newCategoryIds) {
+	        Category category = categoryRepository.findById(categoryId)
+	                .orElseThrow(() -> new RuntimeException("Category not found"));
 
-	        UserInterests.UserInterestId compositeKey = new UserInterests.UserInterestId(user, interest);
+	        UserCategories.UserCategoryId compositeKey = new UserCategories.UserCategoryId(user, category);
 
-	        if (!userInterestsRepository.existsById(compositeKey)) {
-	            UserInterests userInterest = new UserInterests();
-	            userInterest.setId(compositeKey);
-	            userInterest.setInterest(interest);
-	            userInterestsRepository.save(userInterest);
+	        if (!userCategoriesRepository.existsById(compositeKey)) {
+	            UserCategories userCategory = new UserCategories();
+	            userCategory.setId(compositeKey);
+	            userCategory.setCategory(category);
+	            userCategoriesRepository.save(userCategory);
 	        }
 	    }
 	}

@@ -1,6 +1,6 @@
 package com.build4all.repositories;
 
-import com.build4all.entities.Interest;
+import com.build4all.entities.Category;
 import com.build4all.entities.UserStatus;
 import com.build4all.entities.Users;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -34,11 +34,11 @@ public interface UsersRepository extends JpaRepository<Users, Long> {
     """)
     List<Object[]> countMonthlyRegistrations(@Param("startDate") LocalDateTime startDate);
 
-    @Query("SELECT DISTINCT ui.id.user FROM UserInterests ui " +
-    	       "WHERE ui.interest IN :interests " +
+    @Query("SELECT DISTINCT ui.id.user FROM UserCategories ui " +
+    	       "WHERE ui.category IN :categories " +
     	       "AND ui.id.user.id <> :userId")
-    	List<Users> findUsersWithMatchingInterests(@Param("userId") Long userId,
-    	                                           @Param("interests") List<Interest> interests);
+    	List<Users> findUsersWithMatchingCategories(@Param("userId") Long userId,
+    	                                           @Param("categoriess") List<Category> categories);
 
     Optional<Users> findByGoogleId(String googleId); // ✅ correct type
 
