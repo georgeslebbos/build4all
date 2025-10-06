@@ -12,10 +12,13 @@ import java.util.List;
 @Repository
 public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long> {
 
-    // ---- Direct lookups ----
-    List<ItemBooking> findByItem_Id(Long itemId);
-    List<ItemBooking> findByUser_Id(Long userId);
+    // load bookings for a user + also prefetch item & booking to avoid lazy problems
+    @EntityGraph(attributePaths = {"item", "booking"})                    // fetch join
+    List<ItemBooking> findByUser_IdOrderByCreatedAtDesc(Long userId);     // last first
 
+    // ---- Direct lookups (keep them) ----
+    List<ItemBooking> findByItem_Id(Long itemId);
+   
     boolean existsByItem_IdAndUser_Id(Long itemId, Long userId);
     List<ItemBooking> findByItem_IdAndUser_Id(Long itemId, Long userId);
 
@@ -23,8 +26,7 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
 
     List<ItemBooking> findByCreatedAtAfter(LocalDateTime after);
 
-    List<ItemBooking> findTop5ByUser_IdOrderByCreatedAtDesc(Long userId);
-
+ 
     // ---- Business-scoped via Item ----
     @Query("""
            SELECT b
@@ -42,7 +44,7 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
            """)
     long countBookingsByBusinessId(@Param("businessId") Long businessId);
 
-    // ---- Aggregates (participants/quantity) ----
+    // ---- Aggregates (quantity) ----
     @Query("""
            SELECT COALESCE(SUM(b.quantity), 0)
            FROM ItemBooking b
@@ -59,6 +61,15 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
     int sumQuantityByItemIdAndBookingStatuses(@Param("itemId") Long itemId,
                                               @Param("statuses") List<String> statuses);
 
+    // seats already taken for COMPLETED bookings (status normalized)
+    @Query("""
+           SELECT COALESCE(SUM(ib.quantity), 0)
+           FROM ItemBooking ib
+           WHERE ib.item.id = :itemId
+             AND ib.booking.status IN ('COMPLETED')
+           """)
+    int sumParticipantsCompletedForItem(@Param("itemId") Long itemId);
+
     // ---- Deletes ----
     @Modifying
     @Query("DELETE FROM ItemBooking b WHERE b.item.id = :itemId")
@@ -71,7 +82,7 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
     @Query("DELETE FROM ItemBooking b WHERE b.user.id = :userId")
     void deleteByUserId(@Param("userId") Long userId);
 
-    // ---- “Completed booking” gates for reviews ----
+    // ---- “Completed booking” gates ----
     @Query("""
            SELECT CASE WHEN COUNT(ib) > 0 THEN true ELSE false END
            FROM ItemBooking ib
@@ -87,11 +98,11 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
            SELECT DISTINCT ib.item.id
            FROM ItemBooking ib
            WHERE ib.user.id = :userId
-             AND ib.booking.status = 'Completed'
+             AND ib.booking.status = 'COMPLETED'
            """)
     List<Long> findCompletedItemIdsByUser(@Param("userId") Long userId);
 
-    // ---- Time windows (use Booking header date) ----
+    // ---- Time windows / stats ----
     @Query("""
            SELECT COUNT(ib)
            FROM ItemBooking ib
@@ -99,7 +110,6 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
            """)
     long countByBookingDateAfter(@Param("fromDate") LocalDateTime fromDate);
 
-    // ---- Monthly counts (PostgreSQL-safe via EXTRACT) ----
     @Query("""
            SELECT COUNT(ib)
            FROM ItemBooking ib
@@ -123,7 +133,6 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
     List<Object[]> countBookingsByMonthForYear(@Param("businessId") Long businessId,
                                                @Param("year") int year);
 
-    // ---- Peak booking hours (by Booking header) ----
     @Query("""
            SELECT CAST(EXTRACT(HOUR FROM b.bookingDate) AS int) AS hour,
                   COUNT(b) AS c
@@ -135,7 +144,6 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
            """)
     List<Object[]> findPeakBookingHours(@Param("businessId") Long businessId);
 
-    // ---- Revenue (sum of line prices * qty) ----
     @Query("""
            SELECT COALESCE(SUM(ib.price * ib.quantity), 0)
            FROM ItemBooking ib
@@ -143,7 +151,6 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
            """)
     BigDecimal sumRevenueByBusinessId(@Param("businessId") Long businessId);
 
-    // ---- Customers (distinct & returning) ----
     @Query("""
            SELECT COUNT(DISTINCT ib.user.id)
            FROM ItemBooking ib
@@ -170,4 +177,11 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
            WHERE ib.booking.bookingDate > :fromDate
            """)
     long countByBookingDatetimeAfter(@Param("fromDate") LocalDateTime fromDate);
+    
+    
+    @EntityGraph(attributePaths = {"booking", "item"})
+    List<ItemBooking> findByUser_Id(Long userId);
+
+    @EntityGraph(attributePaths = {"booking", "item"})
+    List<ItemBooking> findTop5ByUser_IdOrderByCreatedAtDesc(Long userId);
 }

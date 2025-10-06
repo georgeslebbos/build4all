@@ -1,0 +1,25 @@
+{
+  "groups": [
+    {
+      "name": "security.jwt",
+      "type": "com.build4all.security.JwtProperties",
+      "sourceType": "com.build4all.security.JwtProperties"
+    }
+  ],
+  "properties": [
+    {
+      "name": "security.jwt.expiration-time",
+      "type": "java.lang.Long",
+      "sourceType": "com.build4all.security.JwtProperties"
+    },
+    {
+      "name": "security.jwt.secret-key",
+      "type": "java.lang.String",
+      "sourceType": "com.build4all.security.JwtProperties"
+    }
+  ],
+  "hints": [],
+  "ignored": {
+    "properties": []
+  }
+}

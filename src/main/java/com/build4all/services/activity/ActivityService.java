@@ -8,7 +8,6 @@ import com.build4all.repositories.BusinessesRepository;
 import com.build4all.repositories.ItemBookingsRepository;
 import com.build4all.repositories.ItemTypeRepository;
 import com.build4all.repositories.activity.ActivitiesRepository;
-
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -66,7 +65,7 @@ public class ActivityService {
                 .orElseThrow(() -> new IllegalArgumentException("Invalid businessId"));
 
         Activity a = new Activity();
-        a.setItemName(name); // base Item field
+        a.setItemName(name);
         a.setItemType(type);
         a.setDescription(description);
         a.setPrice(price);
@@ -104,7 +103,7 @@ public class ActivityService {
                                             MultipartFile image,
                                             boolean imageRemoved) throws IOException {
 
-        Activity a = activityRepository.findById(id)
+        Activity a = activityRepository.findByIdWithJoins(id)
                 .orElseThrow(() -> new IllegalArgumentException("Activity not found"));
 
         ItemType type = itemTypeRepository.findById(itemTypeId)
@@ -134,15 +133,30 @@ public class ActivityService {
         return activityRepository.save(a);
     }
 
-    public Activity findById(Long id) { return activityRepository.findById(id).orElse(null); }
-    public List<Activity> findAll() { return activityRepository.findAll(); }
+    // --- READS that the controller uses (now fetch-joined) ---
+
+    public Activity findById(Long id) {
+        return activityRepository.findByIdWithJoins(id).orElse(null);
+    }
+
+    public List<Activity> findAll() {
+        return activityRepository.findAllWithItemTypeAndBusiness();
+    }
+
     public Activity save(Activity a) { return activityRepository.save(a); }
+
     public void deleteActivity(Long id) { activityRepository.deleteById(id); }
-    public List<Activity> findByBusinessId(Long businessId) { return activityRepository.findByBusinessId(businessId); }
-    public List<Activity> findByItemTypeId(Long typeId) { return activityRepository.findByItemTypeId(typeId); }
+
+    public List<Activity> findByBusinessId(Long businessId) {
+        return activityRepository.findByBusinessIdWithJoins(businessId);
+    }
+
+    public List<Activity> findByItemTypeId(Long typeId) {
+        return activityRepository.findByItemTypeIdWithJoins(typeId);
+    }
 
     public boolean isAvailable(Long itemId, int requestedParticipants) {
-        Activity a = activityRepository.findById(itemId)
+        Activity a = activityRepository.findByIdWithJoins(itemId)
                 .orElseThrow(() -> new IllegalArgumentException("Item not found"));
 
         List<String> active = Arrays.asList("Pending", "Completed", "Paid", "Confirmed");
@@ -153,7 +167,7 @@ public class ActivityService {
     }
 
     public List<Activity> findItemsByUserCategories(Long userId) {
-        return activityRepository.findUpcomingByUserCategories(userId, LocalDateTime.now());
+        return activityRepository.findUpcomingByUserCategoriesWithJoins(userId, LocalDateTime.now());
     }
 
     /**

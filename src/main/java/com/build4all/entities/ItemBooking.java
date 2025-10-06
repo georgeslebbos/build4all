@@ -5,6 +5,10 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
+@JsonIgnoreProperties({"hibernateLazyInitializer","handler"})
 @Entity
 @Table(name = "item_bookings")
 public class ItemBooking {
@@ -26,6 +30,7 @@ public class ItemBooking {
     // 🔗 (Optional) Track the user who booked this item
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
+    @JsonIgnore             // ⬅️ prevent Jackson from touching the lazy Users proxy
     private Users user;
 
     // Extra details

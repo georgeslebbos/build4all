@@ -20,9 +20,9 @@ public abstract class Item {
     @Column(name = "item_id")
     private Long id;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "business_id", nullable = false)
-    @OnDelete(action = OnDeleteAction.CASCADE)
+    @com.fasterxml.jackson.annotation.JsonIgnore   // ⬅️ stop Jackson from touching the lazy proxy
     private Businesses business;
 
     @Column(name = "item_name", nullable = false)
@@ -31,10 +31,12 @@ public abstract class Item {
     @Column(columnDefinition = "TEXT")
     private String description;
 
-    @ManyToOne
+ // Item.java
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "item_type_id", nullable = false)
-    @OnDelete(action = OnDeleteAction.CASCADE)
+    @com.fasterxml.jackson.annotation.JsonIgnore     // ⬅️ stop Jackson from touching ItemType proxy
     private ItemType itemType;
+
 
     private BigDecimal price;
 

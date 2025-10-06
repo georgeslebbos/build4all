@@ -10,6 +10,12 @@ import java.util.List;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
+
+@JsonIgnoreProperties({"hibernateLazyInitializer","handler"})
 @Entity
 @Table(name = "bookings")
 public class Booking {
@@ -22,7 +28,13 @@ public class Booking {
     // 🔗 (Optional) Track the user who booked this item
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
+    @JsonIgnore
     private Users user;
+
+    // 👇 Add this to avoid lazy collection serialization
+    @OneToMany(mappedBy = "booking", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonIgnore
+    private List<ItemBooking> itemBookings = new ArrayList<>();
 
     @Column(name = "booking_date", nullable = false)
     private LocalDateTime bookingDate = LocalDateTime.now();
@@ -38,9 +50,7 @@ public class Booking {
     @OnDelete(action = OnDeleteAction.CASCADE)
     private Currency currency;
 
-    @OneToMany(mappedBy = "booking", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<ItemBooking> itemBookings = new ArrayList<>();
-
+   
     // Add helper methods
     public void addItemBooking(ItemBooking itemBooking) {
         itemBookings.add(itemBooking);
