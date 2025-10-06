@@ -25,7 +25,7 @@ public class ItemType {
     private String iconLibrary;
   
     @ManyToOne
-    @JoinColumn(name = "category_id", nullable = true)
+    @JoinColumn(name = "category_id", nullable = false)
     private Category category;
 
     public ItemType() {}

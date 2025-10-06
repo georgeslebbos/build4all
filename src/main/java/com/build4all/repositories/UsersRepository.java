@@ -38,7 +38,7 @@ public interface UsersRepository extends JpaRepository<Users, Long> {
     	       "WHERE ui.category IN :categories " +
     	       "AND ui.id.user.id <> :userId")
     	List<Users> findUsersWithMatchingCategories(@Param("userId") Long userId,
-    	                                           @Param("categoriess") List<Category> categories);
+    	                                           @Param("categories") List<Category> categories);
 
     Optional<Users> findByGoogleId(String googleId); // ✅ correct type
 

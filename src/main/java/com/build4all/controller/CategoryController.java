@@ -17,7 +17,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 @RestController
-@RequestMapping("/api/admin/categoriess")
+@RequestMapping("/api/admin/categories")
 public class CategoryController {
 
     private final CategoryRepository categoryRepo;

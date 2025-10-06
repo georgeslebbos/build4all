@@ -13,6 +13,8 @@ public interface ItemTypeRepository extends JpaRepository<ItemType, Long> {
     List<ItemType> findAllByOrderByNameAsc();
 
     // filter by project through the category
+    List<ItemType> findByCategory_IdOrderByNameAsc(Long categoryId);
+    
     List<ItemType> findByCategory_Project_IdOrderByNameAsc(Long projectId);
 
     // optional helpers
