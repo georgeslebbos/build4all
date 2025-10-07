@@ -1,6 +1,5 @@
 package com.build4all.services;
 
-import com.build4all.controller.ChatWebSocketController;
 import com.build4all.entities.ChatMessages;
 import com.build4all.entities.Users;
 import com.build4all.repositories.ChatMessagesRepository;
@@ -10,9 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.*;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -28,7 +25,7 @@ public class ChatMessagesService {
     public ChatMessagesService(ChatMessagesRepository chatRepo,
                                NotificationsService notificationsService,
                                FriendshipRepository friendshipRepo,
-                               WebSocketService webSocketService) { // 👈 NEW
+                               WebSocketService webSocketService) {
         this.chatRepo = chatRepo;
         this.notificationsService = notificationsService;
         this.friendshipRepo = friendshipRepo;
@@ -40,7 +37,6 @@ public class ChatMessagesService {
         if (!friendshipRepo.areFriends(sender.getId(), receiver.getId())) {
             throw new RuntimeException("You are not friends. Cannot send message.");
         }
-
         if (friendshipRepo.isBlocked(receiver.getId(), sender.getId())) {
             throw new RuntimeException("This user has blocked you. Cannot send message.");
         }
@@ -51,14 +47,13 @@ public class ChatMessagesService {
 
         if (!sender.getId().equals(receiver.getId())) {
             notificationsService.createNotification(
-                receiver,
-                sender.getUsername() + " sent you a message.",
-                "MESSAGE"
+                    receiver,
+                    sender.getUsername() + " sent you a message.",
+                    "MESSAGE"
             );
         }
 
-        webSocketService.broadcastMessage(saved); // instead of chatWebSocketController
-
+        webSocketService.broadcastMessage(saved);
         return saved;
     }
 
@@ -67,7 +62,6 @@ public class ChatMessagesService {
         if (!friendshipRepo.areFriends(sender.getId(), receiver.getId())) {
             throw new RuntimeException("You are not friends. Cannot send message.");
         }
-
         if (friendshipRepo.isBlocked(receiver.getId(), sender.getId())) {
             throw new RuntimeException("This user has blocked you. Cannot send message.");
         }
@@ -78,20 +72,17 @@ public class ChatMessagesService {
         chat.setMessage(message != null ? message : "");
         chat.setImageUrl(imageUrl);
         chat.setSentAt(LocalDateTime.now());
-
         ChatMessages saved = chatRepo.save(chat);
 
         if (!sender.getId().equals(receiver.getId())) {
             notificationsService.createNotification(
-                receiver,
-                sender.getUsername() + " sent you a message.",
-                "MESSAGE"
+                    receiver,
+                    sender.getUsername() + " sent you a message.",
+                    "MESSAGE"
             );
         }
 
-        webSocketService.broadcastMessage(saved); // instead of chatWebSocketController
-
-
+        webSocketService.broadcastMessage(saved);
         return saved;
     }
 
@@ -125,11 +116,9 @@ public class ChatMessagesService {
 
     @Transactional
     public void markMessagesAsRead(Users receiver, Users sender) {
-        List<ChatMessages> unreadMessages = chatRepo.findUnreadMessages(receiver.getId(), sender.getId());
-        for (ChatMessages msg : unreadMessages) {
-            msg.setIsRead(true);
-        }
-        chatRepo.saveAll(unreadMessages);
+        var unread = chatRepo.findUnreadMessages(receiver.getId(), sender.getId());
+        unread.forEach(m -> m.setIsRead(true));
+        chatRepo.saveAll(unread);
     }
 
     @Transactional
@@ -137,8 +126,7 @@ public class ChatMessagesService {
         if (!friendshipRepo.areFriends(user1.getId(), user2.getId())) {
             throw new RuntimeException("You are not friends. Cannot view this conversation.");
         }
-
-        List<ChatMessages> messages = chatRepo.findConversationBetween(user1.getId(), user2.getId());
+        var messages = chatRepo.findConversationBetween(user1.getId(), user2.getId());
         messages.forEach(msg -> {
             msg.getSender().getUsername();
             msg.getReceiver().getUsername();
@@ -153,23 +141,19 @@ public class ChatMessagesService {
 
     @Transactional
     public boolean deleteMessageByIdAndUser(Long messageId, Users user) {
-        ChatMessages message = chatRepo.findById(messageId).orElse(null);
-        if (message == null || !message.getSender().getId().equals(user.getId())) {
-            return false;
-        }
+        var message = chatRepo.findById(messageId).orElse(null);
+        if (message == null || !message.getSender().getId().equals(user.getId())) return false;
         chatRepo.delete(message);
         return true;
     }
 
     @Transactional
     public void markSingleMessageAsRead(Users currentUser, Long messageId) {
-        ChatMessages message = chatRepo.findById(messageId)
+        var message = chatRepo.findById(messageId)
             .orElseThrow(() -> new RuntimeException("Message not found"));
-
         if (!message.getReceiver().getId().equals(currentUser.getId())) {
             throw new RuntimeException("Unauthorized to mark this message as read");
         }
-
         message.setIsRead(true);
         chatRepo.save(message);
     }

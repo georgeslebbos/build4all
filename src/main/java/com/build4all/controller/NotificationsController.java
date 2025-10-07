@@ -56,7 +56,7 @@ public class NotificationsController {
         }
 
         Users user = usersService.getUserByEmaill(principal.getName());
-        List<Notifications> notifications = notificationsService.getAllByUser1(user);
+        List<Notifications> notifications = notificationsService.getAllByUser(user);
         return ResponseEntity.ok(notifications != null ? notifications : Collections.emptyList());
     }
 
@@ -103,7 +103,7 @@ public class NotificationsController {
         }
 
         Users user = usersService.getUserByEmaill(principal.getName());
-        long count = notificationsService.getAllByUser1(user).size();
+        long count = notificationsService.getAllByUser(user).size();
         return ResponseEntity.ok(count);
     }
 

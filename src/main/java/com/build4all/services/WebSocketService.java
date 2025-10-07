@@ -1,7 +1,7 @@
 package com.build4all.services;
 
-import com.build4all.entities.ChatMessages;
 import com.build4all.dto.TypingDTO;
+import com.build4all.entities.ChatMessages;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
@@ -14,19 +14,18 @@ public class WebSocketService {
         this.messagingTemplate = messagingTemplate;
     }
 
+    private String roomId(Long a, Long b) {
+        return (a < b) ? (a + "_" + b) : (b + "_" + a);
+    }
+
     public void broadcastMessage(ChatMessages message) {
         Long senderId = message.getSender().getId();
         Long receiverId = message.getReceiver().getId();
-        String roomId = getRoomId(senderId, receiverId);
-        messagingTemplate.convertAndSend("/topic/chat/" + roomId, message);
+        messagingTemplate.convertAndSend("/topic/chat/" + roomId(senderId, receiverId), message);
     }
 
     public void broadcastTyping(TypingDTO typingDTO) {
-        String roomId = getRoomId(typingDTO.getSenderId(), typingDTO.getReceiverId());
-        messagingTemplate.convertAndSend("/topic/typing/" + roomId, typingDTO);
-    }
-
-    private String getRoomId(Long user1, Long user2) {
-        return user1 < user2 ? user1 + "_" + user2 : user2 + "_" + user1;
+        String id = roomId(typingDTO.getSenderId(), typingDTO.getReceiverId());
+        messagingTemplate.convertAndSend("/topic/typing/" + id, typingDTO);
     }
 }

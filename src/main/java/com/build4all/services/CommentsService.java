@@ -7,7 +7,9 @@ import com.build4all.repositories.CommentsRepository;
 import com.build4all.repositories.PostsRepository;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class CommentsService {
@@ -15,31 +17,48 @@ public class CommentsService {
     private final CommentsRepository commentsRepo;
     private final PostsRepository postsRepo;
     private final NotificationsService notificationsService;
+    private final WebSocketEventService ws;
 
     public CommentsService(CommentsRepository commentsRepo,
                            PostsRepository postsRepo,
-                           NotificationsService notificationsService) {
+                           NotificationsService notificationsService,
+                           WebSocketEventService ws) {
         this.commentsRepo = commentsRepo;
         this.postsRepo = postsRepo;
         this.notificationsService = notificationsService;
+        this.ws = ws;
     }
 
     public Comments addComment(Long postId, String content, Users user) {
         Posts post = postsRepo.findById(postId)
                 .orElseThrow(() -> new RuntimeException("Post not found"));
 
-        Comments comment = new Comments(post, user, content);
-        Comments savedComment = commentsRepo.save(comment);
+        Comments savedComment = commentsRepo.save(new Comments(post, user, content));
 
-        // 🔔 Add notification for the post owner
         if (!user.getId().equals(post.getUser().getId())) {
             notificationsService.createNotification(
                     post.getUser(),
-                    user.getUsername() + " commented on your post",
+                    (user.getUsername() == null ? "Someone" : user.getUsername()) + " commented on your post",
                     "ACTIVITY_UPDATE"
             );
+            ws.sendUnreadBumped(post.getUser().getId());
         }
 
+        Map<String, Object> dto = new HashMap<>();
+        dto.put("id", savedComment.getId());
+        if (savedComment.getUser() != null) {
+            if (savedComment.getUser().getFirstName() != null)
+                dto.put("firstName", savedComment.getUser().getFirstName());
+            if (savedComment.getUser().getLastName() != null)
+                dto.put("lastName", savedComment.getUser().getLastName());
+            if (savedComment.getUser().getProfilePictureUrl() != null)
+                dto.put("profilePictureUrl", savedComment.getUser().getProfilePictureUrl());
+        }
+        if (savedComment.getContent() != null)
+            dto.put("content", savedComment.getContent());
+        dto.put("isMine", false);
+
+        ws.sendCommentAdded(post.getId(), dto);
         return savedComment;
     }
 
@@ -51,13 +70,13 @@ public class CommentsService {
 
     public void deleteComment(Long commentId, Users user) {
         Comments comment = commentsRepo.findById(commentId)
-            .orElseThrow(() -> new RuntimeException("Comment not found"));
+                .orElseThrow(() -> new RuntimeException("Comment not found"));
 
-        // Only allow the author to delete their comment
         if (!comment.getUser().getId().equals(user.getId())) {
             throw new RuntimeException("You are not authorized to delete this comment");
         }
 
         commentsRepo.delete(comment);
+        ws.sendCommentDeleted(comment.getPost().getId(), comment.getId());
     }
 }

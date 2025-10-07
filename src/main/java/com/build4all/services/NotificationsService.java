@@ -14,28 +14,28 @@ public class NotificationsService {
     private final UsersRepository usersRepo;
     private final NotificationTypeRepository notificationTypeRepo;
     private final FCMService fcmService;
+    private final WebSocketEventService ws;
 
-    public NotificationsService(
-            NotificationsRepository notificationsRepo,
-            UsersRepository usersRepo,
-            NotificationTypeRepository notificationTypeRepo,
-            FCMService fcmService
-    ) {
+    public NotificationsService(NotificationsRepository notificationsRepo,
+                                UsersRepository usersRepo,
+                                NotificationTypeRepository notificationTypeRepo,
+                                FCMService fcmService,
+                                WebSocketEventService ws) {
         this.notificationsRepo = notificationsRepo;
         this.usersRepo = usersRepo;
         this.notificationTypeRepo = notificationTypeRepo;
         this.fcmService = fcmService;
+        this.ws = ws;
     }
 
     private boolean isPushWorthy(NotificationTypeEntity type) {
-        return type.getCode().equalsIgnoreCase("MESSAGE") ||
-               type.getCode().equalsIgnoreCase("MENTION") ||
-               type.getCode().equalsIgnoreCase("COMMENT");
+        return type.getCode().equalsIgnoreCase("MESSAGE")
+            || type.getCode().equalsIgnoreCase("MENTION")
+            || type.getCode().equalsIgnoreCase("COMMENT")
+            || type.getCode().equalsIgnoreCase("ACTIVITY_UPDATE");
     }
 
     public void createNotification(Users receiver, String message, String typeCode) {
-        System.out.println("📩 Create notification: " + message + " to " + receiver.getUsername());
-
         NotificationTypeEntity type = notificationTypeRepo.findByCode(typeCode)
                 .orElseThrow(() -> new RuntimeException("NotificationType not found: " + typeCode));
 
@@ -44,6 +44,10 @@ public class NotificationsService {
 
         if (receiver.getFcmToken() != null && !receiver.getFcmToken().isBlank() && isPushWorthy(type)) {
             fcmService.sendNotification(receiver.getFcmToken(), "🔔 build4all", message);
+        }
+
+        if (receiver.getId() != null) {
+            ws.sendUnreadBumped(receiver.getId());
         }
     }
 
@@ -61,8 +65,7 @@ public class NotificationsService {
         if (business.getFcmToken() != null && !business.getFcmToken().isBlank() && isPushWorthy(type)) {
             fcmService.sendNotification(business.getFcmToken(), "📢 build4all Business", message);
         }
-
-        System.out.println("✅ Notification sent to business: " + business.getBusinessName());
+        // (optional) add per-business websocket queue if needed
     }
 
     public void notifyAdmin(AdminUsers admin, String message, String typeCode) {
@@ -87,7 +90,9 @@ public class NotificationsService {
             fcmService.sendNotification(user.getFcmToken(), "👑 Admin Notification", message);
         }
 
-        System.out.println("✅ Admin notification sent to: " + admin.getEmail());
+        if (user.getId() != null) {
+            ws.sendUnreadBumped(user.getId());
+        }
     }
 
     public List<Notifications> getAllByUser(Users user) {
@@ -118,10 +123,6 @@ public class NotificationsService {
     public List<Notifications> getUnreadByBusiness(Businesses business) {
         return notificationsRepo.findByBusinessAndIsReadFalse(business);
     }
-    
-    public List<Notifications> getAllByUser1(Users user) {
-        return notificationsRepo.findByUserOrderByCreatedAtDesc(user);
-    }
 
     @Transactional
     public void markAsRead(Long notificationId, Users user) {
@@ -129,7 +130,7 @@ public class NotificationsService {
         if (notif.getUser() != null && notif.getUser().getId().equals(user.getId())) {
             notif.setIsRead(true);
             notificationsRepo.save(notif);
-            System.out.println("✔ Notification ID " + notif.getId() + " marked as read.");
+            ws.sendUnreadBumped(user.getId()); // update badge live
         } else {
             throw new RuntimeException("Unauthorized");
         }
@@ -141,6 +142,7 @@ public class NotificationsService {
         if (notif.getBusiness() != null && notif.getBusiness().getId().equals(business.getId())) {
             notif.setIsRead(true);
             notificationsRepo.save(notif);
+            // (optional) add business-specific websocket bump here
         } else {
             throw new RuntimeException("Unauthorized");
         }

@@ -1,22 +1,18 @@
 package com.build4all.services;
 
 import com.build4all.dto.PostDto;
+import com.build4all.entities.PostVisibility;
 import com.build4all.entities.Posts;
 import com.build4all.entities.Users;
-import com.build4all.entities.PostVisibility;
-import com.build4all.entities.UserStatus;
-
-import com.build4all.repositories.PostsRepository;
 import com.build4all.repositories.PostVisibilityRepository;
-
+import com.build4all.repositories.PostsRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.file.*;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -24,33 +20,28 @@ public class PostService {
 
     private final PostsRepository postsRepository;
     private final PostVisibilityRepository postVisibilityRepository;
+    private final FriendshipService friendshipService;
+    private final WebSocketEventService ws;
 
     @Autowired
-    private FriendshipService friendshipService;
-
-    @Autowired
-    private WebSocketEventService webSocketEventService;
-
-    @Autowired
-    public PostService(PostsRepository postsRepository, PostVisibilityRepository postVisibilityRepository) {
+    public PostService(PostsRepository postsRepository,
+                       PostVisibilityRepository postVisibilityRepository,
+                       FriendshipService friendshipService,
+                       WebSocketEventService ws) {
         this.postsRepository = postsRepository;
         this.postVisibilityRepository = postVisibilityRepository;
+        this.friendshipService = friendshipService;
+        this.ws = ws;
     }
 
-    /**
-     * Create a new post with optional image and visibility level.
-     */
     public Posts createPost(String content, MultipartFile image, String hashtags, Users user, PostVisibility visibility) {
         String imageUrl = null;
 
-        // Upload image if provided
         if (image != null && !image.isEmpty()) {
             try {
                 String filename = System.currentTimeMillis() + "_" + image.getOriginalFilename();
                 Path uploadPath = Paths.get("uploads/");
-                if (!Files.exists(uploadPath)) {
-                    Files.createDirectories(uploadPath);
-                }
+                if (!Files.exists(uploadPath)) Files.createDirectories(uploadPath);
                 Path filePath = uploadPath.resolve(filename);
                 Files.copy(image.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
                 imageUrl = "/uploads/" + filename;
@@ -59,113 +50,123 @@ public class PostService {
             }
         }
 
-        // Save post with visibility
         Posts post = new Posts(user, content, imageUrl, hashtags);
         post.setVisibility(visibility);
         Posts savedPost = postsRepository.save(post);
 
-     // 🔥 Broadcast creation
-     webSocketEventService.sendPostCreated(savedPost.getId().toString());
+        // legacy broadcast (string OK)
+        ws.sendPostCreated(savedPost.getId().toString());
 
-     return savedPost;
+        // JSON broadcast (null-safe)
+        Map<String, Object> changes = new HashMap<>();
+        if (savedPost.getContent() != null)      changes.put("content", savedPost.getContent());
+        if (savedPost.getImageUrl() != null)     changes.put("imageUrl", savedPost.getImageUrl());
+        if (savedPost.getHashtags() != null)     changes.put("hashtags", savedPost.getHashtags());
+        String visName = (savedPost.getVisibility() != null && savedPost.getVisibility().getName() != null)
+                ? savedPost.getVisibility().getName() : "PUBLIC";
+        changes.put("visibility", visName);
 
+        ws.sendPostUpdated(savedPost.getId(), changes);
+
+        return savedPost;
     }
 
-    /**
-     * Delete a post only if it belongs to the user.
-     */
-    public void deletePost(Long postId, Users user) {
-        Posts post = postsRepository.findById(postId)
-                .orElseThrow(() -> new RuntimeException("Post not found"));
-
-        if (!post.getUser().getId().equals(user.getId())) {
-            throw new RuntimeException("Not authorized to delete this post");
-        }
-
-        postsRepository.delete(post);
-    }
-
-    /**
-     * Return all visible posts for the current user, respecting visibility rules.
-     */
     @Transactional
-    public List<PostDto> getAllPostDtos(Long currentUserId) {
-        System.out.println("👉 Fetching posts for user: " + currentUserId);
-
-        List<Posts> posts = postsRepository.findAll();
-
-        return posts.stream()
-            .filter(post -> {
-                try {
-                    Users poster = post.getUser();
-
-                    // ✅ Skip if user is not active
-                    if (poster.getStatus() == null || !"ACTIVE".equals(poster.getStatus().getName()))
-                        return false;
-
-                    // ✅ Show own posts
-                    if (poster.getId().equals(currentUserId))
-                        return true;
-
-                    String visibilityName = post.getVisibility() != null ? post.getVisibility().getName() : "PUBLIC";
-
-                    // ✅ Show public posts
-                    if ("PUBLIC".equalsIgnoreCase(visibilityName))
-                        return true;
-
-                    // ✅ Show FRIENDS_ONLY posts if they are friends
-                    if ("FRIENDS_ONLY".equalsIgnoreCase(visibilityName)
-                            && areFriends(currentUserId, poster.getId())) {
-                        return true;
-                    }
-
-                    return false;
-
-                } catch (Exception e) {
-                    System.err.println("❌ Error in filter logic: " + e.getMessage());
-                    return false;
-                }
-            })
-            .map(post -> new PostDto(post, currentUserId))
-            .collect(Collectors.toList());
-    }
-
-    /**
-     * Check if two users are friends.
-     */
-    private boolean areFriends(Long viewerId, Long posterId) {
-        Users viewer = new Users();
-        viewer.setId(viewerId);
-
-        Users poster = new Users();
-        poster.setId(posterId);
-
-        return friendshipService.areFriends(viewer, poster);
-    }
-
-    /**
-     * Delete a post if it belongs to the specified user ID.
-     */
     public boolean deletePostByUser(Long postId, Long userId) {
         Optional<Posts> post = postsRepository.findById(postId);
         if (post.isPresent() && post.get().getUser().getId().equals(userId)) {
             postsRepository.delete(post.get());
-         // after postsRepository.delete(post);
-            webSocketEventService.sendPostDeleted(postId.toString());
-
+            ws.sendPostDeleted(String.valueOf(postId));
+            ws.sendPostUpdated(postId, Collections.singletonMap("deleted", true));
             return true;
         }
         return false;
     }
 
-    /**
-     * Get posts by specific user (no visibility filtering here).
-     */
+    public void deletePost(Long postId, Users user) {
+        Posts post = postsRepository.findById(postId)
+                .orElseThrow(() -> new RuntimeException("Post not found"));
+        if (!post.getUser().getId().equals(user.getId())) {
+            throw new RuntimeException("Not authorized to delete this post");
+        }
+        postsRepository.delete(post);
+        ws.sendPostDeleted(String.valueOf(postId));
+        ws.sendPostUpdated(postId, Collections.singletonMap("deleted", true));
+    }
+
+    @Transactional
+    public List<PostDto> getAllPostDtos(Long currentUserId) {
+        List<Posts> posts = postsRepository.findAll();
+        return posts.stream()
+                .filter(post -> {
+                    try {
+                        Users poster = post.getUser();
+                        if (poster.getStatus() == null || !"ACTIVE".equals(poster.getStatus().getName()))
+                            return false;
+                        if (Objects.equals(poster.getId(), currentUserId))
+                            return true;
+
+                        String visibilityName = post.getVisibility() != null ? post.getVisibility().getName() : "PUBLIC";
+                        if ("PUBLIC".equalsIgnoreCase(visibilityName)) return true;
+
+                        if ("FRIENDS_ONLY".equalsIgnoreCase(visibilityName) &&
+                                friendshipService.areFriends(
+                                        new Users() {{ setId(currentUserId); }},
+                                        new Users() {{ setId(poster.getId()); }}
+                                )) {
+                            return true;
+                        }
+                        return false;
+                    } catch (Exception e) {
+                        return false;
+                    }
+                })
+                .map(post -> new PostDto(post, currentUserId))
+                .collect(Collectors.toList());
+    }
+
     @Transactional
     public List<PostDto> getPostDtosByUser(Long userId) {
-        List<Posts> posts = postsRepository.findByUserId(userId);
-        return posts.stream()
+        return postsRepository.findByUserId(userId)
+                .stream()
                 .map(post -> new PostDto(post, userId))
                 .collect(Collectors.toList());
+    }
+
+    public Posts updatePost(Long postId, Users user, String newContent, String newHashtags,
+                            PostVisibility newVisibility, MultipartFile newImage) {
+        Posts post = postsRepository.findById(postId)
+                .orElseThrow(() -> new RuntimeException("Post not found"));
+        if (!post.getUser().getId().equals(user.getId()))
+            throw new RuntimeException("Not authorized");
+
+        if (newContent != null)   post.setContent(newContent);
+        if (newHashtags != null)  post.setHashtags(newHashtags);
+        if (newVisibility != null) post.setVisibility(newVisibility);
+        if (newImage != null && !newImage.isEmpty()) {
+            try {
+                String filename = System.currentTimeMillis() + "_" + newImage.getOriginalFilename();
+                Path uploadPath = Paths.get("uploads/");
+                if (!Files.exists(uploadPath)) Files.createDirectories(uploadPath);
+                Path filePath = uploadPath.resolve(filename);
+                Files.copy(newImage.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
+                post.setImageUrl("/uploads/" + filename);
+            } catch (Exception e) {
+                throw new RuntimeException("Error uploading image", e);
+            }
+        }
+
+        Posts saved = postsRepository.save(post);
+
+        Map<String, Object> changes = new HashMap<>();
+        if (saved.getContent() != null)      changes.put("content", saved.getContent());
+        if (saved.getImageUrl() != null)     changes.put("imageUrl", saved.getImageUrl());
+        if (saved.getHashtags() != null)     changes.put("hashtags", saved.getHashtags());
+        String visName = (saved.getVisibility() != null && saved.getVisibility().getName() != null)
+                ? saved.getVisibility().getName() : "PUBLIC";
+        changes.put("visibility", visName);
+
+        ws.sendPostUpdated(saved.getId(), changes);
+        return saved;
     }
 }

@@ -13,13 +13,16 @@ public class PostLikesService {
     private final PostLikesRepository likesRepository;
     private final PostsRepository postsRepository;
     private final NotificationsService notificationsService;
+    private final WebSocketEventService ws;
 
     public PostLikesService(PostLikesRepository likesRepository,
                             PostsRepository postsRepository,
-                            NotificationsService notificationsService) {
+                            NotificationsService notificationsService,
+                            WebSocketEventService ws) {
         this.likesRepository = likesRepository;
         this.postsRepository = postsRepository;
         this.notificationsService = notificationsService;
+        this.ws = ws;
     }
 
     public String toggleLike(Long postId, Users user) {
@@ -29,20 +32,24 @@ public class PostLikesService {
         return likesRepository.findByUserAndPost(user, post)
                 .map(like -> {
                     likesRepository.delete(like);
+                    // broadcast unliked
+                    ws.sendLikeChanged(postId, false, user.getId());
                     return "disliked";
                 })
                 .orElseGet(() -> {
                     likesRepository.save(new PostLikes(user, post));
 
-                    // Notify post owner (if not self)
                     if (!user.getId().equals(post.getUser().getId())) {
                         notificationsService.createNotification(
                                 post.getUser(),
                                 user.getUsername() + " liked your post",
-                                "ACTIVITY_UPDATE" // <-- using code string instead of enum
+                                "ACTIVITY_UPDATE"
                         );
+                        ws.sendUnreadBumped(post.getUser().getId());
                     }
 
+                    // broadcast liked
+                    ws.sendLikeChanged(postId, true, user.getId());
                     return "Liked";
                 });
     }
