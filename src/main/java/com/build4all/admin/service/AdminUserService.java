@@ -155,7 +155,7 @@ public class AdminUserService {
     @Transactional
     public void deleteUserAndDependencies(Long userId) {
         reviewRepository.deleteByCustomer_Id(userId); // ✅ use userId here
-        itemBookingsRepository.deleteByUserId(userId);
+        itemBookingsRepository.deleteByUser_Id(userId);
         usersRepository.deleteById(userId);
     }
 

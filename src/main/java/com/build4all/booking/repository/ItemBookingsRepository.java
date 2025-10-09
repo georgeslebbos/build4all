@@ -78,10 +78,6 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
     @Modifying
     void deleteByUser_Id(Long userId);
 
-    @Modifying
-    @Query("DELETE FROM ItemBooking b WHERE b.user.id = :userId")
-    void deleteByUserId(@Param("userId") Long userId);
-
     // ---- “Completed booking” gates ----
     @Query("""
            SELECT CASE WHEN COUNT(ib) > 0 THEN true ELSE false END
@@ -101,14 +97,6 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
              AND ib.booking.status = 'COMPLETED'
            """)
     List<Long> findCompletedItemIdsByUser(@Param("userId") Long userId);
-
-    // ---- Time windows / stats ----
-    @Query("""
-           SELECT COUNT(ib)
-           FROM ItemBooking ib
-           WHERE ib.booking.bookingDate > :fromDate
-           """)
-    long countByBookingDateAfter(@Param("fromDate") LocalDateTime fromDate);
 
     @Query("""
            SELECT COUNT(ib)

@@ -48,6 +48,8 @@ public class ItemBooking {
 
     private LocalDateTime createdAt = LocalDateTime.now();
 
+    private LocalDateTime updatedAt = LocalDateTime.now();
+
     // ---------- Getters & Setters ----------
     public Long getId() {
         return id;
@@ -89,14 +91,6 @@ public class ItemBooking {
         this.quantity = quantity;
     }
 
-    public LocalDateTime getBookedAt() {
-        return createdAt;
-    }
-
-    public void setBookedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
 	public BigDecimal getPrice() {
 		return price;
 	}
@@ -104,8 +98,7 @@ public class ItemBooking {
 	public void setPrice(BigDecimal price) {
 		this.price = price;
 	}
-	
-	
+
 
 	public Currency getCurrency() {
 		return currency;
@@ -122,6 +115,13 @@ public class ItemBooking {
 	public void setCreatedAt(LocalDateTime createdAt) {
 		this.createdAt = createdAt;
 	}
-    
+
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
+    }
     
 }

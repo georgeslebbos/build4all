@@ -1,8 +1,8 @@
+E:\Eclipse\Build4All\src\main\java\com\build4all\admin\domain\AdminUser.java
 E:\Eclipse\Build4All\src\main\java\com\build4all\admin\domain\AdminUserBusiness.java
 E:\Eclipse\Build4All\src\main\java\com\build4all\admin\domain\AdminUserBusinessId.java
 E:\Eclipse\Build4All\src\main\java\com\build4all\admin\domain\AdminUserProject.java
 E:\Eclipse\Build4All\src\main\java\com\build4all\admin\domain\AdminUserProjectId.java
-E:\Eclipse\Build4All\src\main\java\com\build4all\admin\domain\AdminUsers.java
 E:\Eclipse\Build4All\src\main\java\com\build4all\admin\domain\DataInitializer.java
 E:\Eclipse\Build4All\src\main\java\com\build4all\admin\dto\AdminProfileUpdateDTO.java
 E:\Eclipse\Build4All\src\main\java\com\build4all\admin\dto\AdminProjectAssignmentRequest.java
