@@ -10,8 +10,7 @@
     {
       "name": "security.jwt.expiration-time",
       "type": "java.lang.Long",
-      "sourceType": "com.build4all.security.JwtProperties",
-      "defaultValue": 0
+      "sourceType": "com.build4all.security.JwtProperties"
     },
     {
       "name": "security.jwt.secret-key",

@@ -41,7 +41,7 @@ public class PendingUser {
 
   
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "status")
     private UserStatus status;
 
