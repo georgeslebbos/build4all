@@ -1,7 +1,7 @@
 package com.build4all.config;
 
-import com.build4all.services.IconJsonImporter;
-import com.build4all.services.IconJsonImporter.ImportStats;
+import com.build4all.catalog.service.IconJsonImporter;
+import com.build4all.catalog.service.IconJsonImporter.ImportStats;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
@@ -16,17 +16,8 @@ import java.util.List;
 @Configuration
 public class IconFileSeeder {
 
-    @Value("${icons.import.locations:}")     // e.g. "file:/data/icons/*.json,classpath*:icons/*.json"
+    @Value("${icons.import.locations:}")     // e.g. "classpath*:icons/*.json,file:/data/icons/*.json"
     private String locations;
-
-    @Value("${icons.import.dir:}")           // e.g. "/data/icons"  (loads all *.json)
-    private String importDir;
-
-    @Value("${icons.import.prefix-names:true}")
-    private boolean prefixNames;
-
-    @Value("${icons.import.include-aliases:false}")
-    private boolean includeAliases;
 
     @Bean
     public CommandLineRunner seedIcons(IconJsonImporter importer) {
@@ -37,30 +28,25 @@ public class IconFileSeeder {
             if (locations != null && !locations.isBlank()) {
                 for (String pattern : locations.split(",")) {
                     String p = pattern.trim();
-                    if (p.isEmpty()) continue;
-                    files.addAll(Arrays.asList(resolver.getResources(p)));
+                    if (!p.isEmpty()) {
+                        files.addAll(Arrays.asList(resolver.getResources(p)));
+                    }
                 }
-            } else if (importDir != null && !importDir.isBlank()) {
-                String base = importDir.trim();
-                String pattern = (base.startsWith("classpath:") ? base.replace("classpath:", "classpath*:") : "file:" + base);
-                if (!pattern.endsWith("/")) pattern += "/";
-                pattern += "*.json";
-                files.addAll(Arrays.asList(resolver.getResources(pattern)));
             } else {
-                // default: look in classpath folder src/main/resources/icons
+                // default: look in classpath /resources/icons/*.json
                 files.addAll(Arrays.asList(resolver.getResources("classpath*:icons/*.json")));
             }
 
             if (files.isEmpty()) {
-                System.out.println("ℹ️ No icon JSON files found to import.");
+                System.out.println("ℹ️ No icon JSON files found to import (looked under /resources/icons).");
                 return;
             }
 
             System.out.println("✅ Icon JSON import starting...");
             for (Resource r : files) {
                 try {
-                    ImportStats stats = importer.importFile(r, prefixNames, includeAliases);
-                    System.out.printf("   • %s  -> inserted=%d, skipped=%d%n",
+                    ImportStats stats = importer.importFile(r, true, false);
+                    System.out.printf("   • %s -> inserted=%d, skipped=%d%n",
                             r.getFilename(), stats.getInserted(), stats.getSkipped());
                 } catch (Exception e) {
                     System.err.printf("   ✖ Failed to import %s: %s%n", r.getDescription(), e.getMessage());

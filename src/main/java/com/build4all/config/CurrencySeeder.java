@@ -1,7 +1,7 @@
 package com.build4all.config;
 
-import com.build4all.entities.Currency;
-import com.build4all.repositories.CurrencyRepository;
+import com.build4all.catalog.domain.Currency;
+import com.build4all.catalog.repository.CurrencyRepository;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Component;
 

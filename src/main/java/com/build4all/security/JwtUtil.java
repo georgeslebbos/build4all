@@ -5,13 +5,11 @@ import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
 import jakarta.servlet.http.HttpServletRequest;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.springframework.web.bind.annotation.GetMapping;
 
-import com.build4all.entities.AdminUsers;
-import com.build4all.entities.Businesses;
-import com.build4all.entities.Users;
+import com.build4all.admin.domain.AdminUsers;
+import com.build4all.business.domain.Businesses;
+import com.build4all.user.domain.Users;
 
 import java.security.Key;
 import java.util.Date;

@@ -1,7 +1,7 @@
 package com.build4all.config;
 
-import com.build4all.entities.BusinessStatus;
-import com.build4all.repositories.BusinessStatusRepository;
+import com.build4all.business.domain.BusinessStatus;
+import com.build4all.business.repository.BusinessStatusRepository;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,18 +12,16 @@ import java.util.List;
 public class BusinessStatusSeeder {
 
     @Bean
-    public CommandLineRunner seedBusinessStatuses(BusinessStatusRepository businessStatusRepository) {
+    public CommandLineRunner seedBusinessStatuses(BusinessStatusRepository repo) {
         return args -> {
-            System.out.println("✅ BusinessStatus Seeder running...");
+            System.out.println("✅ BusinessStatus seeder running...");
 
-            List<String> statuses = List.of("ACTIVE", "INACTIVE", "DELETED","INACTIVEBYADMIN");
+            List<String> names = List.of("ACTIVE", "INACTIVE", "SUSPENDED", "PENDING_APPROVAL");
 
-            for (String name : statuses) {
-                boolean exists = businessStatusRepository.findByName(name).isPresent();
-                if (!exists) {
-                	businessStatusRepository.save(new BusinessStatus(name));
-
-                    System.out.println("➕ Inserted BusinessStatus: " + name);
+            for (String n : names) {
+                if (repo.findByNameIgnoreCase(n).isEmpty()) {
+                    repo.save(new BusinessStatus(n));
+                    System.out.println("   • inserted BusinessStatus: " + n);
                 }
             }
         };

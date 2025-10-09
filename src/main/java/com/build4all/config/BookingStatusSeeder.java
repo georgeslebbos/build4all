@@ -1,7 +1,7 @@
 package com.build4all.config;
 
-import com.build4all.entities.BookingStatus;
-import com.build4all.repositories.BookingStateRepository;
+import com.build4all.booking.domain.BookingStatus;
+import com.build4all.booking.repository.BookingStateRepository; // keep if your repo is named *State*
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,16 +12,19 @@ import java.util.List;
 public class BookingStatusSeeder {
 
     @Bean
-    public CommandLineRunner seedBookingStates(BookingStateRepository repo) {
+    public CommandLineRunner seedBookingStatuses(BookingStateRepository repo) {
         return args -> {
-            System.out.println("✅ BookingState Seeder running...");
+            System.out.println("✅ BookingStatus seeder running...");
 
-            List<String> states = List.of("PENDING", "APPROVED", "REJECTED", "Cancel_Requested", "Canceled", "Completed", "REFUNDED");
+            List<String> names = List.of(
+                    "PENDING", "APPROVED", "REJECTED",
+                    "CANCEL_REQUESTED", "CANCELED", "COMPLETED", "REFUNDED"
+            );
 
-            for (String name : states) {
-                if (repo.findByNameIgnoreCase(name).isEmpty()) {
-                    repo.save(new BookingStatus(name));
-                    System.out.println("➕ Inserted BookingState: " + name);
+            for (String n : names) {
+                if (repo.findByNameIgnoreCase(n).isEmpty()) {
+                    repo.save(new BookingStatus(n));
+                    System.out.println("   • inserted BookingStatus: " + n);
                 }
             }
         };

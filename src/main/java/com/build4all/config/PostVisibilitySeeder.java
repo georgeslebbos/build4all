@@ -1,7 +1,7 @@
 package com.build4all.config;
 
-import com.build4all.entities.PostVisibility;
-import com.build4all.repositories.PostVisibilityRepository;
+import com.build4all.social.domain.PostVisibility;
+import com.build4all.social.repository.PostVisibilityRepository;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,17 +12,16 @@ import java.util.List;
 public class PostVisibilitySeeder {
 
     @Bean
-    public CommandLineRunner seedPostVisibilities(PostVisibilityRepository postVisibilityRepository) {
+    public CommandLineRunner seedPostVisibilities(PostVisibilityRepository repo) {
         return args -> {
-            System.out.println("✅ PostVisibility Seeder running...");
+            System.out.println("✅ PostVisibility seeder running...");
 
-            List<String> visibilities = List.of("PUBLIC", "FRIENDS_ONLY");
+            List<String> visibilities = List.of("PUBLIC", "FRIENDS", "PRIVATE");
 
-            for (String name : visibilities) {
-                boolean exists = postVisibilityRepository.findByName(name).isPresent();
-                if (!exists) {
-                    postVisibilityRepository.save(new PostVisibility(null, name));
-                    System.out.println("➕ Inserted PostVisibility: " + name);
+            for (String v : visibilities) {
+                if (repo.findByNameIgnoreCase(v).isEmpty()) {
+                    repo.save(new PostVisibility(v));
+                    System.out.println("   • inserted PostVisibility: " + v);
                 }
             }
         };

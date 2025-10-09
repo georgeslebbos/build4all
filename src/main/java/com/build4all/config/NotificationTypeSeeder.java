@@ -1,7 +1,7 @@
 package com.build4all.config;
 
-import com.build4all.entities.NotificationTypeEntity;
-import com.build4all.repositories.NotificationTypeRepository;
+import com.build4all.notifications.domain.NotificationTypeEntity;
+import com.build4all.notifications.repository.NotificationTypeRepository;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

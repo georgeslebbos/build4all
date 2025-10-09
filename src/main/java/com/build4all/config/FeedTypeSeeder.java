@@ -1,7 +1,12 @@
 package com.build4all.config;
 
-import com.build4all.entities.FeedType;
-import com.build4all.repositories.FeedTypeRepository;
+import com.build4all.feedType.repository.FeedTypeRepository;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -26,5 +31,26 @@ public class FeedTypeSeeder {
                 }
             }
         };
+    }
+
+    @Entity
+    @Table(name = "feed_types")
+    public static class FeedType {
+
+        @Id
+        @GeneratedValue(strategy = GenerationType.IDENTITY)
+        private Long id;
+
+
+        @Column(nullable = false, unique = true)
+        private String name;  // Values like "Post", "Event", etc.
+
+        public FeedType() {
+
+        }
+
+        public FeedType(String name) {
+            this.name = name;
+        }
     }
 }

@@ -1,7 +1,7 @@
 package com.build4all.config;
 
-import com.build4all.entities.UserStatus;
-import com.build4all.repositories.UserStatusRepository;
+import com.build4all.user.domain.UserStatus;
+import com.build4all.user.repository.UserStatusRepository;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,18 +12,16 @@ import java.util.List;
 public class UserStatusSeeder {
 
     @Bean
-    public CommandLineRunner seedUserStatuses(UserStatusRepository userStatusRepository) {
+    public CommandLineRunner seedUserStatuses(UserStatusRepository repo) {
         return args -> {
-            System.out.println("✅ UserStatus Seeder running...");
+            System.out.println("✅ UserStatus seeder running...");
 
-            List<String> statuses = List.of("ACTIVE", "INACTIVE", "DELETED", "PENDING", "CREATED_BY_BUSINESS");
+            List<String> statuses = List.of("ACTIVE", "INACTIVE", "BANNED", "LOCKED");
 
-
-            for (String name : statuses) {
-                boolean exists = userStatusRepository.findByName(name).isPresent();
-                if (!exists) {
-                    userStatusRepository.save(new UserStatus(name));
-                    System.out.println("➕ Inserted UserStatus: " + name);
+            for (String s : statuses) {
+                if (repo.findByNameIgnoreCase(s).isEmpty()) {
+                    repo.save(new UserStatus(s));
+                    System.out.println("   • inserted UserStatus: " + s);
                 }
             }
         };
