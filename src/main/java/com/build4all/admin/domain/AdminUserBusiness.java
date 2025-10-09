@@ -8,37 +8,47 @@ import java.time.LocalDateTime;
 
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 @Entity
-@Table(name = "AdminUserBusiness")
-public class AdminUserBusiness
-{
+@EntityListeners(AuditingEntityListener.class)
+@Table(
+        name = "admin_user_businesses",
+        uniqueConstraints = @UniqueConstraint(name="uk_aub_admin_business", columnNames={"admin_id","business_id"}),
+        indexes = {
+                @Index(name="idx_aub_admin", columnList="admin_id"),
+                @Index(name="idx_aub_business", columnList="business_id")
+        }
+)
+public class AdminUserBusiness {
 
     @EmbeddedId
-    private AdminUserBusinessId id;  // Composite key using @EmbeddedId
+    private AdminUserBusinessId id = new AdminUserBusinessId();
 
-    @ManyToOne
-    @MapsId("businessId")  // Maps the businessId field in the composite key
-    @OnDelete(action = OnDeleteAction.CASCADE)
-    @JoinColumn(name = "business_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY, optional=false)
+    @MapsId("businessId")
+    @JoinColumn(name="business_id", nullable=false)
     private Businesses business;
 
-    @ManyToOne
-    @MapsId("adminId")  // Maps the adminId field in the composite key
-    @JoinColumn(name = "admin_id", nullable = false)
-    @OnDelete(action = OnDeleteAction.CASCADE)
-    private AdminUsers admin;
-    
-    @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+    @ManyToOne(fetch = FetchType.LAZY, optional=false)
+    @MapsId("adminId")
+    @JoinColumn(name="admin_id", nullable=false)
+    private AdminUser admin;
 
-    @Column(name = "created_at", updatable = false)
+    @CreatedDate
+    @Column(name="created_at", updatable=false, nullable=false)
     private LocalDateTime createdAt;
+
+    @LastModifiedDate
+    @Column(name="updated_at", nullable=false)
+    private LocalDateTime updatedAt;
 
     // Constructors
     public AdminUserBusiness() {}
 
-    public AdminUserBusiness(Businesses business, AdminUsers admin) {
+    public AdminUserBusiness(Businesses business, AdminUser admin) {
         this.business = business;
         this.admin = admin;
         this.id = new AdminUserBusinessId(business.getId(), admin.getAdminId());  // Initialize composite key
@@ -61,11 +71,11 @@ public class AdminUserBusiness
         this.business = business;
     }
 
-    public AdminUsers getAdmin() {
+    public AdminUser getAdmin() {
         return admin;
     }
 
-    public void setAdmin(AdminUsers admin) {
+    public void setAdmin(AdminUser admin) {
         this.admin = admin;
     }
     

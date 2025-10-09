@@ -5,7 +5,14 @@ import jakarta.persistence.*;
 import java.time.LocalDate;
 
 @Entity
-@Table(name = "admin_user_projects")
+@Table(
+        name = "admin_user_projects",
+        uniqueConstraints = @UniqueConstraint(name="uk_aup_admin_project", columnNames={"admin_id","project_id"}),
+        indexes = {
+                @Index(name="idx_aup_admin", columnList="admin_id"),
+                @Index(name="idx_aup_project", columnList="project_id")
+        }
+)
 public class AdminUserProject {
 
     @EmbeddedId
@@ -14,7 +21,7 @@ public class AdminUserProject {
     @ManyToOne(fetch = FetchType.LAZY)
     @MapsId("adminId")
     @JoinColumn(name = "admin_id", referencedColumnName = "admin_id")
-    private AdminUsers admin;
+    private AdminUser admin;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @MapsId("projectId")
@@ -33,7 +40,7 @@ public class AdminUserProject {
 
     public AdminUserProject() {}
 
-    public AdminUserProject(AdminUsers admin, Project project, String licenseId, LocalDate validFrom, LocalDate endTo) {
+    public AdminUserProject(AdminUser admin, Project project, String licenseId, LocalDate validFrom, LocalDate endTo) {
         this.admin = admin;
         this.project = project;
         this.id = new AdminUserProjectId(admin.getAdminId(), project.getId());
@@ -45,8 +52,8 @@ public class AdminUserProject {
     public AdminUserProjectId getId() { return id; }
     public void setId(AdminUserProjectId id) { this.id = id; }
 
-    public AdminUsers getAdmin() { return admin; }
-    public void setAdmin(AdminUsers admin) { this.admin = admin; }
+    public AdminUser getAdmin() { return admin; }
+    public void setAdmin(AdminUser admin) { this.admin = admin; }
 
     public Project getProject() { return project; }
     public void setProject(Project project) { this.project = project; }

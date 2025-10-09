@@ -1,7 +1,7 @@
 package com.build4all.user.service;
 
 import com.build4all.admin.service.AdminUserService;
-import com.build4all.admin.domain.AdminUsers;
+import com.build4all.admin.domain.AdminUser;
 
 import com.build4all.catalog.domain.Category;
 import com.build4all.user.domain.PendingUser;
@@ -383,7 +383,7 @@ public class UserService {
 	        Users user = userOptional.get();
 
 	        // 🔁 Remove manager record if user is promoted as a manager
-	        Optional<AdminUsers> adminOpt = adminUserService.findByUserEmail(user.getEmail());
+	        Optional<AdminUser> adminOpt = adminUserService.findByUserEmail(user.getEmail());
 	        adminOpt.ifPresent(admin -> adminUserService.deleteManagerById(admin.getAdminId()));
 
 	        // ✅ Now delete the user
@@ -409,8 +409,8 @@ public class UserService {
 
 		  
 		    if (user.getEmail() != null) {
-		        List<AdminUsers> admins = adminUserService.findAllByUserEmail(user.getEmail());
-		        for (AdminUsers admin : admins) {
+		        List<AdminUser> admins = adminUserService.findAllByUserEmail(user.getEmail());
+		        for (AdminUser admin : admins) {
 		            adminUserService.deleteManagerById(admin.getAdminId());
 		        }
 		    }

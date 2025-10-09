@@ -1,6 +1,6 @@
 package com.build4all.notifications.service;
 
-import com.build4all.admin.domain.AdminUsers;
+import com.build4all.admin.domain.AdminUser;
 import com.build4all.business.domain.Businesses;
 import com.build4all.user.domain.Users;
 import com.build4all.user.repository.UsersRepository;
@@ -75,7 +75,7 @@ public class NotificationsService {
         // (optional) add per-business websocket queue if needed
     }
 
-    public void notifyAdmin(AdminUsers admin, String message, String typeCode) {
+    public void notifyAdmin(AdminUser admin, String message, String typeCode) {
         NotificationTypeEntity type = notificationTypeRepo.findByCode(typeCode)
                 .orElseThrow(() -> new RuntimeException("NotificationType not found: " + typeCode));
 

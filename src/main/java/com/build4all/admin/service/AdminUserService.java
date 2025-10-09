@@ -1,6 +1,6 @@
 package com.build4all.admin.service;
 
-import com.build4all.admin.domain.AdminUsers;
+import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.domain.AdminUserBusiness;
 import com.build4all.business.domain.Businesses;
 import com.build4all.review.repository.ReviewRepository;
@@ -48,54 +48,54 @@ public class AdminUserService {
     @Autowired
     private UsersRepository usersRepository;
 
-    public Optional<AdminUsers> findByEmail(String email) {
+    public Optional<AdminUser> findByEmail(String email) {
         return adminUserRepository.findByEmail(email);
     }
 
-    public Optional<AdminUsers> findByUsername(String username) {
+    public Optional<AdminUser> findByUsername(String username) {
         return adminUserRepository.findByUsername(username);
     }
 
-    public Optional<AdminUsers> findById(Long id) {
+    public Optional<AdminUser> findById(Long id) {
         return adminUserRepository.findById(id);
     }
 
-    public void save(AdminUsers adminUser) {
+    public void save(AdminUser adminUser) {
         adminUserRepository.save(adminUser);
     }
 
-    public AdminUsers createAdminUser(String username, String firstName, String lastName,
+    public AdminUser createAdminUser(String username, String firstName, String lastName,
             String email, String plainPassword, String roleName) {
 
         Role role = roleRepository.findByName(roleName.toUpperCase())
                 .orElseThrow(() -> new RuntimeException("Role not found: " + roleName));
 
-        Optional<AdminUsers> existingAdmin = adminUserRepository.findByEmail(email);
+        Optional<AdminUser> existingAdmin = adminUserRepository.findByEmail(email);
         if (existingAdmin.isPresent()) {
             throw new RuntimeException("Admin user with email " + email + " already exists");
         }
 
         String encodedPassword = passwordEncoder.encode(plainPassword);
 
-        AdminUsers admin = new AdminUsers(username, firstName, lastName, email, encodedPassword, role);
+        AdminUser admin = new AdminUser(username, firstName, lastName, email, encodedPassword, role);
 
         return adminUserRepository.save(admin);
     }
 
-    public Optional<AdminUsers> findByUsernameOrEmail(String input) {
+    public Optional<AdminUser> findByUsernameOrEmail(String input) {
         return adminUserRepository.findByUsernameOrEmail(input, input);
     }
 
-    public AdminUsers promoteUserToManager(Users user) {
+    public AdminUser promoteUserToManager(Users user) {
         Role managerRole = roleRepository.findByName("MANAGER")
                 .orElseThrow(() -> new RuntimeException("Manager role not found"));
 
-        Optional<AdminUsers> existing = adminUserRepository.findByEmail(user.getEmail());
+        Optional<AdminUser> existing = adminUserRepository.findByEmail(user.getEmail());
         if (existing.isPresent()) {
             throw new RuntimeException("User already promoted to admin");
         }
 
-        AdminUsers manager = new AdminUsers(
+        AdminUser manager = new AdminUser(
                 user.getUsername(),
                 user.getFirstName(),
                 user.getLastName(),
@@ -106,11 +106,11 @@ public class AdminUserService {
         return adminUserRepository.save(manager);
     }
 
-    public AdminUsers promoteUserToManager(Users user, Businesses business) {
+    public AdminUser promoteUserToManager(Users user, Businesses business) {
         Role managerRole = roleRepository.findByName("MANAGER")
                 .orElseThrow(() -> new RuntimeException("Role MANAGER not found"));
 
-        AdminUsers manager = new AdminUsers();
+        AdminUser manager = new AdminUser();
         manager.setUsername(user.getUsername());
         manager.setFirstName(user.getFirstName());
         manager.setLastName(user.getLastName());
@@ -119,7 +119,7 @@ public class AdminUserService {
         manager.setRole(managerRole);
         manager.setBusiness(business);
 
-        AdminUsers savedManager = adminUserRepository.save(manager);
+        AdminUser savedManager = adminUserRepository.save(manager);
 
         AdminUserBusiness adminUserBusiness = new AdminUserBusiness(business, savedManager);
         adminUserBusinessRepository.save(adminUserBusiness);
@@ -161,13 +161,11 @@ public class AdminUserService {
 
     @Transactional
     public void deleteManagerById(Long adminId) {
-        // Step 1: Delete the AdminUserBusiness relationship
-        adminUserBusinessRepository.findByAdmin_AdminId(adminId)
-                .ifPresent(adminUserBusinessRepository::delete);
-
-        // Step 2: Delete the AdminUsers entry
-        adminUserRepository.findById(adminId)
-                .ifPresent(adminUserRepository::delete);
+        var links = adminUserBusinessRepository.findByAdmin_AdminId(adminId);
+        if (!links.isEmpty()) {
+            adminUserBusinessRepository.deleteAll(links);
+        }
+        adminUserRepository.findById(adminId).ifPresent(adminUserRepository::delete);
     }
 
     public List<UserSummaryDTO> getUsersByRole(String role) {
@@ -196,20 +194,20 @@ public class AdminUserService {
     }
 
     public boolean isUserAlreadyManager(Users user, Businesses business) {
-        List<AdminUsers> results = adminUserRepository.findByEmailAndBusiness(user.getEmail(), business);
+        List<AdminUser> results = adminUserRepository.findByEmailAndBusiness(user.getEmail(), business);
         return !results.isEmpty();
 }
 
     public void deleteManagerByEmail(String email) {
-        Optional<AdminUsers> admin = adminUserRepository.findByEmail(email);
+        Optional<AdminUser> admin = adminUserRepository.findByEmail(email);
         admin.ifPresent(a -> adminUserRepository.deleteById(a.getAdminId()));
     }
 
-    public Optional<AdminUsers> findByUserEmail(String email) {
+    public Optional<AdminUser> findByUserEmail(String email) {
         return adminUserRepository.findByEmail(email); // email-based lookup
     }
 
-    public List<AdminUsers> findAllByUserEmail(String email) {
+    public List<AdminUser> findAllByUserEmail(String email) {
         return adminUserRepository.findAllByEmail(email);
     }
 

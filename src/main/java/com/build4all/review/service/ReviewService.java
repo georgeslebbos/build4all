@@ -1,6 +1,6 @@
 package com.build4all.review.service;
 
-import com.build4all.admin.domain.AdminUsers;
+import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.repository.AdminUsersRepository;
 import com.build4all.review.domain.Review;
 import com.build4all.review.repository.ReviewRepository;
@@ -151,13 +151,13 @@ public class ReviewService {
 
         // 3) notify SUPER_ADMINs if low (<= 3.0) and they opted in
         if (avg <= 3.0) {
-            List<AdminUsers> adminsToNotify = adminUsersRepository.findAll().stream()
+            List<AdminUser> adminsToNotify = adminUsersRepository.findAll().stream()
                     .filter(a -> a.getRole() != null
                               && "SUPER_ADMIN".equalsIgnoreCase(a.getRole().getName())
                               && Boolean.TRUE.equals(a.getNotifyUserFeedback()))
                     .toList();
 
-            for (AdminUsers admin : adminsToNotify) {
+            for (AdminUser admin : adminsToNotify) {
                 notificationsService.notifyAdmin(
                     admin,
                     "Alert: Business " + businessId + " average rating is " + avg

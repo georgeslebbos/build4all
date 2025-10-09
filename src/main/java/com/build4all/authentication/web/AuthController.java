@@ -1,6 +1,6 @@
 package com.build4all.authentication.web;
 
-import com.build4all.admin.domain.AdminUsers;
+import com.build4all.admin.domain.AdminUser;
 import com.build4all.business.domain.BusinessStatus;
 import com.build4all.business.domain.Businesses;
 import com.build4all.business.repository.BusinessStatusRepository;
@@ -781,7 +781,7 @@ public class AuthController {
 @PostMapping("/manager/login")
 public ResponseEntity<?> managerLogin(@RequestBody AdminLoginRequest request) {
     // 1. Find manager by username or email
-    Optional<AdminUsers> optionalAdmin = adminUserService.findByUsernameOrEmail(request.getUsernameOrEmail());
+    Optional<AdminUser> optionalAdmin = adminUserService.findByUsernameOrEmail(request.getUsernameOrEmail());
 
     // 2. If not found, error
     if (optionalAdmin.isEmpty()) {
@@ -789,7 +789,7 @@ public ResponseEntity<?> managerLogin(@RequestBody AdminLoginRequest request) {
                 .body(Map.of("message", "Invalid credentials"));
     }
 
-    AdminUsers admin = optionalAdmin.get();
+    AdminUser admin = optionalAdmin.get();
 
     // 3. Password check
     if (!passwordEncoder.matches(request.getPassword(), admin.getPasswordHash())) {
@@ -871,14 +871,14 @@ public ResponseEntity<?> managerLogin(@RequestBody AdminLoginRequest request) {
         
 
         // Force login by email only
-        Optional<AdminUsers> adminOpt = adminUserService.findByEmail(request.getUsernameOrEmail());
+        Optional<AdminUser> adminOpt = adminUserService.findByEmail(request.getUsernameOrEmail());
 
         if (adminOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("message", "No Super Admin found with this email"));
         }
 
-        AdminUsers admin = adminOpt.get();
+        AdminUser admin = adminOpt.get();
         
 
         if (!passwordEncoder.matches(request.getPassword(), admin.getPasswordHash())) {
@@ -924,7 +924,7 @@ public ResponseEntity<?> managerLogin(@RequestBody AdminLoginRequest request) {
                 .orElseThrow(() -> new RuntimeException("Role SUPER_ADMIN not found"));
 
         // Create the admin user
-        AdminUsers newAdmin = new AdminUsers();
+        AdminUser newAdmin = new AdminUser();
         newAdmin.setUsername(request.getUsername());
         newAdmin.setFirstName(request.getFirstName());
         newAdmin.setLastName(request.getLastName());
@@ -945,7 +945,7 @@ public ResponseEntity<?> managerLogin(@RequestBody AdminLoginRequest request) {
 
     @DeleteMapping("/admin/remove-manager/{adminId}")
     public ResponseEntity<?> removeManager(@PathVariable Long adminId){
-        Optional<AdminUsers> optionalManager = adminUserService.findById(adminId);
+        Optional<AdminUser> optionalManager = adminUserService.findById(adminId);
 
         if (optionalManager.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of("message", "Manager not found"));

@@ -14,7 +14,7 @@ import com.build4all.business.domain.Businesses;
 import com.build4all.catalog.domain.Item;
 import com.build4all.business.dto.LowRatedBusinessDTO;
 
-import com.build4all.admin.domain.AdminUsers;
+import com.build4all.admin.domain.AdminUser;
 
 import com.build4all.notifications.service.EmailService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -168,7 +168,7 @@ public class BusinessService {
 
         // Step 3: Delete links to business admins & internal admins
         adminUserBusinessRepository.deleteByBusinessId(businessId);
-        adminUsersRepository.deleteByBusinessId(businessId);
+        adminUsersRepository.deleteByBusiness_Id(businessId);
 
         // Step 4: Finally delete the business itself
         businessRepository.deleteById(businessId);
@@ -708,7 +708,7 @@ public class BusinessService {
         }
 
         // ✅ 4. Save AdminUser (Manager)
-        AdminUsers newManager = new AdminUsers();
+        AdminUser newManager = new AdminUser();
         newManager.setUsername(username);
         newManager.setFirstName(firstName);
         newManager.setLastName(lastName);

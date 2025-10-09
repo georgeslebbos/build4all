@@ -16,7 +16,7 @@ public class UserStatusSeeder {
         return args -> {
             System.out.println("✅ UserStatus seeder running...");
 
-            List<String> statuses = List.of("ACTIVE", "INACTIVE", "BANNED", "LOCKED");
+            List<String> statuses = List.of("ACTIVE", "INACTIVE", "BANNED", "LOCKED","PENDING");
 
             for (String s : statuses) {
                 if (repo.findByNameIgnoreCase(s).isEmpty()) {

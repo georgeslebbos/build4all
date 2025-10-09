@@ -9,7 +9,7 @@ import com.build4all.review.repository.ReviewRepository;
 import com.build4all.user.repository.UserStatusRepository;
 import com.build4all.user.repository.UsersRepository;
 import com.build4all.business.service.BusinessService;
-import com.build4all.admin.domain.AdminUsers;
+import com.build4all.admin.domain.AdminUser;
 import com.build4all.business.domain.BusinessStatus;
 import com.build4all.business.domain.Businesses;
 import com.build4all.user.domain.Users;
@@ -265,7 +265,7 @@ public class AdminController {
 
         token = token.substring(7).trim(); // Remove "Bearer "
         Long currentAdminId = jwtUtil.extractId(token);
-        AdminUsers admin = adminUsersRepository.findById(currentAdminId).orElse(null);
+        AdminUser admin = adminUsersRepository.findById(currentAdminId).orElse(null);
 
         if (admin == null) {
             return ResponseEntity.status(404).body("Admin user not found.");
@@ -299,12 +299,12 @@ public class AdminController {
         token = token.substring(7).trim();
         Long currentAdminId = jwtUtil.extractId(token);
 
-        Optional<AdminUsers> optionalAdmin = adminUsersRepository.findById(currentAdminId);
+        Optional<AdminUser> optionalAdmin = adminUsersRepository.findById(currentAdminId);
         if (optionalAdmin.isEmpty()) {
             return ResponseEntity.status(404).body("Admin user not found.");
         }
 
-        AdminUsers admin = optionalAdmin.get();
+        AdminUser admin = optionalAdmin.get();
         if (!passwordEncoder.matches(dto.getCurrentPassword(), admin.getPasswordHash())) {
             return ResponseEntity.status(403).body("Current password is incorrect.");
         }
@@ -333,7 +333,7 @@ public class AdminController {
         token = token.substring(7).trim();
         Long currentAdminId = jwtUtil.extractId(token);
 
-        AdminUsers admin = adminUsersRepository.findById(currentAdminId).orElse(null);
+        AdminUser admin = adminUsersRepository.findById(currentAdminId).orElse(null);
         if (admin == null) {
             return ResponseEntity.status(404).body("Admin user not found.");
         }
@@ -380,13 +380,13 @@ public class AdminController {
 
         token = token.substring(7).trim(); // Remove "Bearer "
         Long currentAdminId = jwtUtil.extractId(token);
-        Optional<AdminUsers> optionalAdmin = adminUsersRepository.findById(currentAdminId);
+        Optional<AdminUser> optionalAdmin = adminUsersRepository.findById(currentAdminId);
 
         if (optionalAdmin.isEmpty()) {
             return ResponseEntity.status(404).body("Admin not found.");
         }
 
-        AdminUsers admin = optionalAdmin.get();
+        AdminUser admin = optionalAdmin.get();
 
         return ResponseEntity.ok(Map.of(
                 "id", admin.getAdminId(),

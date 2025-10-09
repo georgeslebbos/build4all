@@ -1,6 +1,6 @@
 package com.build4all.admin.service;
 
-import com.build4all.admin.domain.AdminUsers;
+import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.domain.AdminUserProjectId;
 import com.build4all.admin.dto.AdminProjectAssignmentRequest;
@@ -45,7 +45,7 @@ public class AdminUserProjectService
 
     @Transactional
     public void assign(Long adminId, AdminProjectAssignmentRequest req) {
-        AdminUsers admin = adminRepo.findByAdminId(adminId)
+        AdminUser admin = adminRepo.findByAdminId(adminId)
                 .orElseThrow(() -> new IllegalArgumentException("Admin not found"));
         Project project = projectRepo.findById(req.getProjectId())
                 .orElseThrow(() -> new IllegalArgumentException("Project not found"));

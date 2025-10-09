@@ -7,7 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import org.springframework.stereotype.Component;
 
-import com.build4all.admin.domain.AdminUsers;
+import com.build4all.admin.domain.AdminUser;
 import com.build4all.business.domain.Businesses;
 import com.build4all.user.domain.Users;
 
@@ -65,7 +65,7 @@ public class JwtUtil {
     }
 
 
-    public String generateToken(AdminUsers adminUser) {
+    public String generateToken(AdminUser adminUser) {
         return Jwts.builder()
                 .setSubject(adminUser.getEmail())
                 .claim("id", adminUser.getAdminId())

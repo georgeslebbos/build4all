@@ -1,5 +1,5 @@
 package com.build4all.admin.service;
-import com.build4all.admin.domain.AdminUsers;
+import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.domain.AdminUserBusiness;
 import com.build4all.business.domain.Businesses;
 import com.build4all.admin.repository.AdminUserBusinessRepository;
@@ -21,7 +21,7 @@ public class AdminUserBusinessService
     private BusinessService businessService;
 
     public void assignAdminToBusiness(Long adminId, Long businessId) {
-        AdminUsers admin = adminUserService.findById(adminId)
+        AdminUser admin = adminUserService.findById(adminId)
             .orElseThrow(() -> new RuntimeException("Admin not found"));
 
         Businesses business = businessService.findById(businessId);

@@ -13,8 +13,8 @@ import org.hibernate.annotations.OnDeleteAction;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 @Entity
-@Table(name = "AdminUsers")
-public class AdminUsers {
+@Table(name = "AdminUser")
+public class AdminUser {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -63,9 +63,9 @@ public class AdminUsers {
     @OneToMany(mappedBy = "admin", cascade = CascadeType.ALL, orphanRemoval = true)
     private Set<AdminUserProject> projectLinks = new HashSet<>();
 
-    public AdminUsers() {}
+    public AdminUser() {}
 
-    public AdminUsers(String username, String firstName, String lastName, String email, String passwordHash, Role role) {
+    public AdminUser(String username, String firstName, String lastName, String email, String passwordHash, Role role) {
         this.username = username; this.firstName = firstName; this.lastName = lastName;
         this.email = email; this.passwordHash = passwordHash; this.role = role;
     }
