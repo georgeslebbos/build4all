@@ -53,4 +53,10 @@ public class Project {
 
     public Set<AdminUserProject> getAdminLinks() { return adminLinks; }
     public void setAdminLinks(Set<AdminUserProject> adminLinks) { this.adminLinks = adminLinks; }
+
+    @PrePersist
+    public void prePersist() {
+        if (createdAt == null) createdAt = LocalDateTime.now();
+        if (updatedAt == null) updatedAt = createdAt;
+    }
 }

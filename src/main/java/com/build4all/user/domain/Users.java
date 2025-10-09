@@ -54,7 +54,7 @@ public class Users {
     @Column(name = "profile_picture_url", nullable = true)
     private String profilePictureUrl;
 
-    @ManyToOne(fetch = FetchType.EAGER)
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "status") 
     private UserStatus status;
     

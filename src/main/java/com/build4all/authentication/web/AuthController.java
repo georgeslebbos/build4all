@@ -467,7 +467,7 @@ public class AuthController {
             return ResponseEntity.badRequest().body(Map.of("error", "Account is not inactive"));
         }
 
-        BusinessStatus activeStatus = businessStatusRepository.findByName("ACTIVE")
+        BusinessStatus activeStatus = businessStatusRepository.findByNameIgnoreCase("ACTIVE")
             .orElseThrow(() -> new RuntimeException("ACTIVE status not found"));
 
         business.setStatus(activeStatus);

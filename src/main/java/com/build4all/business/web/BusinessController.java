@@ -396,7 +396,7 @@ public class BusinessController {
 
         try {
             Businesses business = businessService.findById(id);
-            BusinessStatus statusEntity = businessStatusRepository.findByName(newStatus.toUpperCase())
+            BusinessStatus statusEntity = businessStatusRepository.findByNameIgnoreCase(newStatus.toUpperCase())
                 .orElseThrow(() -> new IllegalArgumentException("Invalid status value"));
             
             business.setStatus(statusEntity);

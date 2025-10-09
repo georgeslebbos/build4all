@@ -67,7 +67,7 @@ public class BusinessUserService {
 
     @Transactional
     public List<BusinessUserSimpleDto> getUsersByBusiness(Long businessId) {
-        List<BusinessUser> users = businessUserRepo.findByBusinessId(businessId);
+        List<BusinessUser> users = businessUserRepo.findByBusiness_Id(businessId);
         return users.stream()
                     .map(BusinessUserSimpleDto::new)
                     .collect(Collectors.toList());

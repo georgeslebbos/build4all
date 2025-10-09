@@ -23,7 +23,7 @@ public class Category {
     @Column(name = "icon_library")
     private String iconLibrary;
 
-    @Column(unique = true, nullable = false)
+    @Column(name = "name", nullable = false)
     private String name;
 
     @Column(name = "created_at", updatable = false)

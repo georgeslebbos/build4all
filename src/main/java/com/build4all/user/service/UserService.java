@@ -549,7 +549,7 @@ public class UserService {
         if (myCategoryIds.isEmpty()) return List.of();
 
         // Get users who share categories
-        List<UserCategories> sharedCategories = userCategoriesRepository.findByCategoryIdIn(myCategoryIds);
+        List<UserCategories> sharedCategories = userCategoriesRepository.findByCategory_IdIn(myCategoryIds);
 
         Set<Users> potentialFriends = sharedCategories.stream()
             .map(ui -> ui.getId().getUser())

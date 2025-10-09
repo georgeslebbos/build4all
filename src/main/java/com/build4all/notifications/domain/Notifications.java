@@ -9,7 +9,13 @@ import org.hibernate.annotations.OnDeleteAction;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "notifications")
+@Table(
+        name = "notifications",
+        indexes = {
+                @Index(name = "idx_notif_user_read_created", columnList = "user_id, is_read, created_at"),
+                @Index(name = "idx_notif_business_read_created", columnList = "business_id, is_read, created_at")
+        }
+)
 public class Notifications {
 
     @Id
@@ -17,30 +23,30 @@ public class Notifications {
     @Column(name = "notification_id")
     private Long id;
 
-    @ManyToOne
-    @JoinColumn(name = "user_id", nullable = true)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id")
     @OnDelete(action = OnDeleteAction.CASCADE)
     private Users user;
 
-    @ManyToOne
-    @JoinColumn(name = "business_id", nullable = true)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "business_id")
     @OnDelete(action = OnDeleteAction.CASCADE)
     private Businesses business;
 
     @Column(columnDefinition = "TEXT", nullable = false)
     private String message;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "notification_type_id", nullable = false)
     private NotificationTypeEntity notificationType;
 
     @Column(name = "is_read", nullable = false)
-    private Boolean isRead = false;
+    private boolean isRead = false; // use primitive to avoid null tri-state
 
-    @Column(name = "created_at", updatable = false)
+    @Column(name = "created_at", updatable = false, nullable = false)
     private LocalDateTime createdAt;
 
-    @Column(name = "updated_at")
+    @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
     public Notifications() {}
@@ -59,7 +65,8 @@ public class Notifications {
 
     @PrePersist
     protected void onCreate() {
-        this.createdAt = this.updatedAt = LocalDateTime.now();
+        this.createdAt = LocalDateTime.now();
+        this.updatedAt = this.createdAt;
     }
 
     @PreUpdate
@@ -67,8 +74,7 @@ public class Notifications {
         this.updatedAt = LocalDateTime.now();
     }
 
-    // Getters and Setters
-
+    // Getters / setters
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
@@ -84,8 +90,8 @@ public class Notifications {
     public NotificationTypeEntity getNotificationType() { return notificationType; }
     public void setNotificationType(NotificationTypeEntity notificationType) { this.notificationType = notificationType; }
 
-    public Boolean getRead() { return isRead; }
-    public void setIsRead(Boolean isRead) { this.isRead = isRead; }
+    public boolean getIsRead() { return isRead; }             // ✅ conventional boolean getter
+    public void setIsRead(boolean read) { isRead = read; }   // ✅ conventional setter
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

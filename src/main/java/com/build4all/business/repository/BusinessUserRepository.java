@@ -7,5 +7,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import com.build4all.business.domain.BusinessUser;
 
 public interface BusinessUserRepository extends JpaRepository<BusinessUser, Long> {
-    List<BusinessUser> findByBusinessId(Long businessId);
+    List<BusinessUser> findByBusiness_Id(Long businessId);
 }

@@ -8,7 +8,6 @@ import java.util.Optional;
 
 @Repository
 public interface BusinessStatusRepository extends JpaRepository<BusinessStatus, Long> {
-    Optional<BusinessStatus> findByName(String name);
     Optional<BusinessStatus> findByNameIgnoreCase(String name);
     boolean existsByNameIgnoreCase(String name);
 }

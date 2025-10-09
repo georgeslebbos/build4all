@@ -17,7 +17,7 @@ public interface UserCategoriesRepository extends JpaRepository<UserCategories, 
 	 @Query("SELECT ui.category FROM UserCategories ui WHERE ui.id.user.id = :userId")
 	    List<Category> findCategoriesByUserId(@Param("userId") Long userId);
 
-	 List<UserCategories> findByCategoryIdIn(List<Long> myCategoryIds);
+	List<UserCategories> findByCategory_IdIn(List<Long> categoryIds);
 
 	 List<UserCategories> findById_User_Id(Long userId);
 

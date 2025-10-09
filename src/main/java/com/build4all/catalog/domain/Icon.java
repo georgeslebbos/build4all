@@ -3,7 +3,10 @@ package com.build4all.catalog.domain;
 import jakarta.persistence.*;
 
 @Entity
-@Table(name = "Icons")
+@Table(
+        name = "icons",
+        uniqueConstraints = @UniqueConstraint(name="uk_icon_name", columnNames = "name")
+)
 public class Icon {
 
     @Id

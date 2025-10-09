@@ -38,7 +38,7 @@ public class ReviewService {
     }
 
     public List<Review> getReviewsByBusiness(Long businessId) {
-        return reviewRepository.findReviewsByBusinessId(businessId);
+        return reviewRepository.findByBusinessId(businessId);
     }
 
     public Review createReviewFromDTO(ReviewDTO dto, String token) {

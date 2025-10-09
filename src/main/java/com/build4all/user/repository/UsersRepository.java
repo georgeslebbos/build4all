@@ -14,8 +14,6 @@ import java.util.Optional;
 @Repository
 public interface UsersRepository extends JpaRepository<Users, Long> {
 
-    Optional<Users> findById(Long id);
-
     Users findByEmail(String email);
 
     Users findByUsername(String username);
@@ -24,13 +22,16 @@ public interface UsersRepository extends JpaRepository<Users, Long> {
 
     long countByCreatedAtAfter(LocalDateTime date);
 
-    @Query("""
-        SELECT TO_CHAR(u.createdAt, 'YYYY-MM') AS month, COUNT(u)
-        FROM Users u
-        WHERE u.createdAt >= :startDate
-        GROUP BY TO_CHAR(u.createdAt, 'YYYY-MM')
-        ORDER BY TO_CHAR(u.createdAt, 'YYYY-MM')
-    """)
+    @Query(
+            value = """
+    SELECT TO_CHAR(u.created_at, 'YYYY-MM') AS month, COUNT(*) 
+    FROM "Users" u
+    WHERE u.created_at >= :startDate
+    GROUP BY TO_CHAR(u.created_at, 'YYYY-MM')
+    ORDER BY TO_CHAR(u.created_at, 'YYYY-MM')
+  """,
+            nativeQuery = true
+    )
     List<Object[]> countMonthlyRegistrations(@Param("startDate") LocalDateTime startDate);
 
     @Query("SELECT DISTINCT ui.id.user FROM UserCategories ui " +

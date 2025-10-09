@@ -192,7 +192,7 @@ public class BusinessService {
         }
 
         // ✅ Convert status
-        BusinessStatus status = businessStatusRepository.findByName(
+        BusinessStatus status = businessStatusRepository.findByNameIgnoreCase(
             statusStr != null ? statusStr.toUpperCase() : "ACTIVE"
         ).orElseThrow(() -> new RuntimeException("Invalid or missing status"));
 
@@ -566,7 +566,7 @@ public class BusinessService {
     }
 
     public List<Businesses> getAllPublicActiveBusinesses() {
-        BusinessStatus activeStatus = businessStatusRepository.findByName("ACTIVE")
+        BusinessStatus activeStatus = businessStatusRepository.findByNameIgnoreCase("ACTIVE")
             .orElseThrow(() -> new RuntimeException("ACTIVE status not found"));
 
         return businessRepository.findByIsPublicProfileTrueAndStatus(activeStatus);
@@ -575,10 +575,10 @@ public class BusinessService {
     
     @Scheduled(cron = "0 0 2 * * *")
     public void deleteInactiveBusinessesOlderThan30Days() {
-        BusinessStatus inactiveStatus = businessStatusRepository.findByName("INACTIVE")
+        BusinessStatus inactiveStatus = businessStatusRepository.findByNameIgnoreCase("INACTIVE")
             .orElseThrow(() -> new RuntimeException("INACTIVE status not found"));
 
-        BusinessStatus deletedStatus = businessStatusRepository.findByName("DELETED")
+        BusinessStatus deletedStatus = businessStatusRepository.findByNameIgnoreCase("DELETED")
             .orElseThrow(() -> new RuntimeException("DELETED status not found"));
 
         LocalDateTime cutoffDate = LocalDateTime.now().minusDays(30);
@@ -734,7 +734,7 @@ public class BusinessService {
     }
 
     public BusinessStatus getStatusByName(String name) {
-        return businessStatusRepository.findByName(name.toUpperCase())
+        return businessStatusRepository.findByNameIgnoreCase(name.toUpperCase())
                 .orElseThrow(() -> new RuntimeException("Status '" + name + "' not found"));
 }
 

@@ -13,30 +13,18 @@ import java.util.Optional;
 @Repository
 public interface BusinessesRepository extends JpaRepository<Businesses, Long> {
 
-    Businesses findByBusinessName(String businessName);
+    Optional<Businesses> findByBusinessName(String businessName);
+    boolean existsByBusinessNameIgnoreCase(String businessName);
+    boolean existsByBusinessNameIgnoreCaseAndIdNot(String businessName, Long id);
 
-    // DO NOT override JpaRepository#findById(Long) with a different return type.
-    // Remove any Businesses findById(long id) you might have locally.
+    Optional<Businesses> findByEmail(String email);
+    boolean existsByEmail(String email);
 
-    @Query("SELECT b FROM Businesses b WHERE b.email = :email AND b.email IS NOT NULL")
-    Optional<Businesses> findByEmail(@Param("email") String email);
+    Optional<Businesses> findByPhoneNumber(String phoneNumber);
+    boolean existsByPhoneNumber(String phoneNumber);
 
-    @Query("SELECT b FROM Businesses b WHERE b.phoneNumber = :phoneNumber AND b.phoneNumber IS NOT NULL")
-    Optional<Businesses> findByPhoneNumber(@Param("phoneNumber") String phoneNumber);
-
-    @Query("""
-            SELECT b
-            FROM Businesses b
-            WHERE
-              (b.email IS NOT NULL AND LOWER(b.email) = LOWER(:identifier))
-              OR
-              (b.phoneNumber IS NOT NULL AND b.phoneNumber = :identifier)
-            """)
-    Optional<Businesses> findByEmailOrPhone(@Param("identifier") String identifier);
+    // Handy combined finder (email OR phone)
+    Optional<Businesses> findByEmailIgnoreCaseOrPhoneNumber(String email, String phoneNumber);
 
     List<Businesses> findByIsPublicProfileTrueAndStatus(BusinessStatus status);
-
-    boolean existsByBusinessNameIgnoreCase(String businessName);
-    
-    boolean existsByBusinessNameIgnoreCaseAndIdNot(String businessName, Long id);
 }

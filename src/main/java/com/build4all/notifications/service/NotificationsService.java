@@ -43,7 +43,7 @@ public class NotificationsService {
     }
 
     public void createNotification(Users receiver, String message, String typeCode) {
-        NotificationTypeEntity type = notificationTypeRepo.findByCode(typeCode)
+        NotificationTypeEntity type = notificationTypeRepo.findByCodeIgnoreCase(typeCode)
                 .orElseThrow(() -> new RuntimeException("NotificationType not found: " + typeCode));
 
         Notifications notification = new Notifications(receiver, message, type);
@@ -63,7 +63,7 @@ public class NotificationsService {
             throw new RuntimeException("Business is null or invalid");
         }
 
-        NotificationTypeEntity type = notificationTypeRepo.findByCode(typeCode)
+        NotificationTypeEntity type = notificationTypeRepo.findByCodeIgnoreCase(typeCode)
                 .orElseThrow(() -> new RuntimeException("NotificationType not found: " + typeCode));
 
         Notifications notification = new Notifications(business, message, type);
@@ -76,7 +76,7 @@ public class NotificationsService {
     }
 
     public void notifyAdmin(AdminUser admin, String message, String typeCode) {
-        NotificationTypeEntity type = notificationTypeRepo.findByCode(typeCode)
+        NotificationTypeEntity type = notificationTypeRepo.findByCodeIgnoreCase(typeCode)
                 .orElseThrow(() -> new RuntimeException("NotificationType not found: " + typeCode));
 
         Notifications notification = new Notifications();

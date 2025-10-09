@@ -3,7 +3,14 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "Currency")
+@Table(
+        name = "currency",
+        uniqueConstraints = {
+                @UniqueConstraint(name="uk_currency_type", columnNames = "currency_type"),
+                @UniqueConstraint(name="uk_currency_code", columnNames = "code")
+        },
+        indexes = @Index(name="idx_currency_code", columnList = "code")
+)
 public class Currency {
 
     @Id

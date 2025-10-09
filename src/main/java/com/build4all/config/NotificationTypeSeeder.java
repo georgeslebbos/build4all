@@ -37,7 +37,7 @@ public class NotificationTypeSeeder {
                 String code = entry.getKey();
                 String description = entry.getValue();
 
-                boolean exists = repository.findByCode(code).isPresent();
+                boolean exists = repository.findByCodeIgnoreCase(code).isPresent();
                 if (!exists) {
                     NotificationTypeEntity type = new NotificationTypeEntity();
                     type.setCode(code);
