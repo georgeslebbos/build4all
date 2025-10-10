@@ -197,7 +197,33 @@ public class ItemBookingServiceImpl implements ItemBookingService {
 
     // business views
     @Override public List<ItemBooking> getBookingsByBusiness(Long businessId) { return bookingsRepo.findAllByBusinessId(businessId); }
-    @Override public void markPaid(Long bookingId, Long businessId) { throw new UnsupportedOperationException("markPaid is not implemented yet."); }
+    @Override
+    public void markPaid(Long bookingId, Long businessId) {
+        // 1) Ensure this item-booking belongs to the caller’s business
+        var ib = bookingsRepo.findByIdAndBusiness(bookingId, businessId)
+            .orElseThrow(() -> new IllegalArgumentException("Booking not found or not yours"));
+
+        // 2) Flip the header (Booking) status to COMPLETED (you’re using String status on Booking)
+        var header = ib.getBooking();
+        if (header == null) {
+            throw new IllegalStateException("Invalid state: booking header is missing");
+        }
+
+        // No-op if already COMPLETED
+        if (header.getStatus() != null && header.getStatus().equalsIgnoreCase("COMPLETED")) {
+            return;
+        }
+
+        header.setStatus("COMPLETED");                // normalize to uppercase
+        header.setBookingDate(java.time.LocalDateTime.now()); // optional touch; keep if you want latest timestamp
+
+        // 3) Touch the line’s updatedAt so your list reflects the change immediately
+        ib.setUpdatedAt(java.time.LocalDateTime.now());
+
+        // 4) Persist changes
+        bookingRepo.save(header); // header first
+        bookingsRepo.save(ib);    // then the line
+    }
 
     // cleanup
     @Override public void deleteBookingsByItemId(Long itemId) { bookingsRepo.deleteByItem_Id(itemId); }

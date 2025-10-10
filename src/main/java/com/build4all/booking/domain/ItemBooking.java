@@ -20,15 +20,23 @@ public class ItemBooking {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // 🔗 Many ItemBookings belong to one Booking
+ // 🔗 Many ItemBookings belong to one Booking
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "booking_id", nullable = false)
+    @com.fasterxml.jackson.annotation.JsonIgnore       // ⬅️ ADD THIS
     private Booking booking;
 
     // 🔗 Many ItemBookings belong to one Item
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "item_id", nullable = false)
+    @com.fasterxml.jackson.annotation.JsonIgnore       // ⬅️ ADD THIS
     private Item item;
+
+    // ...
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "currency_id")
+    @com.fasterxml.jackson.annotation.JsonIgnore       // ⬅️ ADD THIS
+    private Currency currency;
 
     // 🔗 (Optional) Track the user who booked this item
     @ManyToOne(fetch = FetchType.LAZY)
@@ -41,10 +49,7 @@ public class ItemBooking {
     
     private BigDecimal price;
     
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "currency_id")
-    private Currency currency;
-    
+
 
     private LocalDateTime createdAt = LocalDateTime.now();
 

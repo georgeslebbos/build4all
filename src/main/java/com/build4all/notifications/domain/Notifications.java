@@ -25,20 +25,26 @@ public class Notifications {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
-    @OnDelete(action = OnDeleteAction.CASCADE)
+    @org.hibernate.annotations.OnDelete(action = OnDeleteAction.CASCADE)
+    @com.fasterxml.jackson.annotation.JsonIgnore         // ⬅️ ADD THIS
     private Users user;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "business_id")
-    @OnDelete(action = OnDeleteAction.CASCADE)
+    @org.hibernate.annotations.OnDelete(action = OnDeleteAction.CASCADE)
+    @com.fasterxml.jackson.annotation.JsonIgnore         // ⬅️ ADD THIS
     private Businesses business;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "notification_type_id", nullable = false)
+    @com.fasterxml.jackson.annotation.JsonIgnore         // ⬅️ ADD THIS
+    private NotificationTypeEntity notificationType;
+
 
     @Column(columnDefinition = "TEXT", nullable = false)
     private String message;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "notification_type_id", nullable = false)
-    private NotificationTypeEntity notificationType;
+   
 
     @Column(name = "is_read", nullable = false)
     private boolean isRead = false; // use primitive to avoid null tri-state

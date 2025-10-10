@@ -8,4 +8,7 @@ import java.util.Optional;
 public interface BookingStateRepository extends JpaRepository<BookingStatus, Long> {
     Optional<BookingStatus> findByNameIgnoreCase(String name);
     boolean existsByNameIgnoreCase(String name);
+    
+    Optional<BookingStatus> findByName(String name);
 }
+

@@ -8,15 +8,16 @@ import org.springframework.stereotype.Repository;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long> {
 
-    // load bookings for a user + also prefetch item & booking to avoid lazy problems
-    @EntityGraph(attributePaths = {"item", "booking"})                    // fetch join
-    List<ItemBooking> findByUser_IdOrderByCreatedAtDesc(Long userId);     // last first
+    // Prefetch item & booking to avoid lazy problems
+    @EntityGraph(attributePaths = {"item", "booking"})
+    List<ItemBooking> findByUser_IdOrderByCreatedAtDesc(Long userId);
 
-    // ---- Direct lookups (keep them) ----
+    // ---- Direct lookups ----
     List<ItemBooking> findByItem_Id(Long itemId);
 
     boolean existsByItem_IdAndUser_Id(Long itemId, Long userId);
@@ -25,7 +26,6 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
     long countByItem_Id(Long itemId);
 
     List<ItemBooking> findByCreatedAtAfter(LocalDateTime after);
-
 
     // ---- Business-scoped via Item ----
     @Query("""
@@ -61,7 +61,7 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
     int sumQuantityByItemIdAndBookingStatuses(@Param("itemId") Long itemId,
                                               @Param("statuses") List<String> statuses);
 
-    // seats already taken for COMPLETED bookings (status normalized)
+    // Seats already taken for COMPLETED bookings (status normalized)
     @Query("""
            SELECT COALESCE(SUM(ib.quantity), 0)
            FROM ItemBooking ib
@@ -166,10 +166,49 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
            """)
     long countByBookingDatetimeAfter(@Param("fromDate") LocalDateTime fromDate);
 
-
     @EntityGraph(attributePaths = {"booking", "item"})
     List<ItemBooking> findByUser_Id(Long userId);
 
     @EntityGraph(attributePaths = {"booking", "item"})
     List<ItemBooking> findTop5ByUser_IdOrderByCreatedAtDesc(Long userId);
+
+    // Secure lookup: business owns the item
+    @Query("""
+           select ib
+           from ItemBooking ib
+           join ib.item i
+           where ib.id = :id and i.business.id = :businessId
+           """)
+    Optional<ItemBooking> findByIdAndBusiness(@Param("id") Long id,
+                                              @Param("businessId") Long businessId);
+
+    // Secure lookup: user owns the booking header
+    @Query("""
+           select ib
+           from ItemBooking ib
+           join ib.booking b
+           where ib.id = :id and b.user.id = :userId
+           """)
+    Optional<ItemBooking> findByIdAndUser(@Param("id") Long id,
+                                          @Param("userId") Long userId);
+
+    // Projection for Flutter booking card (keys match your BookingModel)
+    @Query("""
+           select new map(
+               ib.id as id,
+               b.status as bookingStatus,
+               ib.quantity as numberOfParticipants,
+               i.startDatetime as startDatetime,
+               i.name as itemName,
+               i.location as location,
+               i.imageUrl as imageUrl,
+               (case when upper(b.status) = 'COMPLETED' then true else false end) as wasPaid
+           )
+           from ItemBooking ib
+           join ib.booking b
+           join ib.item i
+           where b.user.id = :userId
+           order by ib.createdAt desc
+           """)
+    List<java.util.Map<String, Object>> findUserBookingCards(@Param("userId") Long userId);
 }

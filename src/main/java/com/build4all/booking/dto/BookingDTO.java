@@ -6,9 +6,8 @@ public class BookingDTO {
     private String userEmail;
     private int participants;
     private double totalPrice;
-    private String currencySymbol; // ✅ Required for displaying symbol
+    private String currencySymbol;
 
-    // ✅ Constructor including all fields
     public BookingDTO(Long id, String itemName, String userEmail, int participants, double totalPrice, String currencySymbol) {
         this.id = id;
         this.itemName = itemName;
@@ -18,7 +17,6 @@ public class BookingDTO {
         this.currencySymbol = currencySymbol;
     }
 
-    // ✅ Getters
     public Long getId() { return id; }
     public String getItemName() { return itemName; }
     public String getUserEmail() { return userEmail; }
@@ -26,12 +24,11 @@ public class BookingDTO {
     public double getTotalPrice() { return totalPrice; }
     public String getCurrencySymbol() { return currencySymbol; }
 
-    // (Optional) toString for debugging
     @Override
     public String toString() {
         return "BookingDTO{" +
                 "id=" + id +
-                ", activityName='" + itemName + '\'' +
+                ", itemName='" + itemName + '\'' +
                 ", userEmail='" + userEmail + '\'' +
                 ", participants=" + participants +
                 ", totalPrice=" + totalPrice +

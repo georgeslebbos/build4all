@@ -1,6 +1,7 @@
 package com.build4all.booking.web;
 
 import com.build4all.booking.domain.ItemBooking;
+import com.build4all.booking.repository.ItemBookingsRepository;
 import com.build4all.security.JwtUtil;
 import com.build4all.booking.service.ItemBookingService;
 
@@ -18,9 +19,13 @@ public class BookingController {
     private final ItemBookingService bookingService;
     private final JwtUtil jwt;
 
-    public BookingController(ItemBookingService bookingService, JwtUtil jwt) {
+    private final ItemBookingsRepository itemBookingsRepo; 
+
+    public BookingController(ItemBookingService bookingService, JwtUtil jwt,
+                             ItemBookingsRepository itemBookingsRepo) {       
         this.bookingService = bookingService;
         this.jwt = jwt;
+        this.itemBookingsRepo = itemBookingsRepo;                             
     }
 
     private String strip(String auth) {
@@ -30,11 +35,11 @@ public class BookingController {
 
     // My bookings
     @GetMapping("/mybookings")
-    @Operation(summary = "List all my bookings")
+    @Operation(summary = "List all my bookings (card model)")
     public ResponseEntity<?> myBookings(@RequestHeader("Authorization") String auth) {
         Long userId = jwt.extractId(strip(auth));
-        List<ItemBooking> list = bookingService.getMyBookings(userId);
-        return ResponseEntity.ok(list);
+        var rows = itemBookingsRepo.findUserBookingCards(userId);  // ⬅️ Projection
+        return ResponseEntity.ok(rows);
     }
 
     @GetMapping("/mybookings/pending")
