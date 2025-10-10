@@ -4,7 +4,7 @@ import com.build4all.booking.domain.ItemBooking;
 import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
-
+import org.springframework.data.jpa.repository.EntityGraph;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -211,4 +211,41 @@ public interface ItemBookingsRepository extends JpaRepository<ItemBooking, Long>
            order by ib.createdAt desc
            """)
     List<java.util.Map<String, Object>> findUserBookingCards(@Param("userId") Long userId);
+    
+    @Query("""
+    		  select new map(
+    		    ib.id as id,
+    		    b.status as bookingStatus,
+    		    ib.quantity as numberOfParticipants,
+    		    i.startDatetime as startDatetime,
+    		    i.name as itemName,
+    		    i.location as location,
+    		    i.imageUrl as imageUrl,
+    		    (case when upper(b.status) = 'COMPLETED' then true else false end) as wasPaid
+    		  )
+    		  from ItemBooking ib
+    		  join ib.booking b
+    		  join ib.item i
+    		  where b.user.id = :userId
+    		    and upper(b.status) in :statuses
+    		  order by ib.createdAt desc
+    		""")
+    		List<java.util.Map<String,Object>> findUserBookingCardsByStatuses(
+    		  @Param("userId") Long userId,
+    		  @Param("statuses") List<String> statuses
+    		);
+
+
+@EntityGraph(attributePaths = {"booking","item","currency","user"})
+@Query("""
+       select ib
+       from ItemBooking ib
+       join fetch ib.booking b
+       join fetch ib.item i
+       left join fetch ib.currency c
+       left join fetch ib.user u
+       where i.business.id = :businessId
+       order by ib.createdAt desc
+       """)
+List<ItemBooking> findRichByBusinessId(@Param("businessId") Long businessId);
 }

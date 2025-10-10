@@ -23,6 +23,9 @@ public interface ItemBookingService {
     void approveCancel(Long bookingId, Long businessId);
     void rejectCancel(Long bookingId, Long businessId);
     void markRefunded(Long bookingId, Long businessId);
+    void rejectBooking(Long bookingId, Long businessId);
+    void unrejectBooking(Long bookingId, Long businessId);
+
 
     List<ItemBooking> getBookingsByBusiness(Long businessId);
     void markPaid(Long bookingId, Long businessId);
