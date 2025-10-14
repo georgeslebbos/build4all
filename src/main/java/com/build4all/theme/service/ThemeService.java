@@ -1,18 +1,14 @@
 package com.build4all.theme.service;
 
 import com.build4all.theme.domain.Theme;
-
+import com.build4all.theme.dto.CreateThemeRequest;
 import com.build4all.theme.repository.ThemeRepository;
-
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import java.util.NoSuchElementException;
-import java.util.Set;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 @Service
 public class ThemeService {
@@ -20,36 +16,22 @@ public class ThemeService {
     @Autowired
     private ThemeRepository themeRepository;
 
-    // === SUPERADMIN: Global Themes ===
-
-@Transactional
-public void setActiveTheme(Long id) {
-    System.out.println("Deactivating all themes...");
-    themeRepository.deactivateAllThemes();
-
-    Theme theme = themeRepository.findById(id)
-        .orElseThrow(() -> new RuntimeException("Theme not found"));
-    System.out.println("Activating theme: " + theme.getName() + " (id: " + id + ")");
-    theme.setIsActive(true);
-    themeRepository.save(theme);
-
-    // Print all themes and status
-    System.out.println("Themes after activation:");
-    for (Theme t : themeRepository.findAll()) {
-        System.out.println("  Theme " + t.getId() + ": " + t.getName() + " - active: " + t.getIsActive());
+    @Transactional
+    public void setActiveTheme(Long id) {
+        themeRepository.deactivateAllThemes();
+        Theme theme = themeRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Theme not found"));
+        theme.setIsActive(true);
+        themeRepository.save(theme);
     }
-}
 
-
-
-   @Transactional
+    @Transactional
     public Theme saveTheme(Theme theme) {
         if (Boolean.TRUE.equals(theme.getIsActive())) {
             themeRepository.deactivateAllThemes();
         }
         return themeRepository.save(theme);
     }
-
 
     public Optional<Theme> getActiveTheme() {
         return themeRepository.findByIsActiveTrue();
@@ -71,27 +53,21 @@ public void setActiveTheme(Long id) {
         return themeRepository.existsByName(name);
     }
 
-
     @Transactional
     public boolean updateMenuType(Long id, String menuType) {
         Optional<Theme> themeOpt = themeRepository.findById(id);
         if (themeOpt.isEmpty()) return false;
-
         Theme theme = themeOpt.get();
         theme.setMenuType(menuType);
         themeRepository.save(theme);
         return true;
     }
 
-    
-   
-
     @Transactional
     public Theme putThemeMerge(Long id, Theme incoming) {
         Theme theme = themeRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Theme not found."));
 
-        // ===== NAME (optional, but if present: validate & unique)
         if (incoming.getName() != null) {
             String newName = incoming.getName().trim();
             if (newName.isEmpty()) throw new IllegalArgumentException("Name cannot be empty.");
@@ -101,7 +77,6 @@ public void setActiveTheme(Long id) {
             theme.setName(newName);
         }
 
-        // ===== MENU TYPE (optional)
         if (incoming.getMenuType() != null) {
             String mt = incoming.getMenuType().trim().toLowerCase();
             Set<String> allowed = Set.of("bottom", "top", "sandwich");
@@ -111,40 +86,58 @@ public void setActiveTheme(Long id) {
             theme.setMenuType(mt);
         }
 
-        // ===== JSON FIELDS (optional) — validate JSON before saving
-        ObjectMapper mapper = new ObjectMapper();
-
+        // Web values ignored in mobile-first approach: force "{}" if provided
         if (incoming.getValues() != null) {
-            String raw = incoming.getValues().trim();
-            // basic sanity: ensure valid JSON
-            try { mapper.readTree(raw); } 
-            catch (Exception ex) { throw new IllegalArgumentException("values must be valid JSON."); }
-            theme.setValues(raw);
+            theme.setValues("{}");
         }
 
-        if (incoming.getValuesMobile() != null) {
-            String rawMob = incoming.getValuesMobile().trim();
-            if (!rawMob.isEmpty()) {
-                try { mapper.readTree(rawMob); }
-                catch (Exception ex) { throw new IllegalArgumentException("valuesMobile must be valid JSON."); }
-                theme.setValuesMobile(rawMob);
-            } else {
-                // allow clearing? pick behavior. Here: allow null to “unset” mobile overrides.
-                theme.setValuesMobile(null);
-            }
+        // valuesMobile parsed/normalized by Theme.@JsonSetter already; but if string came, validate:
+        if (incoming.getValuesMobile() != null && incoming.getValuesMobile().trim().isEmpty()) {
+            theme.setValuesMobile("{}");
         }
-
-        // ===== DO NOT COPY: isActive, id, created_at, updated_at (JPA sets timestamps)
-        // active toggling goes through setActiveTheme(id)
 
         return themeRepository.save(theme);
     }
-    
+
     @Transactional
     public int deactivateAllThemes() {
         return themeRepository.deactivateAllThemes();
     }
-  
-	
 
+    // CREATE: values="{}"; valuesMobile = JSON from DTO
+    @Transactional
+    public Theme createTheme(CreateThemeRequest req) {
+        if (req.getName() == null || req.getName().trim().isEmpty()) {
+            throw new IllegalArgumentException("Name is required.");
+        }
+
+        String menuType = (req.getMenuType() == null || req.getMenuType().isBlank())
+                ? "bottom" : req.getMenuType().trim().toLowerCase();
+        Set<String> allowed = Set.of("bottom", "top", "sandwich");
+        if (!allowed.contains(menuType)) {
+            throw new IllegalArgumentException("menuType must be one of: bottom | top | sandwich");
+        }
+
+        if (Boolean.TRUE.equals(req.getIsActive())) {
+            themeRepository.deactivateAllThemes();
+        }
+
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            String valuesMobileJson = (req.getValuesMobile() == null)
+                    ? "{}"
+                    : mapper.writeValueAsString(req.getValuesMobile());
+
+            Theme t = new Theme();
+            t.setName(req.getName().trim());
+            t.setMenuType(menuType);
+            t.setValues("{}");                // always placeholder
+            t.setValuesMobile(valuesMobileJson);
+            t.setIsActive(Boolean.TRUE.equals(req.getIsActive()));
+
+            return themeRepository.save(t);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid valuesMobile: " + e.getMessage());
+        }
+    }
 }

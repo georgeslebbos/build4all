@@ -19,16 +19,13 @@ public interface ThemeRepository extends JpaRepository<Theme, Long> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Transactional
     @Query("UPDATE Theme t SET t.isActive = false WHERE t.isActive = true")
-    int deactivateAllThemes(); // <- return affected rows
+    int deactivateAllThemes();
 
     @Modifying
     @Transactional
     @Query("UPDATE Theme t SET t.menuType = :menuType WHERE t.id = :id")
     void updateMenuTypeById(@Param("id") Long id, @Param("menuType") String menuType);
-    // ^ you were missing @Param — without it, Spring Data can’t bind :id / :menuType reliably
 
     @Query("SELECT t.menuType FROM Theme t WHERE t.isActive = true")
     Optional<String> findActiveMenuType();
-
-    
 }

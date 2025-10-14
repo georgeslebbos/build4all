@@ -1,5 +1,6 @@
 package com.build4all.theme.web;
 
+import com.build4all.theme.dto.CreateThemeRequest;
 import com.build4all.theme.dto.ThemeMobileDTO;
 import com.build4all.theme.dto.ThemeResponseDTO;
 import com.build4all.theme.domain.Theme;
@@ -20,195 +21,111 @@ public class ThemeController {
     @Autowired
     private ThemeService themeService;
 
-    // === SUPERADMIN: CRUD THEMES ===
-
     @PutMapping("/{id}/set-active")
     public ResponseEntity<?> setActiveTheme(@PathVariable Long id,
             @RequestBody(required = false) Map<String, Object> ignored) {
-        System.out.println("Endpoint hit: /api/themes/" + id + "/set-active");
         try {
             themeService.setActiveTheme(id);
-            return ResponseEntity.ok(Collections.singletonMap("message", "Theme set as active."));
+            return ResponseEntity.ok(Map.of("message", "Theme set as active."));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Collections.singletonMap("message", "Error setting active theme: " + e.getMessage()));
+                    .body(Map.of("message", "Error setting active theme: " + e.getMessage()));
         }
     }
 
     @GetMapping("/active")
     public ResponseEntity<?> getActiveTheme() {
-        try {
-            Optional<Theme> activeTheme = themeService.getActiveTheme();
-            if (activeTheme.isPresent()) {
-                return ResponseEntity.ok(new ThemeResponseDTO(activeTheme.get()));
-            } else {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body(Collections.singletonMap("message", "No active theme found."));
-            }
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Collections.singletonMap("message", "Error fetching active theme: " + e.getMessage()));
-        }
+        return themeService.getActiveTheme()
+                .<ResponseEntity<?>>map(t -> ResponseEntity.ok(new ThemeResponseDTO(t)))
+                .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(Map.of("message", "No active theme found.")));
     }
-    
+
     @GetMapping("/active/mobile")
     public ResponseEntity<?> getActiveMobileTheme() {
-        try {
-            Optional<Theme> activeTheme = themeService.getActiveTheme();
-            if (activeTheme.isPresent()) {
-                return ResponseEntity.ok(new ThemeMobileDTO(activeTheme.get()));
-            } else {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body(Collections.singletonMap("message", "No active theme found."));
-            }
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Collections.singletonMap("message", "Error fetching active mobile theme: " + e.getMessage()));
-        }
+        return themeService.getActiveTheme()
+                .<ResponseEntity<?>>map(t -> ResponseEntity.ok(new ThemeMobileDTO(t)))
+                .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(Map.of("message", "No active theme found.")));
     }
 
-
-    // Get all themes
     @GetMapping("/all")
     public ResponseEntity<?> getAllThemes() {
+        var dtos = themeService.getAllThemes().stream()
+                .map(ThemeResponseDTO::new).collect(Collectors.toList());
+        return ResponseEntity.ok(dtos);
+    }
+
+    @GetMapping("/all/mobile")
+    public ResponseEntity<?> getAllThemesMobile() {
+        var dtos = themeService.getAllThemes().stream()
+                .map(ThemeMobileDTO::new).collect(Collectors.toList());
+        return ResponseEntity.ok(dtos);
+    }
+
+    // IMPORTANT: create uses DTO (maps) not Theme
+    @PostMapping("/create")
+    public ResponseEntity<?> createTheme(@RequestBody CreateThemeRequest req) {
         try {
-            List<Theme> themes = themeService.getAllThemes();
-            List<ThemeResponseDTO> dtos = themes.stream()
-                    .map(ThemeResponseDTO::new)
-                    .collect(Collectors.toList());
-            return ResponseEntity.ok(dtos);
+            if (req.getName() == null || req.getName().trim().isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("message", "Name is required."));
+            }
+            if (themeService.existsByName(req.getName())) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body(Map.of("message", "A theme with this name already exists."));
+            }
+            Theme saved = themeService.createTheme(req);
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(Map.of("message", "Theme created successfully.", "theme", new ThemeResponseDTO(saved)));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("message", ex.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Collections.singletonMap("message", "Error fetching themes: " + e.getMessage()));
+                    .body(Map.of("message", "Error creating theme: " + e.getMessage()));
         }
     }
 
-    // Create a new theme
-    @PostMapping("/create")
-    public ResponseEntity<?> createTheme(@RequestBody Theme theme) {
-        try {
-            if (themeService.existsByName(theme.getName())) {
-                return ResponseEntity.status(HttpStatus.CONFLICT)
-                        .body(Collections.singletonMap("message", "A theme with this name already exists."));
-            }
-            Theme savedTheme = themeService.saveTheme(theme);
-            Map<String, Object> response = new HashMap<>();
-            response.put("message", "Theme created successfully.");
-            response.put("theme", new ThemeResponseDTO(savedTheme));
-            return ResponseEntity.status(HttpStatus.CREATED).body(response);
-
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Collections.singletonMap("message", "Error creating theme: " + e.getMessage()));
-        }
-    }
-
-    // Delete a theme by ID
     @DeleteMapping("/{id}/delete")
     public ResponseEntity<?> deleteTheme(@PathVariable Long id) {
-        try {
-            Optional<Theme> themeOpt = themeService.getThemeById(id);
-            if (themeOpt.isEmpty()) {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body(Collections.singletonMap("message", "Theme not found."));
-            }
-            themeService.deleteTheme(id);
-            return ResponseEntity.ok(Collections.singletonMap("message", "Theme deleted successfully."));
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Collections.singletonMap("message", "Error deleting theme: " + e.getMessage()));
-        }
+        return themeService.getThemeById(id)
+                .<ResponseEntity<?>>map(t -> { themeService.deleteTheme(id);
+                    return ResponseEntity.ok(Map.of("message", "Theme deleted successfully.")); })
+                .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(Map.of("message", "Theme not found.")));
     }
-    
+
     @PutMapping("/{id}/set-menu-type")
-    public ResponseEntity<?> setMenuType(
-            @PathVariable Long id,
-            @RequestBody Map<String, String> body
-    ) {
+    public ResponseEntity<?> setMenuType(@PathVariable Long id, @RequestBody Map<String, String> body) {
         try {
             String newType = body.get("menuType");
-            Optional<Theme> themeOpt = themeService.getThemeById(id);
-
-            if (themeOpt.isEmpty()) {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body(Collections.singletonMap("message", "Theme not found."));
-            }
-
-            Theme theme = themeOpt.get();
+            var opt = themeService.getThemeById(id);
+            if (opt.isEmpty()) return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message","Theme not found."));
+            Theme theme = opt.get();
             theme.setMenuType(newType);
             themeService.saveTheme(theme);
-
-            return ResponseEntity.ok(Collections.singletonMap("message", "Menu type updated to '" + newType + "'"));
+            return ResponseEntity.ok(Map.of("message", "Menu type updated to '" + newType + "'"));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Collections.singletonMap("message", e.getMessage()));
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Collections.singletonMap("message", "Error updating menu type: " + e.getMessage()));
+                    .body(Map.of("message", "Error updating menu type: " + e.getMessage()));
         }
     }
 
-
-    // Get a single theme by ID
-    @GetMapping("/{id}")
-    public ResponseEntity<?> getThemeById(@PathVariable Long id) {
-        try {
-            Optional<Theme> theme = themeService.getThemeById(id);
-            if (theme.isPresent()) {
-                return ResponseEntity.ok(new ThemeResponseDTO(theme.get()));
-            } else {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body(Collections.singletonMap("message", "Theme not found."));
-            }
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Collections.singletonMap("message", "Error fetching theme: " + e.getMessage()));
-        }
-    }
-
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<?> handleAllExceptions(Exception e) {
-        e.printStackTrace();
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(Collections.singletonMap("message", "Server error: " + e.getMessage()));
-    }
-    
- 
+    // Update stays binding to Theme (string fields). Our @JsonSetter now handles object-or-string.
     @PutMapping("/{id}")
     @Transactional
-    public ResponseEntity<?> updateTheme(
-            @PathVariable Long id,
-            @RequestBody Theme incoming
-    ) {
+    public ResponseEntity<?> updateTheme(@PathVariable Long id, @RequestBody Theme incoming) {
         try {
             Theme updated = themeService.putThemeMerge(id, incoming);
-            return ResponseEntity.ok(new ThemeResponseDTO(updated)); // keep your response DTO
+            return ResponseEntity.ok(new ThemeResponseDTO(updated));
         } catch (NoSuchElementException ex) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Collections.singletonMap("message", ex.getMessage()));
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", ex.getMessage()));
         } catch (IllegalArgumentException ex) {
-            return ResponseEntity.badRequest()
-                    .body(Collections.singletonMap("message", ex.getMessage()));
+            return ResponseEntity.badRequest().body(Map.of("message", ex.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Collections.singletonMap("message", "Error updating theme: " + e.getMessage()));
+                    .body(Map.of("message", "Error updating theme: " + e.getMessage()));
         }
     }
-
- // ThemeController.java
-    @PutMapping("/deactivate-all")
-    public ResponseEntity<?> deactivateAllThemes() {
-        try {
-            int updated = themeService.deactivateAllThemes();
-            Map<String, Object> resp = new HashMap<>();
-            resp.put("message", "All themes set to inactive.");
-            resp.put("updatedCount", updated);
-            return ResponseEntity.ok(resp);
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Collections.singletonMap("message",
-                            "Error deactivating themes: " + e.getMessage()));
-        }
-    }
-
 }

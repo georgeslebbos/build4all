@@ -17,30 +17,18 @@ public class ThemeMobileDTO {
         this.id = theme.getId();
         this.name = theme.getName();
         this.menuType = theme.getMenuType();
-
         try {
             ObjectMapper mapper = new ObjectMapper();
             this.valuesMobile = mapper.readValue(
                 theme.getValuesMobile(), new TypeReference<Map<String, Object>>() {}
             );
         } catch (Exception e) {
-            this.valuesMobile = Collections.emptyMap(); // fallback if parsing fails
+            this.valuesMobile = Collections.emptyMap();
         }
     }
 
-    public Long getId() {
-        return id;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public String getMenuType() {
-        return menuType;
-    }
-
-    public Map<String, Object> getValuesMobile() {
-        return valuesMobile;
-    }
+    public Long getId() { return id; }
+    public String getName() { return name; }
+    public String getMenuType() { return menuType; }
+    public Map<String, Object> getValuesMobile() { return valuesMobile; }
 }
