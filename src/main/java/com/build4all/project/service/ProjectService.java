@@ -1,5 +1,10 @@
 package com.build4all.project.service;
 
+import com.build4all.admin.domain.AdminUser;
+import com.build4all.admin.domain.AdminUserProject;
+import com.build4all.admin.domain.AdminUserProjectId;
+import com.build4all.admin.repository.AdminUsersRepository;
+import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.project.domain.Project;
 import com.build4all.project.repository.ProjectRepository;
 import org.springframework.stereotype.Service;
@@ -10,16 +15,20 @@ import java.util.List;
 @Service
 public class ProjectService {
     private final ProjectRepository repo;
+    private final AdminUsersRepository adminRepo;
+    private final AdminUserProjectRepository linkRepo;
 
-    public ProjectService(ProjectRepository repo) {
+    public ProjectService(ProjectRepository repo,
+                          AdminUsersRepository adminRepo,
+                          AdminUserProjectRepository linkRepo) {
         this.repo = repo;
+        this.adminRepo = adminRepo;
+        this.linkRepo = linkRepo;
     }
 
     public List<Project> findAll() { return repo.findAll(); }
 
-    public Project findById(Long id) {
-        return repo.findById(id).orElse(null);
-    }
+    public Project findById(Long id) { return repo.findById(id).orElse(null); }
 
     @Transactional
     public Project create(String name, String description, Boolean active) {
@@ -50,6 +59,45 @@ public class ProjectService {
 
     @Transactional
     public void delete(Long id) {
+        // Clean links (composite key repo doesn’t have deleteByProject_Id — do it safely)
+        var links = linkRepo.findByProject_Id(id);
+        if (!links.isEmpty()) {
+            linkRepo.deleteAll(links);
+        }
         repo.deleteById(id);
+    }
+
+    // ---------- OWNER helpers ----------
+
+    @Transactional
+    public Project save(Project p) { return repo.save(p); }
+
+    /** Link owner/admin (adminId) to project (projectId). Idempotent. */
+    @Transactional
+    public void linkProjectToOwner(Long adminId, Long projectId) {
+        AdminUser owner = adminRepo.findById(adminId)
+                .orElseThrow(() -> new IllegalArgumentException("Owner not found: " + adminId));
+        Project project = repo.findById(projectId)
+                .orElseThrow(() -> new IllegalArgumentException("Project not found: " + projectId));
+
+        if (!linkRepo.existsById_AdminIdAndId_ProjectId(adminId, projectId)) {
+            AdminUserProject link = new AdminUserProject(owner, project, null, null, null);
+            linkRepo.save(link);
+        }
+    }
+
+    /** Projects linked to a given AdminUser (owner/admin) */
+    @Transactional(readOnly = true)
+    public List<Project> findByOwnerAdminId(Long adminId) {
+        return linkRepo.findByAdmin_AdminId(adminId)
+                .stream()
+                .map(AdminUserProject::getProject)
+                .toList();
+    }
+
+    /** Guard: is this admin linked to the project? (for owner update restrictions) */
+    @Transactional(readOnly = true)
+    public boolean isOwnerLinkedToProject(Long adminId, Long projectId) {
+        return linkRepo.existsById_AdminIdAndId_ProjectId(adminId, projectId);
     }
 }

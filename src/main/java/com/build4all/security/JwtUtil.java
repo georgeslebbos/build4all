@@ -13,6 +13,8 @@ import com.build4all.user.domain.Users;
 
 import java.security.Key;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 
 @Component
 public class JwtUtil {
@@ -77,31 +79,16 @@ public class JwtUtil {
                 .compact();
     }
 
-    public String extractUsername(String token) {
-        return Jwts.parserBuilder()
-                .setSigningKey(key)
-                .build()
-                .parseClaimsJws(token)
-                .getBody()
-                .getSubject();
-    }
-
-    public boolean isBusinessToken(String token) {
-        try {
-            String role = extractRole(token);
-            return "BUSINESS".equalsIgnoreCase(role);
-        } catch (Exception e) {
-            return false;
-        }
-    }
+   
 
 
     public String extractRole(String token) {
         try {
+            String jwt = normalize(token);
             return Jwts.parserBuilder()
                     .setSigningKey(key)
                     .build()
-                    .parseClaimsJws(token.trim())
+                    .parseClaimsJws(jwt)
                     .getBody()
                     .get("role", String.class);
         } catch (Exception e) {
@@ -110,18 +97,43 @@ public class JwtUtil {
     }
 
     public Long extractId(String token) {
+        String jwt = normalize(token);
         return Jwts.parserBuilder()
                 .setSigningKey(key)
                 .build()
-                .parseClaimsJws(token)
+                .parseClaimsJws(jwt)
                 .getBody()
                 .get("id", Long.class);
+    }
+
+    // Optional alias used by controllers/services for clarity
+    public Long extractAdminId(String token) {
+        return extractId(token);
+    }
+
+    public String extractUsername(String token) {
+        String jwt = normalize(token);
+        return Jwts.parserBuilder()
+                .setSigningKey(key)
+                .build()
+                .parseClaimsJws(jwt)
+                .getBody()
+                .getSubject();
+    }
+
+    public boolean isBusinessToken(String token) {
+        try {
+            String role = extractRole(token);
+            return role != null && "BUSINESS".equalsIgnoreCase(role);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     public boolean isUserToken(String token) {
         try {
             String role = extractRole(token);
-            return "USER".equalsIgnoreCase(role);
+            return role != null && "USER".equalsIgnoreCase(role);
         } catch (Exception e) {
             return false;
         }
@@ -130,7 +142,7 @@ public class JwtUtil {
     public boolean isAdminToken(String token) {
         try {
             String role = extractRole(token);
-            return "SUPER_ADMIN".equals(role) || "MANAGER".equals(role);
+            return role != null && ("SUPER_ADMIN".equalsIgnoreCase(role) || "MANAGER".equalsIgnoreCase(role));
         } catch (Exception e) {
             return false;
         }
@@ -139,17 +151,47 @@ public class JwtUtil {
     public boolean isSuperAdmin(String token) {
         try {
             String role = extractRole(token);
-            return "SUPER_ADMIN".equals(role);
+            return role != null && "SUPER_ADMIN".equalsIgnoreCase(role);
         } catch (Exception e) {
             return false;
         }
     }
 
+    // Convenience if you ever need it
+    public boolean isManagerToken(String token) {
+        try {
+            String role = extractRole(token);
+            return role != null && "MANAGER".equalsIgnoreCase(role);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public boolean isOwnerToken(String token) {
+        try {
+            String role = extractRole(token);
+            return role != null && "OWNER".equalsIgnoreCase(role);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public boolean isAdminOrOwner(String token) {
+        return isAdminToken(token) || isOwnerToken(token);
+    }
+
+    public Long extractBusinessId(String token) {
+        String jwt = normalize(token);
+        if (!isBusinessToken(jwt)) {
+            throw new RuntimeException("Invalid token: Not a business token");
+        }
+        return extractId(jwt);
+    }
 
     public String extractTokenFromRequest(HttpServletRequest request) {
         String bearerToken = request.getHeader("Authorization");
-        if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
-            return bearerToken.substring(7);
+        if (bearerToken != null && bearerToken.toLowerCase().startsWith("bearer ")) {
+            return bearerToken.substring(7).trim();
         }
         throw new RuntimeException("Authorization token missing or invalid");
     }
@@ -166,18 +208,49 @@ public class JwtUtil {
     }
     
     
-    public Long extractBusinessId(String token) {
-        String jwt = token.replace("Bearer", "").trim();
-        if (!isBusinessToken(jwt)) {
-            throw new RuntimeException("Invalid token: Not a business token");
-        }
-        return extractId(jwt);
+    
+
+
+    private String normalize(String token) {
+        if (token == null) return null;
+        // strip optional "Bearer " (case-insensitive) and trim
+        return token.replaceFirst("(?i)^Bearer\\s+", "").trim();
     }
 
 
-    
+ // ==== Owner Registration Token (short-lived) ====
 
-   
+    public String generateOwnerRegistrationToken(String email, String passwordHash, long ttlMillis) {
+        long now = System.currentTimeMillis();
+        return Jwts.builder()
+                .setSubject(email)                      // subject = email
+                .claim("type", "OWNER_REG")             // marker for registration
+                .claim("email", email)
+                .claim("passwordHash", passwordHash)    // already encoded!
+                .setIssuedAt(new Date(now))
+                .setExpiration(new Date(now + ttlMillis))
+                .signWith(key, SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    public Map<String, Object> parseOwnerRegistrationToken(String token) {
+        var claims = Jwts.parserBuilder()
+                .setSigningKey(key)
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+
+        String type = (String) claims.get("type");
+        if (!"OWNER_REG".equals(type)) {
+            throw new RuntimeException("Invalid registration token type");
+        }
+        Map<String, Object> out = new HashMap<>();
+        out.put("email", claims.get("email"));
+        out.put("passwordHash", claims.get("passwordHash"));
+        out.put("subject", claims.getSubject());
+        return out;
+    }
+
 
 
 }
