@@ -1,15 +1,17 @@
 package com.build4all.social.domain;
 
+import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.user.domain.Users;
 import com.fasterxml.jackson.annotation.JsonIgnore;
-
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import java.util.*;
-
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 
+/**
+ * Social post. Optionally scoped to an owner-project link (aup_id) for multi-tenant isolation.
+ */
 @Entity
 @Table(name = "Posts")
 public class Posts {
@@ -24,9 +26,8 @@ public class Posts {
     @OnDelete(action = OnDeleteAction.CASCADE)
     private Users user;
 
-    @Column(columnDefinition = "TEXT", nullable = true)
+    @Column(columnDefinition = "TEXT")
     private String content;
-
 
     @Column(name = "image_url")
     private String imageUrl;
@@ -47,7 +48,13 @@ public class Posts {
     @JoinColumn(name = "visibility_id", nullable = false)
     private PostVisibility visibility;
 
-    // Users who liked the post
+    /** OPTIONAL: owner scoping (admin_user_projects.aup_id). Backward compatible if null. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "owner_project_link_id")
+    @JsonIgnore
+    private AdminUserProject ownerProject;
+
+    /** Users who liked the post */
     @ManyToMany
     @JoinTable(
         name = "post_likes",
@@ -57,7 +64,7 @@ public class Posts {
     @JsonIgnore
     private Set<Users> likedUsers = new HashSet<>();
 
-    // Comments linked to this post
+    /** Comments linked to this post */
     @OneToMany(mappedBy = "post", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonIgnore
     private List<Comments> comments = new ArrayList<>();
@@ -82,104 +89,44 @@ public class Posts {
         this.updatedAt = LocalDateTime.now();
     }
 
-    // === Getters & Setters ===
+    // ---- Getters & Setters ----
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
 
-    public Long getId() {
-        return id;
-    }
+    public Users getUser() { return user; }
+    public void setUser(Users user) { this.user = user; }
 
-    public void setId(Long id) {
-        this.id = id;
-    }
+    public String getContent() { return content; }
+    public void setContent(String content) { this.content = content; }
 
-    public Users getUser() {
-        return user;
-    }
+    public String getImageUrl() { return imageUrl; }
+    public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
 
-    public void setUser(Users user) {
-        this.user = user;
-    }
+    public String getHashtags() { return hashtags; }
+    public void setHashtags(String hashtags) { this.hashtags = hashtags; }
 
-    public String getContent() {
-        return content;
-    }
+    public LocalDateTime getPostDatetime() { return postDatetime; }
+    public void setPostDatetime(LocalDateTime postDatetime) { this.postDatetime = postDatetime; }
 
-    public void setContent(String content) {
-        this.content = content;
-    }
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 
-    public String getImageUrl() {
-        return imageUrl;
-    }
+    public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 
-    public void setImageUrl(String imageUrl) {
-        this.imageUrl = imageUrl;
-    }
+    public PostVisibility getVisibility() { return visibility; }
+    public void setVisibility(PostVisibility visibility) { this.visibility = visibility; }
 
-    public String getHashtags() {
-        return hashtags;
-    }
+    public AdminUserProject getOwnerProject() { return ownerProject; }
+    public void setOwnerProject(AdminUserProject ownerProject) { this.ownerProject = ownerProject; }
 
-    public void setHashtags(String hashtags) {
-        this.hashtags = hashtags;
-    }
+    public Set<Users> getLikedUsers() { return likedUsers; }
+    public void setLikedUsers(Set<Users> likedUsers) { this.likedUsers = likedUsers; }
 
-    public LocalDateTime getPostDatetime() {
-        return postDatetime;
-    }
+    public List<Comments> getComments() { return comments; }
+    public void setComments(List<Comments> comments) { this.comments = comments; }
 
-    public void setPostDatetime(LocalDateTime postDatetime) {
-        this.postDatetime = postDatetime;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
-
-    public Set<Users> getLikedUsers() {
-        return likedUsers;
-    }
-
-    public void setLikedUsers(Set<Users> likedUsers) {
-        this.likedUsers = likedUsers;
-    }
-
-    public List<Comments> getComments() {
-        return comments;
-    }
-
-    public void setComments(List<Comments> comments) {
-        this.comments = comments;
-    }
-
-    // Count total likes
-    public int getLikeCount() {
-        return likedUsers != null ? likedUsers.size() : 0;
-    }
-
-    // Count total comments
-    public int getCommentCount() {
-        return comments != null ? comments.size() : 0;
-    }
-
-    public PostVisibility getVisibility() {
-        return visibility;
-    }
-
-    public void setVisibility(PostVisibility visibility) {
-        this.visibility = visibility;
-    }
-
+    // Convenience counters
+    public int getLikeCount() { return likedUsers != null ? likedUsers.size() : 0; }
+    public int getCommentCount() { return comments != null ? comments.size() : 0; }
 }

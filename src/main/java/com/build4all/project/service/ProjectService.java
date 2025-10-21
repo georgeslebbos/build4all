@@ -2,7 +2,6 @@ package com.build4all.project.service;
 
 import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.domain.AdminUserProject;
-import com.build4all.admin.domain.AdminUserProjectId;
 import com.build4all.admin.repository.AdminUsersRepository;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.project.domain.Project;
@@ -14,6 +13,7 @@ import java.util.List;
 
 @Service
 public class ProjectService {
+
     private final ProjectRepository repo;
     private final AdminUsersRepository adminRepo;
     private final AdminUserProjectRepository linkRepo;
@@ -59,7 +59,7 @@ public class ProjectService {
 
     @Transactional
     public void delete(Long id) {
-        // Clean links (composite key repo doesn’t have deleteByProject_Id — do it safely)
+        // Clean owner links for this project, then delete the project
         var links = linkRepo.findByProject_Id(id);
         if (!links.isEmpty()) {
             linkRepo.deleteAll(links);
@@ -80,13 +80,15 @@ public class ProjectService {
         Project project = repo.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("Project not found: " + projectId));
 
-        if (!linkRepo.existsById_AdminIdAndId_ProjectId(adminId, projectId)) {
+        boolean exists = linkRepo.existsByAdmin_AdminIdAndProject_Id(adminId, projectId);
+        if (!exists) {
             AdminUserProject link = new AdminUserProject(owner, project, null, null, null);
+            link.setStatus("ACTIVE");
             linkRepo.save(link);
         }
     }
 
-    /** Projects linked to a given AdminUser (owner/admin) */
+    /** Projects linked to a given AdminUser (owner/admin). */
     @Transactional(readOnly = true)
     public List<Project> findByOwnerAdminId(Long adminId) {
         return linkRepo.findByAdmin_AdminId(adminId)
@@ -95,9 +97,9 @@ public class ProjectService {
                 .toList();
     }
 
-    /** Guard: is this admin linked to the project? (for owner update restrictions) */
+    /** Guard: is this admin linked to the project? */
     @Transactional(readOnly = true)
     public boolean isOwnerLinkedToProject(Long adminId, Long projectId) {
-        return linkRepo.existsById_AdminIdAndId_ProjectId(adminId, projectId);
+        return linkRepo.existsByAdmin_AdminIdAndProject_Id(adminId, projectId);
     }
 }

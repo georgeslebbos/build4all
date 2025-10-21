@@ -10,6 +10,7 @@ import java.util.Set;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 @Entity
@@ -60,8 +61,10 @@ public class AdminUser {
     private LocalDateTime updatedAt;
 
     /** NEW: one-to-many to association */
+    @JsonIgnore
     @OneToMany(mappedBy = "admin", cascade = CascadeType.ALL, orphanRemoval = true)
     private Set<AdminUserProject> projectLinks = new HashSet<>();
+    
 
     public AdminUser() {}
 

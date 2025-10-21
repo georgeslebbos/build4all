@@ -16,6 +16,28 @@ import java.util.Optional;
 @Repository
 public interface ItemRepository extends JpaRepository<Item, Long> {
 
+    /* Owner scoping via the link (adminId + projectId) */
+    @Query("""
+           SELECT i
+           FROM Item i
+           WHERE i.ownerProject.admin.adminId = :adminId
+             AND i.ownerProject.project.id = :projectId
+           """)
+    List<Item> findAllByOwner(@Param("adminId") Long adminId,
+                              @Param("projectId") Long projectId);
+
+    @Query("""
+           SELECT i
+           FROM Item i
+           WHERE i.ownerProject.admin.adminId = :adminId
+             AND i.ownerProject.project.id = :projectId
+             AND i.business.id = :businessId
+           """)
+    List<Item> findByOwnerAndBusiness(@Param("adminId") Long adminId,
+                                      @Param("projectId") Long projectId,
+                                      @Param("businessId") Long businessId);
+
+    /* existing */
     @Query("SELECT i FROM Item i WHERE i.business.id = :businessId")
     List<Item> findByBusinessId(@Param("businessId") Long businessId);
 
@@ -39,7 +61,6 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
            """)
     List<Item> findAllPublicActiveBusinessItems();
 
-    // 🔧 FIXED: count uses b.id (ItemBooking PK), not booking_id
     @Query(value = """
             SELECT i.item_name
             FROM item_bookings b
@@ -52,20 +73,19 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
     String findTopItemNameByBusinessId(@Param("businessId") Long businessId);
 
     @Query("""
-    	       SELECT new com.build4all.catalog.dto.AdminItemDTO(
-    	           i.id,
-    	           i.name,
-    	           b.businessName,
-    	           i.description
-    	       )
-    	       FROM Item i
-    	       JOIN i.business b
-    	       WHERE b.status.name = 'ACTIVE'
-    	         AND b.isPublicProfile = true
-    	       """)
-    	List<AdminItemDTO> findAllItemsWithBusinessInfo();
-    
-    // Popular items by number of line bookings (safe to keep here; uses base Item)
+           SELECT new com.build4all.catalog.dto.AdminItemDTO(
+               i.id,
+               i.name,
+               b.businessName,
+               i.description
+           )
+           FROM Item i
+           JOIN i.business b
+           WHERE b.status.name = 'ACTIVE'
+             AND b.isPublicProfile = true
+           """)
+    List<AdminItemDTO> findAllItemsWithBusinessInfo();
+
     @Query("""
            SELECT i, COUNT(ib.id) AS bookingCount
            FROM com.build4all.booking.domain.ItemBooking ib

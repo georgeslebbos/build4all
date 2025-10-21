@@ -8,18 +8,18 @@ import com.build4all.social.service.PostService;
 import com.build4all.user.service.UserService;
 import com.build4all.social.repository.PostVisibilityRepository;
 import com.build4all.security.JwtUtil;
-
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
-
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-
 import java.security.Principal;
 import java.util.List;
 
+/**
+ * Social posts REST endpoints. Backward-compatible with optional owner scoping.
+ */
 @RestController
 @RequestMapping("/api/posts")
 public class PostsController {
@@ -27,9 +27,12 @@ public class PostsController {
     private final PostService postsService;
     private final UserService usersService;
     private final PostVisibilityRepository postVisibilityRepository;
-    private final JwtUtil jwtUtil;  // Your JWT validation utility
+    private final JwtUtil jwtUtil;
 
-    public PostsController(PostService postsService, UserService usersService, PostVisibilityRepository postVisibilityRepository, JwtUtil jwtUtil) {
+    public PostsController(PostService postsService,
+                           UserService usersService,
+                           PostVisibilityRepository postVisibilityRepository,
+                           JwtUtil jwtUtil) {
         this.postsService = postsService;
         this.usersService = usersService;
         this.postVisibilityRepository = postVisibilityRepository;
@@ -40,16 +43,17 @@ public class PostsController {
         @ApiResponse(responseCode = "200", description = "Successful"),
         @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
         @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-        @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-        @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-        @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-        @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+        @ApiResponse(responseCode = "402", description = "Payment Required – Reserved"),
+        @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission"),
+        @ApiResponse(responseCode = "404", description = "Not Found"),
+        @ApiResponse(responseCode = "500", description = "Internal Server Error")
     })
     @PostMapping(consumes = {"multipart/form-data"})
     public ResponseEntity<?> createPost(@RequestParam(required = false) String content,
                                         @RequestParam(required = false) MultipartFile image,
                                         @RequestParam(required = false) String hashtags,
                                         @RequestParam(required = false, defaultValue = "PUBLIC") String visibility,
+                                        @RequestParam(required = false) Long aupId, // OPTIONAL owner scope
                                         Principal principal,
                                         @RequestHeader("Authorization") String authHeader) {
 
@@ -66,31 +70,24 @@ public class PostsController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Visibility setting error");
         }
 
-        Posts created = postsService.createPost(content, image, hashtags, user, postVisibility);
-
+        Posts created = postsService.createPost(content, image, hashtags, user, postVisibility, aupId);
         return ResponseEntity.ok(new PostDto(created, user.getId()));
     }
 
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-        @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-        @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-        @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-        @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+        @ApiResponse(responseCode = "400", description = "Bad Request"),
+        @ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @ApiResponse(responseCode = "500", description = "Internal Server Error")
     })
     @GetMapping
     public ResponseEntity<List<PostDto>> getAllPosts(Principal principal,
                                                      @RequestHeader("Authorization") String authHeader) {
-
-        // Token validation
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
         if (tokenCheck != null) return ResponseEntity.status(tokenCheck.getStatusCode()).build();
 
-        if (principal == null) {
-            return ResponseEntity.status(401).build();
-        }
+        if (principal == null) return ResponseEntity.status(401).build();
+
         try {
             Users user = usersService.getUserByEmaill(principal.getName());
             List<PostDto> postDtos = postsService.getAllPostDtos(user.getId());
@@ -101,21 +98,30 @@ public class PostsController {
         }
     }
 
+    /** NEW: owner-scoped feed (optional). */
+    @GetMapping("/by-owner")
+    public ResponseEntity<?> getOwnerFeed(@RequestParam Long aupId,
+                                          Principal principal,
+                                          @RequestHeader("Authorization") String authHeader) {
+        ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
+        if (tokenCheck != null) return ResponseEntity.status(tokenCheck.getStatusCode()).build();
+
+        if (principal == null) return ResponseEntity.status(401).build();
+
+        Users user = usersService.getUserByEmaill(principal.getName());
+        return ResponseEntity.ok(postsService.getOwnerFeed(aupId, user.getId()));
+    }
+
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-        @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-        @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-        @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-        @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+        @ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @ApiResponse(responseCode = "403", description = "Forbidden"),
+        @ApiResponse(responseCode = "404", description = "Not Found")
     })
     @DeleteMapping("/{postId}")
     public ResponseEntity<String> deletePost(@PathVariable Long postId,
                                              Principal principal,
                                              @RequestHeader("Authorization") String authHeader) {
-
-        // Token validation
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
         if (tokenCheck != null) return tokenCheck;
 
@@ -126,18 +132,12 @@ public class PostsController {
 
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-        @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-        @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-        @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-        @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+        @ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @ApiResponse(responseCode = "403", description = "Forbidden")
     })
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<PostDto>> getPostsByUser(@PathVariable Long userId,
-                                                       @RequestHeader("Authorization") String authHeader) {
-
-        // Token validation
+                                                        @RequestHeader("Authorization") String authHeader) {
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
         if (tokenCheck != null) return ResponseEntity.status(tokenCheck.getStatusCode()).build();
 
@@ -147,19 +147,13 @@ public class PostsController {
 
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-        @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-        @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-        @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-        @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+        @ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @ApiResponse(responseCode = "403", description = "Forbidden")
     })
     @DeleteMapping("/{postId}/user/{userId}")
     public ResponseEntity<?> deletePostByUser(@PathVariable Long postId,
                                               @PathVariable Long userId,
                                               @RequestHeader("Authorization") String authHeader) {
-
-        // Token validation
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
         if (tokenCheck != null) return tokenCheck;
 
@@ -171,19 +165,15 @@ public class PostsController {
         }
     }
 
-
-    // Helper method for token validation to avoid repeating code
+    // Shared helper to validate Bearer token
     private ResponseEntity<String> validateUserToken(String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Missing or invalid Authorization header");
         }
-
         String token = authHeader.substring(7);
-
-        if (!jwtUtil.isUserToken(token)) {  // Your JWT validation method to check if token belongs to a user
+        if (!jwtUtil.isUserToken(token)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid user token");
         }
-
-        return null; // token is valid
+        return null; // valid
     }
 }

@@ -32,6 +32,8 @@ public class Project {
     @OneToMany(mappedBy = "project", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonIgnore
     private Set<AdminUserProject> adminLinks = new HashSet<>();
+    
+   
 
     @PreUpdate
     public void touch() { this.updatedAt = LocalDateTime.now(); }

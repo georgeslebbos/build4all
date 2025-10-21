@@ -4,8 +4,7 @@ import com.build4all.social.domain.Posts;
 import com.build4all.user.domain.Users;
 
 /**
- * Data Transfer Object for Posts.
- * Used to send clean and formatted data to the frontend.
+ * DTO for Posts to avoid exposing deep entity graphs to clients.
  */
 public class PostDto {
     public Long id;
@@ -20,24 +19,22 @@ public class PostDto {
     public String firstName;
     public String lastName;
     public String profilePictureUrl;
-
-    // ✅ Correct field for visibility (e.g., "PUBLIC" or "FRIENDS_ONLY")
-    public String visibility;
+    public String visibility; // e.g., "PUBLIC" or "FRIENDS_ONLY"
 
     public PostDto(Posts post, Long currentUserId) {
         this.id = post.getId();
         this.content = post.getContent();
         this.hashtags = post.getHashtags();
         this.imageUrl = post.getImageUrl();
-        this.postDatetime = post.getPostDatetime().toString();
+        this.postDatetime = post.getPostDatetime() != null ? post.getPostDatetime().toString() : null;
+
         this.likeCount = post.getLikedUsers() != null ? post.getLikedUsers().size() : 0;
         this.commentCount = post.getComments() != null ? post.getComments().size() : 0;
 
-        this.isLiked = post.getLikedUsers().stream()
-                .anyMatch(user -> user.getId().equals(currentUserId));
+        this.isLiked = post.getLikedUsers() != null &&
+                post.getLikedUsers().stream().anyMatch(u -> u.getId().equals(currentUserId));
 
-        // ✅ Fixed: Read visibility name from entity
-        this.visibility = post.getVisibility() != null
+        this.visibility = (post.getVisibility() != null && post.getVisibility().getName() != null)
                 ? post.getVisibility().getName()
                 : "PUBLIC";
 

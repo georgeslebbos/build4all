@@ -1,5 +1,6 @@
 package com.build4all.catalog.domain;
 
+import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.business.domain.Businesses;
 import jakarta.persistence.*;
 import org.hibernate.annotations.OnDelete;
@@ -8,9 +9,6 @@ import org.hibernate.annotations.OnDeleteAction;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
-/**
- * Abstract Item class
- */
 @Entity
 @Table(name = "items")
 @Inheritance(strategy = InheritanceType.JOINED)
@@ -21,9 +19,15 @@ public abstract class Item {
     @Column(name = "item_id")
     private Long id;
 
+    // NEW: single FK to admin_user_projects (aup_id)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "owner_project_link_id")
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private AdminUserProject ownerProject;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "business_id", nullable = false)
-    @com.fasterxml.jackson.annotation.JsonIgnore   // ⬅️ stop Jackson from touching the lazy proxy
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private Businesses business;
 
     @Column(name = "item_name", nullable = false)
@@ -32,19 +36,17 @@ public abstract class Item {
     @Column(columnDefinition = "TEXT")
     private String description;
 
- // Item.java
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "item_type_id", nullable = false)
-    @com.fasterxml.jackson.annotation.JsonIgnore     // ⬅️ stop Jackson from touching ItemType proxy
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private ItemType itemType;
 
-
+    @Column(name = "price")
     private BigDecimal price;
 
-    @Column(nullable = false)
+    @Column(name = "status", nullable = false)
     private String status = "Upcoming";
-    
-    // 👇 add this field to match repository method
+
     @Column(name = "stock", nullable = false)
     private Integer stock = 0;
 
@@ -63,18 +65,16 @@ public abstract class Item {
     private LocalDateTime updatedAt;
 
     @PrePersist
-    protected void onCreate() {
-        this.createdAt = this.updatedAt = LocalDateTime.now();
-    }
+    protected void onCreate() { this.createdAt = this.updatedAt = LocalDateTime.now(); }
 
     @PreUpdate
-    protected void onUpdate() {
-        this.updatedAt = LocalDateTime.now();
-    }
+    protected void onUpdate() { this.updatedAt = LocalDateTime.now(); }
 
-    // Getters and Setters
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+
+    public AdminUserProject getOwnerProject() { return ownerProject; }
+    public void setOwnerProject(AdminUserProject ownerProject) { this.ownerProject = ownerProject; }
 
     public Businesses getBusiness() { return business; }
     public void setBusiness(Businesses business) { this.business = business; }
@@ -93,6 +93,9 @@ public abstract class Item {
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+
+    public Integer getStock() { return stock; }
+    public void setStock(Integer stock) { this.stock = stock; }
 
     public String getImageUrl() { return imageUrl; }
     public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }

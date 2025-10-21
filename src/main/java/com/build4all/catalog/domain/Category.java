@@ -1,5 +1,6 @@
 package com.build4all.catalog.domain;
 
+import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.project.domain.Project;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
@@ -10,12 +11,18 @@ public class Category {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "category_id") // exact column name as requested
+    @Column(name = "category_id")
     private Long id;
 
-    @ManyToOne(optional = false)
+    /** Project-level scope (shared across owners using this project) */
+    @ManyToOne(optional = false, fetch = FetchType.LAZY)
     @JoinColumn(name = "project_id", nullable = false)
     private Project project;
+
+    /** Optional per-owner filter (single-column FK to admin_user_projects.aup_id) */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "owner_project_link_id") // nullable: only used if you want owner-specific categories
+    private AdminUserProject ownerProject;
 
     @Column(name = "icon_name")
     private String iconName;
@@ -28,8 +35,8 @@ public class Category {
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
-    
-    @Column(name = "updated_at", updatable = false)
+
+    @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
     public Category() {}
@@ -41,20 +48,28 @@ public class Category {
         this.iconLibrary = iconLibrary;
     }
 
-
     @PrePersist
     protected void onCreate() {
         if (this.createdAt == null) {
             this.createdAt = LocalDateTime.now();
+            this.updatedAt = this.createdAt;
         }
     }
 
-    // Getters & Setters
+    @PreUpdate
+    protected void onUpdate() {
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    /* Getters & Setters */
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
-    
+
     public Project getProject() { return project; }
     public void setProject(Project project) { this.project = project; }
+
+    public AdminUserProject getOwnerProject() { return ownerProject; }
+    public void setOwnerProject(AdminUserProject ownerProject) { this.ownerProject = ownerProject; }
 
     public String getIconName() { return iconName; }
     public void setIconName(String iconName) { this.iconName = iconName; }
@@ -68,12 +83,6 @@ public class Category {
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 
-	public LocalDateTime getUpdatedAt() {
-		return updatedAt;
-	}
-
-	public void setUpdatedAt(LocalDateTime updatedAt) {
-		this.updatedAt = updatedAt;
-	}
-    
+    public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

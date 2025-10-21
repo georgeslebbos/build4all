@@ -20,4 +20,12 @@ public class CategoryService {
     public Optional<Category> findById(Long id) { return repo.findById(id); }
     public Category save(Category category) { return repo.save(category); }
     public void delete(Long id) { repo.deleteById(id); }
+
+    public List<Category> listByProject(Long projectId) {
+        return repo.findByProject_IdOrderByNameAsc(projectId);
+    }
+
+    public List<Category> listByOwnerLink(Long aupId) {
+        return repo.findByOwnerProject_IdOrderByNameAsc(aupId);
+    }
 }

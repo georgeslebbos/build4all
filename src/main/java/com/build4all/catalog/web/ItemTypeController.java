@@ -1,5 +1,7 @@
 package com.build4all.catalog.web;
 
+import com.build4all.admin.domain.AdminUserProject;
+import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.catalog.dto.ItemTypeDTO;
 import com.build4all.catalog.domain.Category;
 import com.build4all.catalog.domain.ItemType;
@@ -14,42 +16,44 @@ import java.net.URI;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * ItemType endpoints (admin + guest).
- * Project is inferred via ItemType.category.project (ItemType no longer stores project directly).
- */
 @RestController
 @RequestMapping("/api/item-types")
 public class ItemTypeController {
 
     private final ItemTypeRepository itemTypeRepository;
     private final ItemTypeService itemTypeService;
+    private final AdminUserProjectRepository aupRepo;
 
     public ItemTypeController(ItemTypeRepository itemTypeRepository,
-                              ItemTypeService itemTypeService) {
+                              ItemTypeService itemTypeService,
+                              AdminUserProjectRepository aupRepo) {
         this.itemTypeRepository = itemTypeRepository;
         this.itemTypeService = itemTypeService;
+        this.aupRepo = aupRepo;
     }
 
-    // ---------- Payloads ----------
+    // ---------- Payload ----------
     public static class ItemTypePayload {
         private String name;
         private String icon;
         private String iconLibrary;
-        private Long categoryId; // REQUIRED for create; optional for update
+        private Long categoryId; // required for create; optional for update
+        private Long aupId;      // optional owner link id
 
         public String getName() { return name; }
         public String getIcon() { return icon; }
         public String getIconLibrary() { return iconLibrary; }
         public Long getCategoryId() { return categoryId; }
+        public Long getAupId() { return aupId; }
 
         public void setName(String name) { this.name = name; }
         public void setIcon(String icon) { this.icon = icon; }
         public void setIconLibrary(String iconLibrary) { this.iconLibrary = iconLibrary; }
         public void setCategoryId(Long categoryId) { this.categoryId = categoryId; }
+        public void setAupId(Long aupId) { this.aupId = aupId; }
     }
 
-    // ---------- GET ALL (raw entities) ----------
+    // ---------- GET: raw entities ----------
     @Operation(summary = "List all item types (entities)")
     @ApiResponse(responseCode = "200", description = "Successful")
     @GetMapping
@@ -67,7 +71,7 @@ public class ItemTypeController {
         return ResponseEntity.noContent().build();
     }
 
-    // ---------- CREATE (admin) ----------
+    // ---------- CREATE ----------
     @Operation(summary = "Create an item type (admin)")
     @ApiResponse(responseCode = "201", description = "Created")
     @PostMapping
@@ -76,20 +80,26 @@ public class ItemTypeController {
                 body.getName(),
                 body.getIcon(),
                 body.getIconLibrary(),
-                body.getCategoryId() // project is implied by category.project
+                body.getCategoryId()
         );
+
+        // optional owner link attach
+        if (body.getAupId() != null) {
+            aupRepo.findById(body.getAupId()).ifPresent(saved::setOwnerProject);
+            saved = itemTypeRepository.save(saved);
+        }
+
         return ResponseEntity
                 .created(URI.create("/api/item-types/" + saved.getId()))
                 .body(saved);
     }
 
-    // ---------- UPDATE (admin) ----------
+    // ---------- UPDATE ----------
     @Operation(summary = "Update an item type (admin)")
     @ApiResponse(responseCode = "200", description = "Updated")
     @PutMapping("/{id}")
     public ResponseEntity<ItemType> update(@PathVariable Long id,
                                            @RequestBody ItemTypePayload body) {
-        // Service handles null fields (partial update)
         ItemType updated = itemTypeService.updateItemType(
                 id,
                 body.getName(),
@@ -97,57 +107,66 @@ public class ItemTypeController {
                 body.getIconLibrary(),
                 body.getCategoryId()
         );
+
+        // set/clear owner link if provided
+        if (body.getAupId() != null) {
+            if (body.getAupId() <= 0) {
+                updated.setOwnerProject(null);
+            } else {
+                aupRepo.findById(body.getAupId()).ifPresent(updated::setOwnerProject);
+            }
+            updated = itemTypeRepository.save(updated);
+        }
+
         return ResponseEntity.ok(updated);
     }
 
-    // ---------- LIST BY PROJECT (via category.project) ----------
+    // ---------- LIST BY PROJECT ----------
     @Operation(summary = "List item types for a project (via category.project)")
     @GetMapping("/by-project/{projectId}")
     public List<ItemTypeDTO> getByProject(@PathVariable Long projectId) {
-        // Requires repository method:
-        // List<ItemType> findByCategory_Project_IdOrderByNameAsc(Long projectId);
-        return itemTypeRepository.findByCategory_Project_IdOrderByNameAsc(projectId)
+        return itemTypeService.listByProject(projectId)
                 .stream()
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }
 
-    // ---------- LIST BY CATEGORY (optional helper) ----------
+    // ---------- LIST BY CATEGORY ----------
     @Operation(summary = "List item types for a category")
     @GetMapping("/by-category/{categoryId}")
     public List<ItemTypeDTO> getByCategory(@PathVariable Long categoryId) {
-        // Optional repo method:
-        // List<ItemType> findByCategory_IdOrderByNameAsc(Long categoryId);
-        return itemTypeRepository.findByCategory_Id(categoryId)
+        return itemTypeService.listByCategory(categoryId)
                 .stream()
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }
 
-    // ---------- GUEST (DTO list) ----------
-    @Operation(summary = "Guest view of item types (DTO)")
-    @GetMapping("/guest")
-    public List<ItemTypeDTO> getAllItemTypes() {
-        return itemTypeRepository.findAll()
-                .stream()
-                .map(this::toDto)
-                .collect(Collectors.toList());
+    // ---------- NEW: LIST BY OWNER (adminId + projectId) ----------
+    @Operation(summary = "List item types by owner (adminId + projectId)")
+    @GetMapping("/by-owner")
+    public ResponseEntity<?> getByOwner(@RequestParam Long adminId,
+                                        @RequestParam Long projectId) {
+        return aupRepo.findByAdmin_AdminIdAndProject_Id(adminId, projectId)
+                .<ResponseEntity<?>>map(link ->
+                        ResponseEntity.ok(
+                                itemTypeService.listByOwnerLink(link.getId()).stream()
+                                        .map(this::toDto)
+                                        .collect(Collectors.toList())
+                        )
+                ).orElseGet(() -> ResponseEntity.badRequest().body("Owner-project link not found"));
     }
 
-    // ---------- MAPPERS ----------
+    // ---------- DTO mapper ----------
     private ItemTypeDTO toDto(ItemType type) {
         Category cat = type.getCategory();
-        var proj = (cat != null) ? cat.getProject() : null;
-        Long projectId = (proj != null) ? proj.getId() : null;
-        String projectName = (proj != null) ? proj.getProjectName() : null;
-
+        Long categoryId = (cat != null) ? cat.getId() : null;
         return new ItemTypeDTO(
                 type.getId(),
                 type.getName(),
-                type.getName(),                 // displayName = name (can add your own mapping)
+                type.getName(),      // displayName == name (adjust if needed)
                 type.getIcon(),
                 type.getIconLibrary(),
-                type.getCategory().getId()
+                categoryId
         );
     }
 }

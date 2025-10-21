@@ -1,6 +1,6 @@
 package com.build4all.catalog.domain;
 
-import com.build4all.catalog.domain.Category;
+import com.build4all.admin.domain.AdminUserProject;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 
@@ -21,12 +21,19 @@ public class ItemType {
 
     @Column(name = "icon_library")
     private String iconLibrary;
-  
-    @ManyToOne
+
+    /** Category carries the project scope */
+    @ManyToOne(optional = false, fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id", nullable = false)
     private Category category;
 
+    /** OPTIONAL: owner filter (single-column FK to admin_user_projects.aup_id) */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "owner_project_link_id")
+    private AdminUserProject ownerProject;
+
     public ItemType() {}
+
     public ItemType(String name, String icon, String iconLibrary, Category category) {
         this.name = name;
         this.icon = icon;
@@ -49,4 +56,7 @@ public class ItemType {
 
     public Category getCategory() { return category; }
     public void setCategory(Category category) { this.category = category; }
+
+    public AdminUserProject getOwnerProject() { return ownerProject; }
+    public void setOwnerProject(AdminUserProject ownerProject) { this.ownerProject = ownerProject; }
 }

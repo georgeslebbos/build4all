@@ -7,15 +7,18 @@ import com.build4all.social.domain.Posts;
 import com.build4all.user.domain.Users;
 import com.build4all.social.repository.PostVisibilityRepository;
 import com.build4all.social.repository.PostsRepository;
+import com.build4all.admin.repository.AdminUserProjectRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
-
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Post business logic. Supports optional owner scoping via aupId.
+ */
 @Service
 public class PostService {
 
@@ -23,19 +26,30 @@ public class PostService {
     private final PostVisibilityRepository postVisibilityRepository;
     private final FriendshipService friendshipService;
     private final WebSocketEventService ws;
+    private final AdminUserProjectRepository aupRepo;
 
     @Autowired
     public PostService(PostsRepository postsRepository,
                        PostVisibilityRepository postVisibilityRepository,
                        FriendshipService friendshipService,
-                       WebSocketEventService ws) {
+                       WebSocketEventService ws,
+                       AdminUserProjectRepository aupRepo) {
         this.postsRepository = postsRepository;
         this.postVisibilityRepository = postVisibilityRepository;
         this.friendshipService = friendshipService;
         this.ws = ws;
+        this.aupRepo = aupRepo;
     }
 
-    public Posts createPost(String content, MultipartFile image, String hashtags, Users user, PostVisibility visibility) {
+    /**
+     * Create a post. aupId is optional; if provided, the post is scoped to that owner-project link.
+     */
+    public Posts createPost(String content,
+                            MultipartFile image,
+                            String hashtags,
+                            Users user,
+                            PostVisibility visibility,
+                            Long aupId) {
         String imageUrl = null;
 
         if (image != null && !image.isEmpty()) {
@@ -53,20 +67,23 @@ public class PostService {
 
         Posts post = new Posts(user, content, imageUrl, hashtags);
         post.setVisibility(visibility);
+
+        // Optional owner scoping
+        if (aupId != null) {
+            aupRepo.findById(aupId).ifPresent(post::setOwnerProject);
+        }
+
         Posts savedPost = postsRepository.save(post);
 
-        // legacy broadcast (string OK)
+        // Legacy and JSON updates via websocket
         ws.sendPostCreated(savedPost.getId().toString());
-
-        // JSON broadcast (null-safe)
         Map<String, Object> changes = new HashMap<>();
-        if (savedPost.getContent() != null)      changes.put("content", savedPost.getContent());
-        if (savedPost.getImageUrl() != null)     changes.put("imageUrl", savedPost.getImageUrl());
-        if (savedPost.getHashtags() != null)     changes.put("hashtags", savedPost.getHashtags());
+        if (savedPost.getContent() != null)  changes.put("content", savedPost.getContent());
+        if (savedPost.getImageUrl() != null) changes.put("imageUrl", savedPost.getImageUrl());
+        if (savedPost.getHashtags() != null) changes.put("hashtags", savedPost.getHashtags());
         String visName = (savedPost.getVisibility() != null && savedPost.getVisibility().getName() != null)
                 ? savedPost.getVisibility().getName() : "PUBLIC";
         changes.put("visibility", visName);
-
         ws.sendPostUpdated(savedPost.getId(), changes);
 
         return savedPost;
@@ -104,6 +121,7 @@ public class PostService {
                         Users poster = post.getUser();
                         if (poster.getStatus() == null || !"ACTIVE".equals(poster.getStatus().getName()))
                             return false;
+
                         if (Objects.equals(poster.getId(), currentUserId))
                             return true;
 
@@ -134,8 +152,12 @@ public class PostService {
                 .collect(Collectors.toList());
     }
 
-    public Posts updatePost(Long postId, Users user, String newContent, String newHashtags,
-                            PostVisibility newVisibility, MultipartFile newImage) {
+    public Posts updatePost(Long postId,
+                            Users user,
+                            String newContent,
+                            String newHashtags,
+                            PostVisibility newVisibility,
+                            MultipartFile newImage) {
         Posts post = postsRepository.findById(postId)
                 .orElseThrow(() -> new RuntimeException("Post not found"));
         if (!post.getUser().getId().equals(user.getId()))
@@ -144,6 +166,7 @@ public class PostService {
         if (newContent != null)   post.setContent(newContent);
         if (newHashtags != null)  post.setHashtags(newHashtags);
         if (newVisibility != null) post.setVisibility(newVisibility);
+
         if (newImage != null && !newImage.isEmpty()) {
             try {
                 String filename = System.currentTimeMillis() + "_" + newImage.getOriginalFilename();
@@ -160,14 +183,23 @@ public class PostService {
         Posts saved = postsRepository.save(post);
 
         Map<String, Object> changes = new HashMap<>();
-        if (saved.getContent() != null)      changes.put("content", saved.getContent());
-        if (saved.getImageUrl() != null)     changes.put("imageUrl", saved.getImageUrl());
-        if (saved.getHashtags() != null)     changes.put("hashtags", saved.getHashtags());
+        if (saved.getContent() != null)  changes.put("content", saved.getContent());
+        if (saved.getImageUrl() != null) changes.put("imageUrl", saved.getImageUrl());
+        if (saved.getHashtags() != null) changes.put("hashtags", saved.getHashtags());
         String visName = (saved.getVisibility() != null && saved.getVisibility().getName() != null)
                 ? saved.getVisibility().getName() : "PUBLIC";
         changes.put("visibility", visName);
-
         ws.sendPostUpdated(saved.getId(), changes);
+
         return saved;
+    }
+
+    /** Owner-scoped feed (optional). */
+    @Transactional(readOnly = true)
+    public List<PostDto> getOwnerFeed(Long aupId, Long currentUserId) {
+        return postsRepository.findByOwnerProject_IdOrderByPostDatetimeDesc(aupId)
+                .stream()
+                .map(p -> new PostDto(p, currentUserId))
+                .collect(Collectors.toList());
     }
 }
