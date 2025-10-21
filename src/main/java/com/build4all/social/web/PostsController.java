@@ -8,18 +8,18 @@ import com.build4all.social.service.PostService;
 import com.build4all.user.service.UserService;
 import com.build4all.social.repository.PostVisibilityRepository;
 import com.build4all.security.JwtUtil;
+
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+
 import java.security.Principal;
 import java.util.List;
 
-/**
- * Social posts REST endpoints. Backward-compatible with optional owner scoping.
- */
 @RestController
 @RequestMapping("/api/posts")
 public class PostsController {
@@ -39,13 +39,9 @@ public class PostsController {
         this.jwtUtil = jwtUtil;
     }
 
-    @ApiResponses(value = {
+    @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-        @ApiResponse(responseCode = "402", description = "Payment Required – Reserved"),
-        @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission"),
-        @ApiResponse(responseCode = "404", description = "Not Found"),
+        @ApiResponse(responseCode = "401", description = "Unauthorized"),
         @ApiResponse(responseCode = "500", description = "Internal Server Error")
     })
     @PostMapping(consumes = {"multipart/form-data"})
@@ -53,54 +49,49 @@ public class PostsController {
                                         @RequestParam(required = false) MultipartFile image,
                                         @RequestParam(required = false) String hashtags,
                                         @RequestParam(required = false, defaultValue = "PUBLIC") String visibility,
-                                        @RequestParam(required = false) Long aupId, // OPTIONAL owner scope
+                                        @RequestParam Long adminId,
+                                        @RequestParam Long projectId,
                                         Principal principal,
                                         @RequestHeader("Authorization") String authHeader) {
-
-        // Token validations
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
         if (tokenCheck != null) return tokenCheck;
 
-        Users user = usersService.getUserByEmaill(principal.getName());
+        Users user = usersService.getUserByEmaill(principal.getName(), adminId, projectId);
 
         PostVisibility postVisibility = postVisibilityRepository.findByName(visibility.toUpperCase())
                 .orElseGet(() -> postVisibilityRepository.findByName("PUBLIC").orElse(null));
-
         if (postVisibility == null) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Visibility setting error");
         }
 
-        Posts created = postsService.createPost(content, image, hashtags, user, postVisibility, aupId);
+        Posts created = postsService.createPost(content, image, hashtags, user, postVisibility, /*owner scope*/ null);
         return ResponseEntity.ok(new PostDto(created, user.getId()));
     }
 
-    @ApiResponses(value = {
+    @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "400", description = "Bad Request"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized"),
-        @ApiResponse(responseCode = "500", description = "Internal Server Error")
+        @ApiResponse(responseCode = "401", description = "Unauthorized")
     })
     @GetMapping
     public ResponseEntity<List<PostDto>> getAllPosts(Principal principal,
+                                                     @RequestParam Long adminId,
+                                                     @RequestParam Long projectId,
                                                      @RequestHeader("Authorization") String authHeader) {
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
         if (tokenCheck != null) return ResponseEntity.status(tokenCheck.getStatusCode()).build();
 
         if (principal == null) return ResponseEntity.status(401).build();
 
-        try {
-            Users user = usersService.getUserByEmaill(principal.getName());
-            List<PostDto> postDtos = postsService.getAllPostDtos(user.getId());
-            return ResponseEntity.ok(postDtos);
-        } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseEntity.internalServerError().build();
-        }
+        Users user = usersService.getUserByEmaill(principal.getName(), adminId, projectId);
+        List<PostDto> postDtos = postsService.getAllPostDtos(user.getId());
+        return ResponseEntity.ok(postDtos);
     }
 
-    /** NEW: owner-scoped feed (optional). */
+    /** Optional owner-scoped feed if you still need it (pass a collection owner id). */
     @GetMapping("/by-owner")
     public ResponseEntity<?> getOwnerFeed(@RequestParam Long aupId,
+                                          @RequestParam Long adminId,
+                                          @RequestParam Long projectId,
                                           Principal principal,
                                           @RequestHeader("Authorization") String authHeader) {
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
@@ -108,51 +99,56 @@ public class PostsController {
 
         if (principal == null) return ResponseEntity.status(401).build();
 
-        Users user = usersService.getUserByEmaill(principal.getName());
+        Users user = usersService.getUserByEmaill(principal.getName(), adminId, projectId);
         return ResponseEntity.ok(postsService.getOwnerFeed(aupId, user.getId()));
     }
 
-    @ApiResponses(value = {
+    @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized"),
-        @ApiResponse(responseCode = "403", description = "Forbidden"),
-        @ApiResponse(responseCode = "404", description = "Not Found")
+        @ApiResponse(responseCode = "401", description = "Unauthorized")
     })
     @DeleteMapping("/{postId}")
     public ResponseEntity<String> deletePost(@PathVariable Long postId,
+                                             @RequestParam Long adminId,
+                                             @RequestParam Long projectId,
                                              Principal principal,
                                              @RequestHeader("Authorization") String authHeader) {
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
         if (tokenCheck != null) return tokenCheck;
 
-        Users user = usersService.getUserByEmaill(principal.getName());
+        Users user = usersService.getUserByEmaill(principal.getName(), adminId, projectId);
         postsService.deletePost(postId, user);
         return ResponseEntity.ok("Post deleted successfully");
     }
 
-    @ApiResponses(value = {
+    @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized"),
-        @ApiResponse(responseCode = "403", description = "Forbidden")
+        @ApiResponse(responseCode = "401", description = "Unauthorized")
     })
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<PostDto>> getPostsByUser(@PathVariable Long userId,
+                                                        @RequestParam Long adminId,
+                                                        @RequestParam Long projectId,
                                                         @RequestHeader("Authorization") String authHeader) {
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
         if (tokenCheck != null) return ResponseEntity.status(tokenCheck.getStatusCode()).build();
 
+        // NOTE: listing user posts is not sensitive to the caller’s app user identity here,
+        // but still require adminId/projectId for consistent scoping.
         List<PostDto> postDtos = postsService.getPostDtosByUser(userId);
         return ResponseEntity.ok(postDtos);
     }
 
-    @ApiResponses(value = {
+    @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized"),
-        @ApiResponse(responseCode = "403", description = "Forbidden")
+        @ApiResponse(responseCode = "403", description = "Forbidden"),
+        @ApiResponse(responseCode = "401", description = "Unauthorized")
     })
     @DeleteMapping("/{postId}/user/{userId}")
     public ResponseEntity<?> deletePostByUser(@PathVariable Long postId,
                                               @PathVariable Long userId,
+                                              @RequestParam Long adminId,
+                                              @RequestParam Long projectId,
                                               @RequestHeader("Authorization") String authHeader) {
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
         if (tokenCheck != null) return tokenCheck;
@@ -165,7 +161,6 @@ public class PostsController {
         }
     }
 
-    // Shared helper to validate Bearer token
     private ResponseEntity<String> validateUserToken(String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Missing or invalid Authorization header");
@@ -174,6 +169,6 @@ public class PostsController {
         if (!jwtUtil.isUserToken(token)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid user token");
         }
-        return null; // valid
+        return null;
     }
 }

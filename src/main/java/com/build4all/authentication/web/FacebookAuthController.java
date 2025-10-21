@@ -4,7 +4,6 @@ import com.build4all.user.domain.Users;
 import com.build4all.security.JwtUtil;
 import com.build4all.authentication.service.FacebookAuthService;
 import com.build4all.user.service.UserService;
-import com.build4all.user.repository.UserStatusRepository;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,13 +21,11 @@ public class FacebookAuthController {
     @Autowired private FacebookAuthService facebookAuthService;
     @Autowired private UserService userService;
     @Autowired private JwtUtil jwtUtil;
-    @Autowired private UserStatusRepository userStatusRepository;
 
     @PostMapping("/facebook")
-    public ResponseEntity<?> loginWithFacebook(@RequestBody Map<String, String> request) {
-        String accessToken = request.get("access_token");
-
-        if (!facebookAuthService.verifyToken(accessToken)) {
+    public ResponseEntity<?> loginWithFacebook(@RequestBody Map<String, Object> request) {
+        String accessToken = (String) request.get("access_token");
+        if (accessToken == null || !facebookAuthService.verifyToken(accessToken)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid Facebook token.");
         }
 
@@ -36,35 +33,66 @@ public class FacebookAuthController {
         String facebookId = (String) fbUser.get("id");
         String name = (String) fbUser.get("name");
         String email = (String) fbUser.get("email");
-        String picture = ((Map)((Map)fbUser.get("picture")).get("data")).get("url").toString();
 
-        String[] nameParts = name != null ? name.split(" ", 2) : new String[]{"", ""};
-        String firstName = nameParts[0];
-        String lastName = nameParts.length > 1 ? nameParts[1] : "";
+        String picture = null;
+        try {
+            Object picObj = fbUser.get("picture");
+            if (picObj instanceof Map<?, ?> p1) {
+                Object dataObj = p1.get("data");
+                if (dataObj instanceof Map<?, ?> p2) {
+                    Object url = p2.get("url");
+                    picture = url != null ? url.toString() : null;
+                }
+            }
+        } catch (Exception ignore) {}
+
+        String[] parts = name != null ? name.split(" ", 2) : new String[]{"", ""};
+        String firstName = parts[0];
+        String lastName  = parts.length > 1 ? parts[1] : "";
 
         AtomicBoolean wasInactive = new AtomicBoolean(false);
-        AtomicBoolean isNewUser = new AtomicBoolean(false);
+        AtomicBoolean isNewUser   = new AtomicBoolean(false);
 
-        Users user = userService.handleFacebookUser(email, facebookId, firstName, lastName, picture, wasInactive, isNewUser);
+        // Optional app-scope from payload
+        Long adminId   = toLongOrNull(request.get("adminId"));
+        Long projectId = toLongOrNull(request.get("projectId"));
+
+        Users user;
+        if (adminId != null && projectId != null) {
+            // app-scoped flow
+            user = userService.handleFacebookUser(
+                    email, facebookId, firstName, lastName, picture, wasInactive, isNewUser, adminId, projectId
+            );
+        } else {
+            // legacy/global flow (no app scope)
+            user = userService.handleFacebookUser(
+                    email, facebookId, firstName, lastName, picture, wasInactive, isNewUser
+            );
+        }
 
         String token = jwtUtil.generateToken(user);
 
         return ResponseEntity.ok(Map.of(
-            "token", token,
-            "wasInactive", wasInactive.get(),
-            "isNewUser", isNewUser.get(),
-            "user", Map.of(
-                "id", user.getId(),
-                "firstName", user.getFirstName(),
-                "lastName", user.getLastName(),
-                "email", user.getEmail(),
-                "profileImageUrl", user.getProfilePictureUrl(),
-                "username", user.getUsername(),
-                "status", user.getStatus().getName(),
-                "lastLogin", user.getLastLogin(),
-                "publicProfile", user.isPublicProfile(),
-                "facebookId", user.getFacebookId()
-            )
+                "token", token,
+                "wasInactive", wasInactive.get(),
+                "isNewUser", isNewUser.get(),
+                "user", Map.of(
+                        "id", user.getId(),
+                        "firstName", user.getFirstName(),
+                        "lastName", user.getLastName(),
+                        "email", user.getEmail(),
+                        "profileImageUrl", user.getProfilePictureUrl(),
+                        "username", user.getUsername(),
+                        "status", user.getStatus() != null ? user.getStatus().getName() : null,
+                        "lastLogin", user.getLastLogin(),
+                        "publicProfile", user.isPublicProfile(),
+                        "facebookId", user.getFacebookId()
+                )
         ));
     }
+
+    private Long toLongOrNull(Object v) {
+        if (v == null) return null;
+        try { return Long.valueOf(v.toString()); } catch (Exception e) { return null; }
+        }
 }

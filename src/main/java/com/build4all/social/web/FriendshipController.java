@@ -27,20 +27,15 @@ public class FriendshipController {
         this.userService = userService;
     }
 
-    @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+    @ApiResponses({@ApiResponse(responseCode = "200", description = "Successful")})
     @PostMapping("/add/{friendId}")
-    public ResponseEntity<?> sendFriendRequest(@PathVariable Long friendId, Principal principal) {
+    public ResponseEntity<?> sendFriendRequest(@PathVariable Long friendId,
+                                               @RequestParam Long adminId,
+                                               @RequestParam Long projectId,
+                                               Principal principal) {
         try {
-            Users sender = userService.getUserByEmaill(principal.getName());
-            Users receiver = userService.getUserById(friendId);
+            Users sender   = userService.getUserByEmaill(principal.getName(), adminId, projectId);
+            Users receiver = userService.getUserById(friendId, adminId, projectId);
             Friendship friendship = friendshipService.sendFriendRequest(sender, receiver);
             return ResponseEntity.ok(friendship);
         } catch (RuntimeException ex) {
@@ -48,19 +43,13 @@ public class FriendshipController {
         }
     }
 
-    @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
     @PostMapping("/accept/{requestId}")
-    public ResponseEntity<?> acceptRequest(@PathVariable Long requestId, Principal principal) {
+    public ResponseEntity<?> acceptRequest(@PathVariable Long requestId,
+                                           @RequestParam Long adminId,
+                                           @RequestParam Long projectId,
+                                           Principal principal) {
         try {
-            Users receiver = userService.getUserByEmaill(principal.getName());
+            Users receiver = userService.getUserByEmaill(principal.getName(), adminId, projectId);
             Friendship accepted = friendshipService.acceptRequest(requestId, receiver);
             return ResponseEntity.ok(accepted);
         } catch (RuntimeException ex) {
@@ -68,96 +57,61 @@ public class FriendshipController {
         }
     }
 
-    @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
     @GetMapping("/pending")
-    public ResponseEntity<?> getPendingRequests(Principal principal) {
+    public ResponseEntity<?> getPendingRequests(@RequestParam Long adminId,
+                                                @RequestParam Long projectId,
+                                                Principal principal) {
         try {
-            Users user = userService.getUserByEmaill(principal.getName());
+            Users user = userService.getUserByEmaill(principal.getName(), adminId, projectId);
             return ResponseEntity.ok(friendshipService.getPendingRequests(user));
         } catch (RuntimeException ex) {
             return ResponseEntity.badRequest().body(Collections.singletonMap("message", ex.getMessage()));
         }
     }
 
-    @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
     @GetMapping("/pending/count")
-    public ResponseEntity<?> getPendingRequestCount(Principal principal) {
+    public ResponseEntity<?> getPendingRequestCount(@RequestParam Long adminId,
+                                                    @RequestParam Long projectId,
+                                                    Principal principal) {
         try {
-            Users user = userService.getUserByEmaill(principal.getName());
+            Users user = userService.getUserByEmaill(principal.getName(), adminId, projectId);
             return ResponseEntity.ok(friendshipService.getPendingRequestCount(user));
         } catch (RuntimeException ex) {
             return ResponseEntity.badRequest().body(Collections.singletonMap("message", ex.getMessage()));
         }
     }
 
-    @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
     @GetMapping("/my")
-    public ResponseEntity<?> getMyFriends(Principal principal) {
+    public ResponseEntity<?> getMyFriends(@RequestParam Long adminId,
+                                          @RequestParam Long projectId,
+                                          Principal principal) {
         try {
-            Users user = userService.getUserByEmaill(principal.getName());
+            Users user = userService.getUserByEmaill(principal.getName(), adminId, projectId);
             return ResponseEntity.ok(friendshipService.getAcceptedFriends(user));
         } catch (RuntimeException ex) {
             return ResponseEntity.badRequest().body(Collections.singletonMap("message", ex.getMessage()));
         }
     }
-    
-    @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+
     @GetMapping("/sent")
-    public ResponseEntity<?> getSentRequests(Principal principal) {
+    public ResponseEntity<?> getSentRequests(@RequestParam Long adminId,
+                                             @RequestParam Long projectId,
+                                             Principal principal) {
         try {
-            Users user = userService.getUserByEmaill(principal.getName());
+            Users user = userService.getUserByEmaill(principal.getName(), adminId, projectId);
             return ResponseEntity.ok(friendshipService.getSentRequests(user));
         } catch (RuntimeException ex) {
             return ResponseEntity.badRequest().body(Collections.singletonMap("message", ex.getMessage()));
         }
     }
 
-
-    @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
     @PostMapping("/reject/{requestId}")
-    public ResponseEntity<?> rejectFriendRequest(@PathVariable Long requestId, Principal principal) {
+    public ResponseEntity<?> rejectFriendRequest(@PathVariable Long requestId,
+                                                 @RequestParam Long adminId,
+                                                 @RequestParam Long projectId,
+                                                 Principal principal) {
         try {
-            Users receiver = userService.getUserByEmaill(principal.getName());
+            Users receiver = userService.getUserByEmaill(principal.getName(), adminId, projectId);
             friendshipService.rejectRequest(requestId, receiver);
             return ResponseEntity.ok(Collections.singletonMap("message", "Request rejected."));
         } catch (RuntimeException ex) {
@@ -165,20 +119,14 @@ public class FriendshipController {
         }
     }
 
-    @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
     @DeleteMapping("/cancel/{friendId}")
-    public ResponseEntity<?> cancelFriendRequest(@PathVariable Long friendId, Principal principal) {
+    public ResponseEntity<?> cancelFriendRequest(@PathVariable Long friendId,
+                                                 @RequestParam Long adminId,
+                                                 @RequestParam Long projectId,
+                                                 Principal principal) {
         try {
-            Users sender = userService.getUserByEmaill(principal.getName());
-            Users receiver = userService.getUserById(friendId);
+            Users sender   = userService.getUserByEmaill(principal.getName(), adminId, projectId);
+            Users receiver = userService.getUserById(friendId, adminId, projectId);
             friendshipService.cancelRequest(sender, receiver);
             return ResponseEntity.ok(Collections.singletonMap("message", "Request cancelled."));
         } catch (RuntimeException ex) {
@@ -186,20 +134,14 @@ public class FriendshipController {
         }
     }
 
-    @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
     @PostMapping("/block/{userId}")
-    public ResponseEntity<?> blockUser(@PathVariable Long userId, Principal principal) {
+    public ResponseEntity<?> blockUser(@PathVariable Long userId,
+                                       @RequestParam Long adminId,
+                                       @RequestParam Long projectId,
+                                       Principal principal) {
         try {
-            Users blocker = userService.getUserByEmaill(principal.getName());
-            Users blocked = userService.getUserById(userId);
+            Users blocker = userService.getUserByEmaill(principal.getName(), adminId, projectId);
+            Users blocked = userService.getUserById(userId, adminId, projectId);
             friendshipService.blockUser(blocker, blocked);
             return ResponseEntity.ok(Collections.singletonMap("message", "User blocked."));
         } catch (RuntimeException ex) {
@@ -207,66 +149,48 @@ public class FriendshipController {
         }
     }
 
-    @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
     @DeleteMapping("/unblock/{userId}")
-    public ResponseEntity<?> unblockUser(@PathVariable Long userId, Principal principal) {
+    public ResponseEntity<?> unblockUser(@PathVariable Long userId,
+                                         @RequestParam Long adminId,
+                                         @RequestParam Long projectId,
+                                         Principal principal) {
         try {
-            Users blocker = userService.getUserByEmaill(principal.getName());
-            Users blocked = userService.getUserById(userId);
+            Users blocker = userService.getUserByEmaill(principal.getName(), adminId, projectId);
+            Users blocked = userService.getUserById(userId, adminId, projectId);
             friendshipService.unblockUser(blocker, blocked);
             return ResponseEntity.ok(Collections.singletonMap("message", "User unblocked."));
         } catch (RuntimeException ex) {
             return ResponseEntity.badRequest().body(Collections.singletonMap("message", ex.getMessage()));
         }
     }
-    
-    @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+
     @DeleteMapping("/unfriend/{userId}")
-    public ResponseEntity<?> unfriend(@PathVariable Long userId, Principal principal) {
+    public ResponseEntity<?> unfriend(@PathVariable Long userId,
+                                      @RequestParam Long adminId,
+                                      @RequestParam Long projectId,
+                                      Principal principal) {
         try {
-            Users currentUser = userService.getUserByEmaill(principal.getName());
-            Users friend = userService.getUserById(userId);
+            Users currentUser = userService.getUserByEmaill(principal.getName(), adminId, projectId);
+            Users friend      = userService.getUserById(userId, adminId, projectId);
             friendshipService.unfriend(currentUser, friend);
             return ResponseEntity.ok(Collections.singletonMap("message", "User unfriended."));
         } catch (RuntimeException ex) {
             return ResponseEntity.badRequest().body(Collections.singletonMap("message", ex.getMessage()));
         }
     }
-    
-    @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+
     @GetMapping("/status/{userId}")
-    public ResponseEntity<?> getFriendshipStatus(@PathVariable Long userId, Principal principal) {
+    public ResponseEntity<?> getFriendshipStatus(@PathVariable Long userId,
+                                                 @RequestParam Long adminId,
+                                                 @RequestParam Long projectId,
+                                                 Principal principal) {
         try {
-            Users currentUser = userService.getUserByEmaill(principal.getName());
-            Users otherUser = userService.getUserById(userId);
+            Users currentUser = userService.getUserByEmaill(principal.getName(), adminId, projectId);
+            Users otherUser   = userService.getUserById(userId, adminId, projectId);
 
             boolean youBlockedThem = friendshipService.didBlock(currentUser, otherUser);
             boolean theyBlockedYou = friendshipService.didBlock(otherUser, currentUser);
-            boolean isFriend = friendshipService.areFriends(currentUser, otherUser);
+            boolean isFriend       = friendshipService.areFriends(currentUser, otherUser);
 
             return ResponseEntity.ok(
                 Map.of(
@@ -279,7 +203,4 @@ public class FriendshipController {
             return ResponseEntity.badRequest().body(Collections.singletonMap("message", ex.getMessage()));
         }
     }
-
-
-
 }

@@ -17,11 +17,10 @@ import java.security.Principal;
 @RestController
 @RequestMapping("/api/posts")
 public class PostLikesController {
-	
 
     private final PostLikesService likesService;
     private final UserService usersService;
-    private final JwtUtil jwtUtil; // Assuming you have a JWT utility class for token validation
+    private final JwtUtil jwtUtil;
 
     public PostLikesController(PostLikesService likesService, UserService usersService, JwtUtil jwtUtil) {
         this.likesService = likesService;
@@ -29,63 +28,46 @@ public class PostLikesController {
         this.jwtUtil = jwtUtil;
     }
 
-    @ApiResponses(value = {
+    @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-        @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-        @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-        @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-        @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+        @ApiResponse(responseCode = "401", description = "Unauthorized")
     })
     @PostMapping("/{postId}/like")
-    public ResponseEntity<String> toggleLike(
-            @PathVariable Long postId,
-            Principal principal,
-            @RequestHeader("Authorization") String authHeader) {
-
-        // Token validation
+    public ResponseEntity<String> toggleLike(@PathVariable Long postId,
+                                             @RequestParam Long adminId,
+                                             @RequestParam Long projectId,
+                                             Principal principal,
+                                             @RequestHeader("Authorization") String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Missing or invalid Authorization header");
         }
-
         String token = authHeader.substring(7);
         if (!jwtUtil.isUserToken(token)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid user token");
         }
 
-        // Original code unchanged
-        Users user = usersService.getUserByEmaill(principal.getName());
+        Users user = usersService.getUserByEmaill(principal.getName(), adminId, projectId);
         String result = likesService.toggleLike(postId, user);
-
         return ResponseEntity.ok(result);
     }
 
-    @ApiResponses(value = {
+    @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-        @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-        @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-        @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-        @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+        @ApiResponse(responseCode = "401", description = "Unauthorized")
     })
     @GetMapping("/{postId}/likes")
-    public ResponseEntity<Long> countLikes(
-            @PathVariable Long postId,
-            @RequestHeader("Authorization") String authHeader) {
-
-        // Token validation
+    public ResponseEntity<Long> countLikes(@PathVariable Long postId,
+                                           @RequestParam Long adminId,   // kept for symmetry even if not used here
+                                           @RequestParam Long projectId, // kept for symmetry
+                                           @RequestHeader("Authorization") String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-
         String token = authHeader.substring(7);
         if (!jwtUtil.isUserToken(token)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
 
-        // Original code unchanged
         long count = likesService.countLikes(postId);
         return ResponseEntity.ok(count);
     }

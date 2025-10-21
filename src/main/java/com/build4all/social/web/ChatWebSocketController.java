@@ -28,20 +28,24 @@ public class ChatWebSocketController {
 
     @MessageMapping("/chat")
     public void handleChatMessage(ChatMessageDto dto) {
-        Users sender = usersService.getUserById(dto.getSenderId());
-        Users receiver = usersService.getUserById(dto.getReceiverId());
+        // Expecting incoming DTO from WS client with senderId, receiverId, message, imageUrl
+        if (dto == null || dto.getSenderId() == null || dto.getReceiverId() == null) return;
 
+        Users sender   = usersService.getUserById(dto.getSenderId());
+        Users receiver = usersService.getUserById(dto.getReceiverId());
         if (sender == null || receiver == null) return;
 
         ChatMessages chat = chatService.sendMessageWithImage(
-            sender, receiver, dto.getMessage(), dto.getImageUrl()
+                sender, receiver, dto.getMessage(), dto.getImageUrl()
         );
 
+        // broadcast to both participants' room
         webSocketService.broadcastMessage(chat);
     }
 
     @MessageMapping("/typing")
     public void handleTyping(TypingDTO typingDTO) {
+        if (typingDTO == null || typingDTO.getSenderId() == null || typingDTO.getReceiverId() == null) return;
         webSocketService.broadcastTyping(typingDTO);
     }
 }

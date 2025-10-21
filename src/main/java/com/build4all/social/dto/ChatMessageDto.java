@@ -15,6 +15,9 @@ public class ChatMessageDto {
     private boolean isMine;
     private String imageUrl;
 
+    // <<-- IMPORTANT for inbound WebSocket mapping
+    public ChatMessageDto() {}
+
     public ChatMessageDto(ChatMessages chat, Long currentUserId) {
         this.id = chat.getId();
         this.senderId = chat.getSender().getId();
@@ -23,7 +26,6 @@ public class ChatMessageDto {
         this.message = chat.getMessage();
         this.imageUrl = chat.getImageUrl();
 
-        // ✅ FIX: null-safe access to isRead
         this.isRead = Boolean.TRUE.equals(chat.getIsRead());
 
         if (chat.getSentAt() != null) {
@@ -36,75 +38,30 @@ public class ChatMessageDto {
         this.isMine = this.senderId.equals(currentUserId);
     }
 
-    public boolean isMine() {
-        return isMine;
-    }
+    public boolean isMine() { return isMine; }
+    public void setIsMine(boolean isMine) { this.isMine = isMine; }
 
-    public void setIsMine(boolean isMine) {
-        this.isMine = isMine;
-    }
+    public boolean isRead() { return isRead; }
+    public void setRead(boolean read) { isRead = read; }
 
-    public boolean isRead() {
-        return isRead;
-    }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
 
-    public void setRead(boolean read) {
-        isRead = read;
-    }
+    public Long getSenderId() { return senderId; }
+    public void setSenderId(Long senderId) { this.senderId = senderId; }
 
-    public Long getId() {
-        return id;
-    }
+    public String getSenderName() { return senderName; }
+    public void setSenderName(String senderName) { this.senderName = senderName; }
 
-    public void setId(Long id) {
-        this.id = id;
-    }
+    public Long getReceiverId() { return receiverId; }
+    public void setReceiverId(Long receiverId) { this.receiverId = receiverId; }
 
-    public Long getSenderId() {
-        return senderId;
-    }
+    public String getMessage() { return message; }
+    public void setMessage(String message) { this.message = message; }
 
-    public void setSenderId(Long senderId) {
-        this.senderId = senderId;
-    }
+    public String getSentAt() { return sentAt; }
+    public void setSentAt(String sentAt) { this.sentAt = sentAt; }
 
-    public String getSenderName() {
-        return senderName;
-    }
-
-    public void setSenderName(String senderName) {
-        this.senderName = senderName;
-    }
-
-    public Long getReceiverId() {
-        return receiverId;
-    }
-
-    public void setReceiverId(Long receiverId) {
-        this.receiverId = receiverId;
-    }
-
-    public String getMessage() {
-        return message;
-    }
-
-    public void setMessage(String message) {
-        this.message = message;
-    }
-
-    public String getSentAt() {
-        return sentAt;
-    }
-
-    public void setSentAt(String sentAt) {
-        this.sentAt = sentAt;
-    }
-
-    public String getImageUrl() {
-        return imageUrl;
-    }
-
-    public void setImageUrl(String imageUrl) {
-        this.imageUrl = imageUrl;
-    }
+    public String getImageUrl() { return imageUrl; }
+    public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
 }
