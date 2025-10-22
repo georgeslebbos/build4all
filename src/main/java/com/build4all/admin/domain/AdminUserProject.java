@@ -2,6 +2,7 @@ package com.build4all.admin.domain;
 
 import com.build4all.project.domain.Project;
 import jakarta.persistence.*;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -24,11 +25,11 @@ public class AdminUserProject {
     @Column(name = "aup_id")
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "admin_id", referencedColumnName = "admin_id", nullable = false)
     private AdminUser admin;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "project_id", referencedColumnName = "id", nullable = false)
     private Project project;
 
@@ -38,11 +39,13 @@ public class AdminUserProject {
     @Column(name = "valid_from")
     private LocalDate validFrom;
 
+    // kept your column name; see optional migration below if you want valid_to
     @Column(name = "end_to")
     private LocalDate endTo;
 
+    // kept as String; helpers below expose booleans
     @Column(name = "status", length = 16)
-    private String status = "ACTIVE";
+    private String status = "ACTIVE"; // ACTIVE | SUSPENDED | EXPIRED | DELETED
 
     @Column(name = "slug", length = 128)
     private String slug;
@@ -90,7 +93,9 @@ public class AdminUserProject {
     @PreUpdate
     protected void onUpdate() { this.updatedAt = LocalDateTime.now(); }
 
-    public Long getId() { return id; }
+    /* ------------ getters / setters ------------ */
+
+    public Long getId() { return id; }             // <-- primary key accessor
     public void setId(Long id) { this.id = id; }
 
     public AdminUser getAdmin() { return admin; }
@@ -123,6 +128,13 @@ public class AdminUserProject {
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 
+    /* ------------ convenience (not persisted) ------------ */
+
     @Transient public Long getAdminId() { return admin != null ? admin.getAdminId() : null; }
     @Transient public Long getProjectId() { return project != null ? project.getId() : null; }
+
+    @Transient public boolean isActive() { return "ACTIVE".equalsIgnoreCase(status); }
+    @Transient public boolean isSuspended() { return "SUSPENDED".equalsIgnoreCase(status); }
+    @Transient public boolean isExpired() { return "EXPIRED".equalsIgnoreCase(status); }
+    @Transient public boolean isDeleted() { return "DELETED".equalsIgnoreCase(status); }
 }

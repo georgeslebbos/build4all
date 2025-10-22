@@ -1,9 +1,8 @@
 package com.build4all.user.domain;
 
-import com.build4all.admin.domain.AdminUser;
+import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.booking.domain.ItemBooking;
 import com.build4all.notifications.domain.Notifications;
-import com.build4all.project.domain.Project;
 import com.build4all.review.domain.Review;
 import com.build4all.social.domain.*;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -17,15 +16,15 @@ import java.util.List;
 @Table(
     name = "Users",
     uniqueConstraints = {
-        @UniqueConstraint(name = "uk_user_app_email",  columnNames = {"admin_id", "project_id", "email"}),
-        @UniqueConstraint(name = "uk_user_app_phone",  columnNames = {"admin_id", "project_id", "phone_number"}),
-        @UniqueConstraint(name = "uk_user_app_user",   columnNames = {"admin_id", "project_id", "username"})
+        @UniqueConstraint(name = "uk_user_app_email_link",  columnNames = {"owner_project_link_id", "email"}),
+        @UniqueConstraint(name = "uk_user_app_phone_link",  columnNames = {"owner_project_link_id", "phone_number"}),
+        @UniqueConstraint(name = "uk_user_app_user_link",   columnNames = {"owner_project_link_id", "username"})
     },
     indexes = {
-        @Index(name = "idx_users_app",        columnList = "admin_id,project_id"),
-        @Index(name = "idx_users_email",      columnList = "email"),
-        @Index(name = "idx_users_phone",      columnList = "phone_number"),
-        @Index(name = "idx_users_username",   columnList = "username")
+        @Index(name = "idx_users_owner_project",  columnList = "owner_project_link_id"),
+        @Index(name = "idx_users_email",          columnList = "email"),
+        @Index(name = "idx_users_phone",          columnList = "phone_number"),
+        @Index(name = "idx_users_username",       columnList = "username")
     }
 )
 public class Users {
@@ -35,15 +34,10 @@ public class Users {
     @Column(name = "user_id")
     private Long id;
 
-    /** which AdminUser (owner/admin) this app is under */
+    /** Unified tenant link (owner + project) */
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "admin_id", nullable = true)
-    private AdminUser owner;
-
-    /** which Project this app is under */
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "project_id", nullable = true)
-    private Project project;
+    @JoinColumn(name = "owner_project_link_id", referencedColumnName = "aup_id", nullable = true)
+    private AdminUserProject ownerProject;
 
     @Column(nullable = false)
     private String username;
@@ -54,11 +48,11 @@ public class Users {
     @Column(nullable = false)
     private String lastName;
 
-    /** uniqueness is per (admin_id, project_id) */
+    /** uniqueness is per (owner_project_link_id) */
     @Column(name = "email")
     private String email;
 
-    /** uniqueness is per (admin_id, project_id) */
+    /** uniqueness is per (owner_project_link_id) */
     @Column(name = "phone_number")
     private String phoneNumber;
 
@@ -149,11 +143,8 @@ public class Users {
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
-    public AdminUser getOwner() { return owner; }
-    public void setOwner(AdminUser owner) { this.owner = owner; }
-
-    public Project getProject() { return project; }
-    public void setProject(Project project) { this.project = project; }
+    public AdminUserProject getOwnerProject() { return ownerProject; }
+    public void setOwnerProject(AdminUserProject ownerProject) { this.ownerProject = ownerProject; }
 
     public String getUsername() { return username; }
     public void setUsername(String username) { this.username = username; }

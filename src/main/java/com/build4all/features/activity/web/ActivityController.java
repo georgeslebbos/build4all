@@ -50,7 +50,7 @@ public class ActivityController {
         this.jwtUtil = jwtUtil;
     }
 
-    // ---------- helpers
+    /* ------------------------ helpers ------------------------ */
 
     private String strip(String auth) { return auth == null ? "" : auth.replace("Bearer ", "").trim(); }
 
@@ -60,13 +60,15 @@ public class ActivityController {
         return false;
     }
 
-    /** App-scoped user resolver (email or phone from JWT). */
-    private Users getScopedUserFromToken(String authHeader, Long adminId, Long projectId) {
-        if (authHeader == null || !authHeader.startsWith("Bearer "))
+    /** App-scoped user resolver (email or phone from JWT) using a single ownerProjectLinkId. */
+    private Users getScopedUserFromToken(String authHeader, Long ownerProjectLinkId) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             throw new RuntimeException("Missing or invalid Authorization header");
+        }
         String jwt = authHeader.substring(7).trim();
         String identity = jwtUtil.extractUsername(jwt); // may be email or phone
-        return userService.getUserByEmaill(identity, adminId, projectId);
+        // NOTE: service must provide owner-link overloads
+        return userService.getUserByEmaill(identity, ownerProjectLinkId);
     }
 
     private ActivityDetailsDTO toDto(Activity a) {
@@ -89,14 +91,12 @@ public class ActivityController {
         );
     }
 
-    // ---------- create
+    /* ------------------------ create ------------------------ */
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Create activity (multipart)")
     public ResponseEntity<?> create(
             @RequestHeader("Authorization") String auth,
-            @RequestParam Long adminId,
-            @RequestParam Long projectId,
             @RequestParam("name") String name,
             @RequestParam("itemTypeId") Long itemTypeId,
             @RequestParam(value = "description", required = false) String description,
@@ -113,10 +113,10 @@ public class ActivityController {
     ) throws Exception {
 
         String token = strip(auth);
-        if (!hasRole(token, "BUSINESS", "MANAGER"))
+        if (!hasRole(token, "BUSINESS", "MANAGER")) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Business or Manager role required."));
+        }
 
-        // (optional) validate business belongs to this (adminId, projectId) in your service
         Activity saved = activityService.createActivityWithImage(
                 name, itemTypeId, description, location, latitude, longitude,
                 maxParticipants, price, startDatetime, endDatetime, status, businessId, image
@@ -127,14 +127,12 @@ public class ActivityController {
         ));
     }
 
-    // ---------- update
+    /* ------------------------ update ------------------------ */
 
     @PutMapping(path = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Update activity (multipart)")
     public ResponseEntity<?> update(
             @RequestHeader("Authorization") String auth,
-            @RequestParam Long adminId,
-            @RequestParam Long projectId,
             @PathVariable Long id,
             @RequestParam("name") String name,
             @RequestParam("itemTypeId") Long itemTypeId,
@@ -153,8 +151,9 @@ public class ActivityController {
     ) throws Exception {
 
         String token = strip(auth);
-        if (!hasRole(token, "BUSINESS", "MANAGER"))
+        if (!hasRole(token, "BUSINESS", "MANAGER")) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Business or Manager role required."));
+        }
 
         Activity saved = activityService.updateActivityWithImage(
                 id, name, itemTypeId, description, location, latitude, longitude,
@@ -166,17 +165,16 @@ public class ActivityController {
         ));
     }
 
-    // ---------- delete
+    /* ------------------------ delete ------------------------ */
 
     @DeleteMapping("/{id}")
     @Operation(summary = "Delete an item by ID")
     public ResponseEntity<?> delete(@RequestHeader("Authorization") String auth,
-                                    @RequestParam Long adminId,
-                                    @RequestParam Long projectId,
                                     @PathVariable Long id) {
         String token = strip(auth);
-        if (!hasRole(token, "BUSINESS"))
+        if (!hasRole(token, "BUSINESS")) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Only Business users can delete items."));
+        }
 
         Activity a = activityService.findById(id);
         if (a == null) return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "Item not found"));
@@ -186,7 +184,7 @@ public class ActivityController {
         return ResponseEntity.noContent().build();
     }
 
-    // ---------- get one
+    /* ------------------------ get one ------------------------ */
 
     @GetMapping("/{id}")
     public ResponseEntity<?> getById(@PathVariable Long id) {
@@ -230,7 +228,7 @@ public class ActivityController {
         return ResponseEntity.ok(response);
     }
 
-    // ---------- lists (public)
+    /* ------------------------ lists (public) ------------------------ */
 
     @GetMapping
     public ResponseEntity<?> getAll() {
@@ -280,9 +278,7 @@ public class ActivityController {
 
     @GetMapping("/business/{businessId}")
     public ResponseEntity<?> getByBusiness(@PathVariable Long businessId,
-                                           @RequestHeader("Authorization") String tokenHeader,
-                                           @RequestParam Long adminId,
-                                           @RequestParam Long projectId) {
+                                           @RequestHeader("Authorization") String tokenHeader) {
         if (tokenHeader == null || !tokenHeader.startsWith("Bearer "))
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Missing or invalid Authorization header"));
 
@@ -298,7 +294,6 @@ public class ActivityController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not your business."));
         }
 
-        // (optional) assert business belongs to (adminId, projectId)
         List<Activity> items = activityService.findByBusinessId(businessId);
         if (items.isEmpty())
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "No items found for this business"));
@@ -339,19 +334,18 @@ public class ActivityController {
         return ResponseEntity.ok(upcoming.stream().map(this::toDto).toList());
     }
 
-    // ---------- personalized feed (APP-SCOPED)
+    /* ---------------- personalized feed (owner-linked user) ---------------- */
 
     @GetMapping("/category-based/{userId}")
     public ResponseEntity<?> categoryBased(@RequestHeader("Authorization") String auth,
-                                           @RequestParam Long adminId,
-                                           @RequestParam Long projectId,
+                                           @RequestParam Long ownerProjectLinkId,
                                            @PathVariable Long userId) {
         try {
             String token = strip(auth);
             if (!jwtUtil.isUserToken(token))
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "User token required."));
 
-            Users u = getScopedUserFromToken(auth, adminId, projectId);
+            Users u = getScopedUserFromToken(auth, ownerProjectLinkId);
             if (u == null || !u.getId().equals(userId))
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Token does not match requested user ID"));
 
@@ -362,7 +356,7 @@ public class ActivityController {
                     .filter(a -> !"Terminated".equalsIgnoreCase(a.getStatus()))
                     .toList();
             if (pending.isEmpty())
-                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "No pending items found for user's categorys"));
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "No pending items found for user's categories"));
             return ResponseEntity.ok(pending.stream().map(this::toDto).toList());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
@@ -372,17 +366,16 @@ public class ActivityController {
         }
     }
 
-    // ---------- availability (APP-SCOPED user)
+    /* ---------------- availability (owner-linked user) ---------------- */
 
     @GetMapping("/{itemId}/check-availability")
     public ResponseEntity<?> checkAvailability(@PathVariable Long itemId,
                                                @RequestParam("participants") String participantsStr,
-                                               @RequestParam Long adminId,
-                                               @RequestParam Long projectId,
+                                               @RequestParam Long ownerProjectLinkId,
                                                @RequestHeader("Authorization") String authHeader) {
         try {
             int requested = Integer.parseInt(participantsStr.replaceAll("[^\\d]", ""));
-            Users user = getScopedUserFromToken(authHeader, adminId, projectId);
+            Users user = getScopedUserFromToken(authHeader, ownerProjectLinkId);
 
             if (bookingService.hasUserAlreadyBooked(itemId, user.getId()))
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("available", false, "error", "You already booked this item."));
@@ -397,15 +390,14 @@ public class ActivityController {
         }
     }
 
-    // ---------- confirm booking (APP-SCOPED user)
+    /* ---------------- confirm booking (owner-linked user) ---------------- */
 
     @PostMapping("/confirm-booking")
     public ResponseEntity<?> confirmBooking(@RequestHeader("Authorization") String auth,
-                                            @RequestParam Long adminId,
-                                            @RequestParam Long projectId,
+                                            @RequestParam Long ownerProjectLinkId,
                                             @RequestBody Map<String, Object> data) {
         try {
-            Users user = getScopedUserFromToken(auth, adminId, projectId);
+            Users user = getScopedUserFromToken(auth, ownerProjectLinkId);
             Long itemId = Long.parseLong(data.get("itemId").toString());
             int participants = Integer.parseInt(data.get("participants").toString());
             String stripePaymentId = data.get("stripePaymentId").toString();
@@ -423,12 +415,10 @@ public class ActivityController {
         }
     }
 
-    // ---------- cash booking (BUSINESS scope, optionally app-scoped)
+    /* ---------------- cash booking (business scope) ---------------- */
 
     @PostMapping("/book-cash")
     public ResponseEntity<?> bookCash(@RequestHeader("Authorization") String auth,
-                                      @RequestParam Long adminId,
-                                      @RequestParam Long projectId,
                                       @RequestBody BookCashRequest dto) {
         try {
             Long businessId = jwtUtil.extractBusinessId(auth);
@@ -449,7 +439,7 @@ public class ActivityController {
         }
     }
 
-    // ---------- DTO
+    /* ---------------- DTO ---------------- */
 
     public static class BookCashRequest {
         private Long itemId;

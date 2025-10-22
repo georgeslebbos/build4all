@@ -159,4 +159,7 @@ public class ChatMessagesService {
         message.setIsRead(true);
         chatRepo.save(message);
     }
+    
+   
+    
 }

@@ -27,15 +27,14 @@ public class FriendshipController {
         this.userService = userService;
     }
 
-    @ApiResponses({@ApiResponse(responseCode = "200", description = "Successful")})
+    @ApiResponses({@ApiResponse(responseCode = "200")})
     @PostMapping("/add/{friendId}")
     public ResponseEntity<?> sendFriendRequest(@PathVariable Long friendId,
-                                               @RequestParam Long adminId,
-                                               @RequestParam Long projectId,
+                                               @RequestParam Long ownerProjectLinkId,
                                                Principal principal) {
         try {
-            Users sender   = userService.getUserByEmaill(principal.getName(), adminId, projectId);
-            Users receiver = userService.getUserById(friendId, adminId, projectId);
+            Users sender   = userService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
+            Users receiver = userService.getUserById(friendId, ownerProjectLinkId);
             Friendship friendship = friendshipService.sendFriendRequest(sender, receiver);
             return ResponseEntity.ok(friendship);
         } catch (RuntimeException ex) {
@@ -45,11 +44,10 @@ public class FriendshipController {
 
     @PostMapping("/accept/{requestId}")
     public ResponseEntity<?> acceptRequest(@PathVariable Long requestId,
-                                           @RequestParam Long adminId,
-                                           @RequestParam Long projectId,
+                                           @RequestParam Long ownerProjectLinkId,
                                            Principal principal) {
         try {
-            Users receiver = userService.getUserByEmaill(principal.getName(), adminId, projectId);
+            Users receiver = userService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
             Friendship accepted = friendshipService.acceptRequest(requestId, receiver);
             return ResponseEntity.ok(accepted);
         } catch (RuntimeException ex) {
@@ -58,11 +56,10 @@ public class FriendshipController {
     }
 
     @GetMapping("/pending")
-    public ResponseEntity<?> getPendingRequests(@RequestParam Long adminId,
-                                                @RequestParam Long projectId,
+    public ResponseEntity<?> getPendingRequests(@RequestParam Long ownerProjectLinkId,
                                                 Principal principal) {
         try {
-            Users user = userService.getUserByEmaill(principal.getName(), adminId, projectId);
+            Users user = userService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
             return ResponseEntity.ok(friendshipService.getPendingRequests(user));
         } catch (RuntimeException ex) {
             return ResponseEntity.badRequest().body(Collections.singletonMap("message", ex.getMessage()));
@@ -70,11 +67,10 @@ public class FriendshipController {
     }
 
     @GetMapping("/pending/count")
-    public ResponseEntity<?> getPendingRequestCount(@RequestParam Long adminId,
-                                                    @RequestParam Long projectId,
+    public ResponseEntity<?> getPendingRequestCount(@RequestParam Long ownerProjectLinkId,
                                                     Principal principal) {
         try {
-            Users user = userService.getUserByEmaill(principal.getName(), adminId, projectId);
+            Users user = userService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
             return ResponseEntity.ok(friendshipService.getPendingRequestCount(user));
         } catch (RuntimeException ex) {
             return ResponseEntity.badRequest().body(Collections.singletonMap("message", ex.getMessage()));
@@ -82,11 +78,10 @@ public class FriendshipController {
     }
 
     @GetMapping("/my")
-    public ResponseEntity<?> getMyFriends(@RequestParam Long adminId,
-                                          @RequestParam Long projectId,
+    public ResponseEntity<?> getMyFriends(@RequestParam Long ownerProjectLinkId,
                                           Principal principal) {
         try {
-            Users user = userService.getUserByEmaill(principal.getName(), adminId, projectId);
+            Users user = userService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
             return ResponseEntity.ok(friendshipService.getAcceptedFriends(user));
         } catch (RuntimeException ex) {
             return ResponseEntity.badRequest().body(Collections.singletonMap("message", ex.getMessage()));
@@ -94,11 +89,10 @@ public class FriendshipController {
     }
 
     @GetMapping("/sent")
-    public ResponseEntity<?> getSentRequests(@RequestParam Long adminId,
-                                             @RequestParam Long projectId,
+    public ResponseEntity<?> getSentRequests(@RequestParam Long ownerProjectLinkId,
                                              Principal principal) {
         try {
-            Users user = userService.getUserByEmaill(principal.getName(), adminId, projectId);
+            Users user = userService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
             return ResponseEntity.ok(friendshipService.getSentRequests(user));
         } catch (RuntimeException ex) {
             return ResponseEntity.badRequest().body(Collections.singletonMap("message", ex.getMessage()));
@@ -107,11 +101,10 @@ public class FriendshipController {
 
     @PostMapping("/reject/{requestId}")
     public ResponseEntity<?> rejectFriendRequest(@PathVariable Long requestId,
-                                                 @RequestParam Long adminId,
-                                                 @RequestParam Long projectId,
+                                                 @RequestParam Long ownerProjectLinkId,
                                                  Principal principal) {
         try {
-            Users receiver = userService.getUserByEmaill(principal.getName(), adminId, projectId);
+            Users receiver = userService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
             friendshipService.rejectRequest(requestId, receiver);
             return ResponseEntity.ok(Collections.singletonMap("message", "Request rejected."));
         } catch (RuntimeException ex) {
@@ -121,12 +114,11 @@ public class FriendshipController {
 
     @DeleteMapping("/cancel/{friendId}")
     public ResponseEntity<?> cancelFriendRequest(@PathVariable Long friendId,
-                                                 @RequestParam Long adminId,
-                                                 @RequestParam Long projectId,
+                                                 @RequestParam Long ownerProjectLinkId,
                                                  Principal principal) {
         try {
-            Users sender   = userService.getUserByEmaill(principal.getName(), adminId, projectId);
-            Users receiver = userService.getUserById(friendId, adminId, projectId);
+            Users sender   = userService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
+            Users receiver = userService.getUserById(friendId, ownerProjectLinkId);
             friendshipService.cancelRequest(sender, receiver);
             return ResponseEntity.ok(Collections.singletonMap("message", "Request cancelled."));
         } catch (RuntimeException ex) {
@@ -136,12 +128,11 @@ public class FriendshipController {
 
     @PostMapping("/block/{userId}")
     public ResponseEntity<?> blockUser(@PathVariable Long userId,
-                                       @RequestParam Long adminId,
-                                       @RequestParam Long projectId,
+                                       @RequestParam Long ownerProjectLinkId,
                                        Principal principal) {
         try {
-            Users blocker = userService.getUserByEmaill(principal.getName(), adminId, projectId);
-            Users blocked = userService.getUserById(userId, adminId, projectId);
+            Users blocker = userService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
+            Users blocked = userService.getUserById(userId, ownerProjectLinkId);
             friendshipService.blockUser(blocker, blocked);
             return ResponseEntity.ok(Collections.singletonMap("message", "User blocked."));
         } catch (RuntimeException ex) {
@@ -151,12 +142,11 @@ public class FriendshipController {
 
     @DeleteMapping("/unblock/{userId}")
     public ResponseEntity<?> unblockUser(@PathVariable Long userId,
-                                         @RequestParam Long adminId,
-                                         @RequestParam Long projectId,
+                                         @RequestParam Long ownerProjectLinkId,
                                          Principal principal) {
         try {
-            Users blocker = userService.getUserByEmaill(principal.getName(), adminId, projectId);
-            Users blocked = userService.getUserById(userId, adminId, projectId);
+            Users blocker = userService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
+            Users blocked = userService.getUserById(userId, ownerProjectLinkId);
             friendshipService.unblockUser(blocker, blocked);
             return ResponseEntity.ok(Collections.singletonMap("message", "User unblocked."));
         } catch (RuntimeException ex) {
@@ -166,12 +156,11 @@ public class FriendshipController {
 
     @DeleteMapping("/unfriend/{userId}")
     public ResponseEntity<?> unfriend(@PathVariable Long userId,
-                                      @RequestParam Long adminId,
-                                      @RequestParam Long projectId,
+                                      @RequestParam Long ownerProjectLinkId,
                                       Principal principal) {
         try {
-            Users currentUser = userService.getUserByEmaill(principal.getName(), adminId, projectId);
-            Users friend      = userService.getUserById(userId, adminId, projectId);
+            Users currentUser = userService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
+            Users friend      = userService.getUserById(userId, ownerProjectLinkId);
             friendshipService.unfriend(currentUser, friend);
             return ResponseEntity.ok(Collections.singletonMap("message", "User unfriended."));
         } catch (RuntimeException ex) {
@@ -181,12 +170,11 @@ public class FriendshipController {
 
     @GetMapping("/status/{userId}")
     public ResponseEntity<?> getFriendshipStatus(@PathVariable Long userId,
-                                                 @RequestParam Long adminId,
-                                                 @RequestParam Long projectId,
+                                                 @RequestParam Long ownerProjectLinkId,
                                                  Principal principal) {
         try {
-            Users currentUser = userService.getUserByEmaill(principal.getName(), adminId, projectId);
-            Users otherUser   = userService.getUserById(userId, adminId, projectId);
+            Users currentUser = userService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
+            Users otherUser   = userService.getUserById(userId, ownerProjectLinkId);
 
             boolean youBlockedThem = friendshipService.didBlock(currentUser, otherUser);
             boolean theyBlockedYou = friendshipService.didBlock(otherUser, currentUser);

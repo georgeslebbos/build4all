@@ -40,23 +40,22 @@ public class PostsController {
     }
 
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized"),
-        @ApiResponse(responseCode = "500", description = "Internal Server Error")
+        @ApiResponse(responseCode = "200"),
+        @ApiResponse(responseCode = "401"),
+        @ApiResponse(responseCode = "500")
     })
     @PostMapping(consumes = {"multipart/form-data"})
     public ResponseEntity<?> createPost(@RequestParam(required = false) String content,
                                         @RequestParam(required = false) MultipartFile image,
                                         @RequestParam(required = false) String hashtags,
                                         @RequestParam(required = false, defaultValue = "PUBLIC") String visibility,
-                                        @RequestParam Long adminId,
-                                        @RequestParam Long projectId,
+                                        @RequestParam Long ownerProjectLinkId,
                                         Principal principal,
                                         @RequestHeader("Authorization") String authHeader) {
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
         if (tokenCheck != null) return tokenCheck;
 
-        Users user = usersService.getUserByEmaill(principal.getName(), adminId, projectId);
+        Users user = usersService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
 
         PostVisibility postVisibility = postVisibilityRepository.findByName(visibility.toUpperCase())
                 .orElseGet(() -> postVisibilityRepository.findByName("PUBLIC").orElse(null));
@@ -64,95 +63,88 @@ public class PostsController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Visibility setting error");
         }
 
-        Posts created = postsService.createPost(content, image, hashtags, user, postVisibility, /*owner scope*/ null);
+        Posts created = postsService.createPost(content, image, hashtags, user, postVisibility, /*owner scope*/ ownerProjectLinkId);
         return ResponseEntity.ok(new PostDto(created, user.getId()));
     }
 
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized")
+        @ApiResponse(responseCode = "200"),
+        @ApiResponse(responseCode = "401")
     })
     @GetMapping
     public ResponseEntity<List<PostDto>> getAllPosts(Principal principal,
-                                                     @RequestParam Long adminId,
-                                                     @RequestParam Long projectId,
+                                                     @RequestParam Long ownerProjectLinkId,
                                                      @RequestHeader("Authorization") String authHeader) {
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
         if (tokenCheck != null) return ResponseEntity.status(tokenCheck.getStatusCode()).build();
 
         if (principal == null) return ResponseEntity.status(401).build();
 
-        Users user = usersService.getUserByEmaill(principal.getName(), adminId, projectId);
+        Users user = usersService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
         List<PostDto> postDtos = postsService.getAllPostDtos(user.getId());
         return ResponseEntity.ok(postDtos);
     }
 
-    /** Optional owner-scoped feed if you still need it (pass a collection owner id). */
+    /** Optional owner-scoped feed (pass ownerProjectLinkId). */
     @GetMapping("/by-owner")
-    public ResponseEntity<?> getOwnerFeed(@RequestParam Long aupId,
-                                          @RequestParam Long adminId,
-                                          @RequestParam Long projectId,
+    public ResponseEntity<?> getOwnerFeed(@RequestParam Long ownerProjectLinkId,
                                           Principal principal,
                                           @RequestHeader("Authorization") String authHeader) {
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
         if (tokenCheck != null) return ResponseEntity.status(tokenCheck.getStatusCode()).build();
 
-        if (principal == null) return ResponseEntity.status(401).build();
-
-        Users user = usersService.getUserByEmaill(principal.getName(), adminId, projectId);
-        return ResponseEntity.ok(postsService.getOwnerFeed(aupId, user.getId()));
+        Users user = usersService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
+        return ResponseEntity.ok(postsService.getOwnerFeed(ownerProjectLinkId, user.getId()));
     }
 
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized")
+        @ApiResponse(responseCode = "200"),
+        @ApiResponse(responseCode = "401")
     })
     @DeleteMapping("/{postId}")
     public ResponseEntity<String> deletePost(@PathVariable Long postId,
-                                             @RequestParam Long adminId,
-                                             @RequestParam Long projectId,
+                                             @RequestParam Long ownerProjectLinkId,
                                              Principal principal,
                                              @RequestHeader("Authorization") String authHeader) {
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
         if (tokenCheck != null) return tokenCheck;
 
-        Users user = usersService.getUserByEmaill(principal.getName(), adminId, projectId);
+        Users user = usersService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
         postsService.deletePost(postId, user);
         return ResponseEntity.ok("Post deleted successfully");
     }
 
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized")
+        @ApiResponse(responseCode = "200"),
+        @ApiResponse(responseCode = "401")
     })
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<PostDto>> getPostsByUser(@PathVariable Long userId,
-                                                        @RequestParam Long adminId,
-                                                        @RequestParam Long projectId,
+                                                        @RequestParam Long ownerProjectLinkId,
                                                         @RequestHeader("Authorization") String authHeader) {
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
         if (tokenCheck != null) return ResponseEntity.status(tokenCheck.getStatusCode()).build();
 
-        // NOTE: listing user posts is not sensitive to the caller’s app user identity here,
-        // but still require adminId/projectId for consistent scoping.
+        // still scoped by ownerProjectLinkId to prevent cross-tenant access
+        Users viewer = usersService.getUserByEmaill(jwtUtil.extractUsername(authHeader.substring(7)), ownerProjectLinkId);
         List<PostDto> postDtos = postsService.getPostDtosByUser(userId);
         return ResponseEntity.ok(postDtos);
     }
 
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "403", description = "Forbidden"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized")
+        @ApiResponse(responseCode = "200"),
+        @ApiResponse(responseCode = "403"),
+        @ApiResponse(responseCode = "401")
     })
     @DeleteMapping("/{postId}/user/{userId}")
     public ResponseEntity<?> deletePostByUser(@PathVariable Long postId,
                                               @PathVariable Long userId,
-                                              @RequestParam Long adminId,
-                                              @RequestParam Long projectId,
+                                              @RequestParam Long ownerProjectLinkId,
                                               @RequestHeader("Authorization") String authHeader) {
         ResponseEntity<String> tokenCheck = validateUserToken(authHeader);
         if (tokenCheck != null) return tokenCheck;
 
+        // optional: verify caller belongs to same ownerProjectLinkId as userId if your service enforces it
         boolean deleted = postsService.deletePostByUser(postId, userId);
         if (deleted) {
             return ResponseEntity.ok("Post deleted successfully.");

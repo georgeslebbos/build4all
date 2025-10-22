@@ -1,5 +1,6 @@
 package com.build4all.user.repository;
 
+import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.catalog.domain.Category;
 import com.build4all.user.domain.Users;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -14,22 +15,22 @@ import java.util.Optional;
 @Repository
 public interface UsersRepository extends JpaRepository<Users, Long> {
 
-    /* -------- app-scoped preferred finders -------- */
+    /* -------- tenant-scoped finders (via ownerProject link) -------- */
 
-    Optional<Users> findByIdAndOwner_AdminIdAndProject_Id(Long id, Long adminId, Long projectId);
+    Optional<Users> findByIdAndOwnerProject(Long id, AdminUserProject link);
 
-    Users findByEmailAndOwner_AdminIdAndProject_Id(String email, Long adminId, Long projectId);
-    Users findByPhoneNumberAndOwner_AdminIdAndProject_Id(String phoneNumber, Long adminId, Long projectId);
-    Users findByUsernameAndOwner_AdminIdAndProject_Id(String username, Long adminId, Long projectId);
+    Users findByEmailAndOwnerProject(String email, AdminUserProject link);
+    Users findByPhoneNumberAndOwnerProject(String phoneNumber, AdminUserProject link);
+    Users findByUsernameAndOwnerProject(String username, AdminUserProject link);
 
-    boolean existsByEmailAndOwner_AdminIdAndProject_Id(String email, Long adminId, Long projectId);
-    boolean existsByPhoneNumberAndOwner_AdminIdAndProject_Id(String phone, Long adminId, Long projectId);
-    boolean existsByUsernameIgnoreCaseAndOwner_AdminIdAndProject_Id(String username, Long adminId, Long projectId);
+    boolean existsByEmailAndOwnerProject(String email, AdminUserProject link);
+    boolean existsByPhoneNumberAndOwnerProject(String phone, AdminUserProject link);
+    boolean existsByUsernameIgnoreCaseAndOwnerProject(String username, AdminUserProject link);
 
-    Optional<Users> findByGoogleIdAndOwner_AdminIdAndProject_Id(String googleId, Long adminId, Long projectId);
-    Users findByFacebookIdAndOwner_AdminIdAndProject_Id(String facebookId, Long adminId, Long projectId);
+    Optional<Users> findByGoogleIdAndOwnerProject(String googleId, AdminUserProject link);
+    Users findByFacebookIdAndOwnerProject(String facebookId, AdminUserProject link);
 
-    /* -------- legacy/global (only if you still need them) -------- */
+    /* -------- legacy/global (keep only if needed) -------- */
     Users findByEmail(String email);
     Users findByPhoneNumber(String phoneNumber);
     Users findByUsername(String username);

@@ -29,6 +29,12 @@ public class FacebookAuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid Facebook token.");
         }
 
+        // REQUIRED: tenant scope by link id
+        Long ownerProjectLinkId = toLongOrNull(request.get("ownerProjectLinkId"));
+        if (ownerProjectLinkId == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "ownerProjectLinkId is required"));
+        }
+
         Map<String, Object> fbUser = facebookAuthService.getUserData(accessToken);
         String facebookId = (String) fbUser.get("id");
         String name = (String) fbUser.get("name");
@@ -53,46 +59,34 @@ public class FacebookAuthController {
         AtomicBoolean wasInactive = new AtomicBoolean(false);
         AtomicBoolean isNewUser   = new AtomicBoolean(false);
 
-        // Optional app-scope from payload
-        Long adminId   = toLongOrNull(request.get("adminId"));
-        Long projectId = toLongOrNull(request.get("projectId"));
-
-        Users user;
-        if (adminId != null && projectId != null) {
-            // app-scoped flow
-            user = userService.handleFacebookUser(
-                    email, facebookId, firstName, lastName, picture, wasInactive, isNewUser, adminId, projectId
-            );
-        } else {
-            // legacy/global flow (no app scope)
-            user = userService.handleFacebookUser(
-                    email, facebookId, firstName, lastName, picture, wasInactive, isNewUser
-            );
-        }
+        Users user = userService.handleFacebookUser(
+            email, facebookId, firstName, lastName, picture,
+            wasInactive, isNewUser, ownerProjectLinkId
+        );
 
         String token = jwtUtil.generateToken(user);
 
         return ResponseEntity.ok(Map.of(
-                "token", token,
-                "wasInactive", wasInactive.get(),
-                "isNewUser", isNewUser.get(),
-                "user", Map.of(
-                        "id", user.getId(),
-                        "firstName", user.getFirstName(),
-                        "lastName", user.getLastName(),
-                        "email", user.getEmail(),
-                        "profileImageUrl", user.getProfilePictureUrl(),
-                        "username", user.getUsername(),
-                        "status", user.getStatus() != null ? user.getStatus().getName() : null,
-                        "lastLogin", user.getLastLogin(),
-                        "publicProfile", user.isPublicProfile(),
-                        "facebookId", user.getFacebookId()
-                )
+            "token", token,
+            "wasInactive", wasInactive.get(),
+            "isNewUser", isNewUser.get(),
+            "user", Map.of(
+                "id", user.getId(),
+                "firstName", user.getFirstName(),
+                "lastName", user.getLastName(),
+                "email", user.getEmail(),
+                "profileImageUrl", user.getProfilePictureUrl(),
+                "username", user.getUsername(),
+                "status", user.getStatus() != null ? user.getStatus().getName() : null,
+                "lastLogin", user.getLastLogin(),
+                "publicProfile", user.isPublicProfile(),
+                "facebookId", user.getFacebookId()
+            )
         ));
     }
 
     private Long toLongOrNull(Object v) {
         if (v == null) return null;
         try { return Long.valueOf(v.toString()); } catch (Exception e) { return null; }
-        }
+    }
 }

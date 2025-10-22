@@ -29,13 +29,12 @@ public class PostLikesController {
     }
 
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized")
+        @ApiResponse(responseCode = "200"),
+        @ApiResponse(responseCode = "401")
     })
     @PostMapping("/{postId}/like")
     public ResponseEntity<String> toggleLike(@PathVariable Long postId,
-                                             @RequestParam Long adminId,
-                                             @RequestParam Long projectId,
+                                             @RequestParam Long ownerProjectLinkId,
                                              Principal principal,
                                              @RequestHeader("Authorization") String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
@@ -46,19 +45,17 @@ public class PostLikesController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid user token");
         }
 
-        Users user = usersService.getUserByEmaill(principal.getName(), adminId, projectId);
+        Users user = usersService.getUserByEmaill(principal.getName(), ownerProjectLinkId);
         String result = likesService.toggleLike(postId, user);
         return ResponseEntity.ok(result);
     }
 
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized")
+        @ApiResponse(responseCode = "200"),
+        @ApiResponse(responseCode = "401")
     })
     @GetMapping("/{postId}/likes")
     public ResponseEntity<Long> countLikes(@PathVariable Long postId,
-                                           @RequestParam Long adminId,   // kept for symmetry even if not used here
-                                           @RequestParam Long projectId, // kept for symmetry
                                            @RequestHeader("Authorization") String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();

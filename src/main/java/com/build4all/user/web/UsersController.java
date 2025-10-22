@@ -27,12 +27,11 @@ public class UsersController {
     private final UserService userService;
     public UsersController(UserService userService) { this.userService = userService; }
 
-    /* -------- list by app -------- */
+    /* -------- list by tenant (ownerProjectLinkId) -------- */
     @ApiResponses({@ApiResponse(responseCode="200"),@ApiResponse(responseCode="401"),@ApiResponse(responseCode="403")})
     @GetMapping("/all")
     public ResponseEntity<?> getAllUsers(@RequestHeader(HttpHeaders.AUTHORIZATION) String token,
-                                         @RequestParam Long adminId,
-                                         @RequestParam Long projectId) {
+                                         @RequestParam Long ownerProjectLinkId) {
         try {
             if (token == null || !token.startsWith("Bearer ")) {
                 return ResponseEntity.status(401).body("Missing or invalid token");
@@ -41,7 +40,7 @@ public class UsersController {
 
             String role = jwtUtil.extractRole(token);
             if (jwtUtil.isBusinessToken(token) || "SUPER_ADMIN".equalsIgnoreCase(role) || role == null || "USER".equalsIgnoreCase(role)) {
-                return ResponseEntity.ok(userService.getAllUserDtos(adminId, projectId));
+                return ResponseEntity.ok(userService.getAllUserDtos(ownerProjectLinkId));
             }
             return ResponseEntity.status(403).body("Access denied");
         } catch (Exception e) {
@@ -49,7 +48,7 @@ public class UsersController {
         }
     }
 
-    /* -------- delete (unchanged semantics) -------- */
+    /* -------- delete -------- */
     @DeleteMapping("/{id}")
     public ResponseEntity<String> deleteUser(@PathVariable Long id,
                                              @RequestBody Map<String, String> body,
@@ -86,14 +85,13 @@ public class UsersController {
         }
     }
 
-    /* -------- password reset (app-scoped) -------- */
+    /* -------- password reset (tenant) -------- */
     @PostMapping("/reset-password")
     public ResponseEntity<Map<String, String>> sendResetCode(@RequestBody Map<String, String> body,
-                                                             @RequestParam Long adminId,
-                                                             @RequestParam Long projectId) {
+                                                             @RequestParam Long ownerProjectLinkId) {
         try {
             String email = body.get("email");
-            boolean ok = userService.resetPassword(email, adminId, projectId);
+            boolean ok = userService.resetPassword(email, ownerProjectLinkId);
             return ok ? ResponseEntity.ok(Map.of("message", "Reset code sent"))
                       : ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "User not found"));
         } catch (Exception e) {
@@ -103,12 +101,11 @@ public class UsersController {
 
     @PostMapping("/verify-reset-code")
     public ResponseEntity<Map<String, String>> verifyCode(@RequestBody Map<String, String> body,
-                                                          @RequestParam Long adminId,
-                                                          @RequestParam Long projectId) {
+                                                          @RequestParam Long ownerProjectLinkId) {
         try {
             String email = body.get("email");
             String code  = body.get("code");
-            return userService.verifyResetCode(email, code, adminId, projectId)
+            return userService.verifyResetCode(email, code, ownerProjectLinkId)
                     ? ResponseEntity.ok(Map.of("message", "Code verified successfully"))
                     : ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", "Invalid code"));
         } catch (Exception e) {
@@ -118,8 +115,7 @@ public class UsersController {
 
     @PostMapping("/update-password")
     public ResponseEntity<Map<String, String>> updatePassword(@RequestBody Map<String, String> body,
-                                                              @RequestParam Long adminId,
-                                                              @RequestParam Long projectId) {
+                                                              @RequestParam Long ownerProjectLinkId) {
         try {
             String email = body.get("email");
             String code  = body.get("code");
@@ -127,7 +123,7 @@ public class UsersController {
             if (newPassword == null || newPassword.isBlank()) {
                 return ResponseEntity.badRequest().body(Map.of("message", "New password is required"));
             }
-            boolean ok = userService.updatePassword(email, code, newPassword, adminId, projectId);
+            boolean ok = userService.updatePassword(email, code, newPassword, ownerProjectLinkId);
             return ok ? ResponseEntity.ok(Map.of("message", "Password updated successfully"))
                       : ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", "Invalid code or user"));
         } catch (Exception e) {
@@ -135,14 +131,11 @@ public class UsersController {
         }
     }
 
-    /* -------- misc endpoints kept; add adminId/projectId where lookups happen if needed -------- */
-
     @GetMapping("/{id}")
     public ResponseEntity<UserDto> getUserById(@PathVariable Long id,
-                                               @RequestParam Long adminId,
-                                               @RequestParam Long projectId) {
+                                               @RequestParam Long ownerProjectLinkId) {
         try {
-            Users user = userService.getUserById(id, adminId, projectId);
+            Users user = userService.getUserById(id, ownerProjectLinkId);
             return ResponseEntity.ok(new UserDto(user));
         } catch (RuntimeException e) {
             return ResponseEntity.status(404).build();

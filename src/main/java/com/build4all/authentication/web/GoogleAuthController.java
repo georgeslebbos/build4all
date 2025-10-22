@@ -1,20 +1,16 @@
 package com.build4all.authentication.web;
 
-import com.build4all.user.repository.UserStatusRepository;
+import com.build4all.user.domain.Users;
+import com.build4all.security.JwtUtil;
+import com.build4all.user.service.UserService;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken.Payload;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.json.jackson2.JacksonFactory;
-
-import com.build4all.user.domain.Users;
-import com.build4all.security.JwtUtil;
-import com.build4all.user.service.UserService;
-
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
-import org.springframework.http.HttpStatus;
+import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -29,19 +25,20 @@ public class GoogleAuthController {
 
     private static final String CLIENT_ID = "851915342014-j24igdgk6pvfqh4hu6pbs65jtp6a1r0k.apps.googleusercontent.com";
 
-    @Autowired
-    private UserService userService;
-    
-    @Autowired
-    private UserStatusRepository userStatusRepository;
-
-
-    @Autowired
-    private JwtUtil jwtUtil;
+    @Autowired private UserService userService;
+    @Autowired private JwtUtil jwtUtil;
 
     @PostMapping("/google")
-    public ResponseEntity<?> googleLogin(@RequestBody Map<String, String> request) {
-        String idTokenString = request.get("idToken");
+    public ResponseEntity<?> googleLogin(@RequestBody Map<String, Object> request) {
+        String idTokenString = (String) request.get("idToken");
+
+        // 👇 tenant: ownerProjectLinkId بدل adminId/projectId
+        Long ownerProjectLinkId = toLongOrNull(request.get("ownerProjectLinkId"));
+        if (ownerProjectLinkId == null) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "message", "ownerProjectLinkId is required"
+            ));
+        }
 
         try {
             GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(
@@ -55,16 +52,20 @@ public class GoogleAuthController {
             }
 
             Payload payload = idToken.getPayload();
-            String email = payload.getEmail();
-            String fullName = (String) payload.get("name");
+            String email      = payload.getEmail();
+            String fullName   = (String) payload.get("name");
             String pictureUrl = (String) payload.get("picture");
-            String googleId = payload.getSubject(); // ✅ extract Google ID
+            String googleId   = payload.getSubject();
 
             AtomicBoolean wasInactive = new AtomicBoolean(false);
-            AtomicBoolean isNewUser = new AtomicBoolean(false);
-            Users user = userService.handleGoogleUser(email, fullName, pictureUrl, googleId, wasInactive, isNewUser);
+            AtomicBoolean isNewUser   = new AtomicBoolean(false);
 
-            String currentStatus = user.getStatus().getName();
+            
+            Users user = userService.handleGoogleUser(
+                email, fullName, pictureUrl, googleId, wasInactive, isNewUser, ownerProjectLinkId
+            );
+
+            String currentStatus = user.getStatus() != null ? user.getStatus().getName() : null;
             if ("DELETED".equalsIgnoreCase(currentStatus)) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN)
                         .body(Map.of("message", "This account has been deleted and cannot be accessed."));
@@ -77,17 +78,16 @@ public class GoogleAuthController {
                     "wasInactive", true,
                     "token", token,
                     "user", Map.of(
-                            "id", user.getId(),
-                            "email", user.getEmail(),
-                            "firstName", user.getFirstName(),
-                            "lastName", user.getLastName(),
-                            "username", user.getUsername(),
-                            "profilePictureUrl", user.getProfilePictureUrl()
+                        "id", user.getId(),
+                        "email", user.getEmail(),
+                        "firstName", user.getFirstName(),
+                        "lastName", user.getLastName(),
+                        "username", user.getUsername(),
+                        "profilePictureUrl", user.getProfilePictureUrl()
                     )
                 ));
-            
             }
-            
+
             user.setLastLogin(LocalDateTime.now());
             userService.save(user);
 
@@ -102,7 +102,7 @@ public class GoogleAuthController {
                     "email", user.getEmail(),
                     "profileImageUrl", user.getProfilePictureUrl(),
                     "username", user.getUsername(),
-                    "status", user.getStatus().getName(),
+                    "status", user.getStatus() != null ? user.getStatus().getName() : null,
                     "lastLogin", user.getLastLogin(),
                     "publicProfile", user.isPublicProfile(),
                     "googleId", user.getGoogleId()
@@ -115,5 +115,8 @@ public class GoogleAuthController {
         }
     }
 
-
+    private Long toLongOrNull(Object v) {
+        if (v == null) return null;
+        try { return Long.valueOf(v.toString()); } catch (Exception e) { return null; }
+    }
 }

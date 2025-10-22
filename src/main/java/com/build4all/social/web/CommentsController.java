@@ -30,39 +30,37 @@ public class CommentsController {
         this.jwtUtil = jwtUtil;
     }
 
-    private Users getUserFromToken(String authHeader, Long adminId, Long projectId) {
+    private Users getUserFromToken(String authHeader, Long ownerProjectLinkId) {
         if (authHeader == null || !authHeader.startsWith("Bearer "))
             throw new RuntimeException("Missing or invalid Authorization header");
         String jwt = authHeader.substring(7);
         String emailOrPhone = jwtUtil.extractUsername(jwt);
-        return usersService.getUserByEmaill(emailOrPhone, adminId, projectId);
+        return usersService.getUserByEmaill(emailOrPhone, ownerProjectLinkId);
     }
 
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized")
+        @ApiResponse(responseCode = "200"),
+        @ApiResponse(responseCode = "401")
     })
     @PostMapping("/{postId}")
     public CommentDto addComment(@PathVariable Long postId,
                                  @RequestParam String content,
-                                 @RequestParam Long adminId,
-                                 @RequestParam Long projectId,
+                                 @RequestParam Long ownerProjectLinkId,
                                  @RequestHeader("Authorization") String authHeader) {
-        Users user = getUserFromToken(authHeader, adminId, projectId);
+        Users user = getUserFromToken(authHeader, ownerProjectLinkId);
         Comments comment = commentsService.addComment(postId, content, user);
         return new CommentDto(comment, user.getId());
     }
 
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized")
+        @ApiResponse(responseCode = "200"),
+        @ApiResponse(responseCode = "401")
     })
     @GetMapping("/{postId}")
     public ResponseEntity<List<CommentDto>> getComments(@PathVariable Long postId,
-                                                        @RequestParam Long adminId,
-                                                        @RequestParam Long projectId,
+                                                        @RequestParam Long ownerProjectLinkId,
                                                         @RequestHeader("Authorization") String authHeader) {
-        Users user = getUserFromToken(authHeader, adminId, projectId);
+        Users user = getUserFromToken(authHeader, ownerProjectLinkId);
         List<Comments> comments = commentsService.getCommentsByPost(postId);
         List<CommentDto> dtos = comments.stream()
                 .map(c -> new CommentDto(c, user.getId()))
@@ -71,15 +69,14 @@ public class CommentsController {
     }
 
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Successful"),
-        @ApiResponse(responseCode = "401", description = "Unauthorized")
+        @ApiResponse(responseCode = "200"),
+        @ApiResponse(responseCode = "401")
     })
     @DeleteMapping("/{commentId}")
     public ResponseEntity<String> deleteComment(@PathVariable Long commentId,
-                                                @RequestParam Long adminId,
-                                                @RequestParam Long projectId,
+                                                @RequestParam Long ownerProjectLinkId,
                                                 @RequestHeader("Authorization") String authHeader) {
-        Users user = getUserFromToken(authHeader, adminId, projectId);
+        Users user = getUserFromToken(authHeader, ownerProjectLinkId);
         commentsService.deleteComment(commentId, user);
         return ResponseEntity.ok("Comment deleted successfully");
     }

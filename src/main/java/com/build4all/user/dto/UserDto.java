@@ -17,7 +17,10 @@ public class UserDto {
     private UserStatus status;
     private LocalDateTime lastLogin;
 
-    // app info (optional but handy for FE)
+    // unified tenant link id (preferred for FE)
+    private Long ownerProjectLinkId;
+
+    // optional: still return these for convenience (resolved from link)
     private Long adminId;
     private Long projectId;
 
@@ -33,8 +36,17 @@ public class UserDto {
         this.publicProfile = user.getIsPublicProfile() != null && user.getIsPublicProfile();
         this.status = user.getStatus();
         this.lastLogin = user.getLastLogin();
-        this.adminId = user.getOwner() != null ? user.getOwner().getAdminId() : null;
-        this.projectId = user.getProject() != null ? user.getProject().getId() : null;
+
+        if (user.getOwnerProject() != null) {
+            this.ownerProjectLinkId = user.getOwnerProject().getId();  // <-- was getAupId()
+            if (user.getOwnerProject().getAdmin() != null) {
+                this.adminId = user.getOwnerProject().getAdmin().getAdminId();
+            }
+            if (user.getOwnerProject().getProject() != null) {
+                this.projectId = user.getOwnerProject().getProject().getId();
+            }
+        }
+
     }
 
     public Long getId() { return id; }
@@ -46,6 +58,7 @@ public class UserDto {
     public boolean isPublicProfile() { return publicProfile; }
     public UserStatus getStatus() { return status; }
     public LocalDateTime getLastLogin() { return lastLogin; }
+    public Long getOwnerProjectLinkId() { return ownerProjectLinkId; }
     public Long getAdminId() { return adminId; }
     public Long getProjectId() { return projectId; }
 
@@ -58,6 +71,7 @@ public class UserDto {
     public void setPublicProfile(boolean publicProfile) { this.publicProfile = publicProfile; }
     public void setStatus(UserStatus status) { this.status = status; }
     public void setLastLogin(LocalDateTime lastLogin) { this.lastLogin = lastLogin; }
+    public void setOwnerProjectLinkId(Long ownerProjectLinkId) { this.ownerProjectLinkId = ownerProjectLinkId; }
     public void setAdminId(Long adminId) { this.adminId = adminId; }
     public void setProjectId(Long projectId) { this.projectId = projectId; }
 }
