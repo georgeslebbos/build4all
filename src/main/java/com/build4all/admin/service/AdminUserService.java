@@ -1,12 +1,10 @@
 package com.build4all.admin.service;
 
 import com.build4all.admin.domain.AdminUser;
-import com.build4all.admin.domain.AdminUserBusiness;
 import com.build4all.business.domain.Businesses;
 import com.build4all.review.repository.ReviewRepository;
 import com.build4all.role.domain.Role;
 import com.build4all.admin.repository.AdminUsersRepository;
-import com.build4all.admin.repository.AdminUserBusinessRepository;
 import com.build4all.role.repository.RoleRepository;
 import com.build4all.user.domain.Users;
 import com.build4all.user.repository.UsersRepository;
@@ -29,12 +27,10 @@ public class AdminUserService {
     @Autowired
     private AdminUsersRepository adminUserRepository;
 
-    @Autowired
-    private AdminUserBusinessRepository adminUserBusinessRepository;
+    // REMOVED: AdminUserBusinessRepository
 
     @Autowired
     private ItemBookingsRepository itemBookingsRepository;
-
 
     @Autowired
     private ReviewRepository reviewRepository;
@@ -65,7 +61,7 @@ public class AdminUserService {
     }
 
     public AdminUser createAdminUser(String username, String firstName, String lastName,
-            String email, String plainPassword, String roleName) {
+                                     String email, String plainPassword, String roleName) {
 
         Role role = roleRepository.findByName(roleName.toUpperCase())
                 .orElseThrow(() -> new RuntimeException("Role not found: " + roleName));
@@ -100,7 +96,7 @@ public class AdminUserService {
                 user.getFirstName(),
                 user.getLastName(),
                 user.getEmail(),
-                user.getPasswordHash(), // assuming hash is valid
+                user.getPasswordHash(),
                 managerRole);
 
         return adminUserRepository.save(manager);
@@ -117,14 +113,12 @@ public class AdminUserService {
         manager.setEmail(user.getEmail());
         manager.setPasswordHash(user.getPasswordHash());
         manager.setRole(managerRole);
+
+        // 👇 Direct FK instead of join-table
         manager.setBusiness(business);
 
-        AdminUser savedManager = adminUserRepository.save(manager);
-
-        AdminUserBusiness adminUserBusiness = new AdminUserBusiness(business, savedManager);
-        adminUserBusinessRepository.save(adminUserBusiness);
-
-        return savedManager;
+        // 👇 No AdminUserBusiness creation anymore
+        return adminUserRepository.save(manager);
     }
 
     public List<UserSummaryDTO> getAllUserSummaries() {
@@ -154,17 +148,15 @@ public class AdminUserService {
 
     @Transactional
     public void deleteUserAndDependencies(Long userId) {
-        reviewRepository.deleteByCustomer_Id(userId); // ✅ use userId here
+        reviewRepository.deleteByCustomer_Id(userId);
         itemBookingsRepository.deleteByUser_Id(userId);
         usersRepository.deleteById(userId);
     }
 
     @Transactional
     public void deleteManagerById(Long adminId) {
-        var links = adminUserBusinessRepository.findByAdmin_AdminId(adminId);
-        if (!links.isEmpty()) {
-            adminUserBusinessRepository.deleteAll(links);
-        }
+        // OLD: delete links from admin_user_business
+        // NEW: not needed; just delete the AdminUser (FK is on AdminUser now)
         adminUserRepository.findById(adminId).ifPresent(adminUserRepository::delete);
     }
 
@@ -194,9 +186,10 @@ public class AdminUserService {
     }
 
     public boolean isUserAlreadyManager(Users user, Businesses business) {
+        // Checks for an AdminUser with the same email tied to the same business (FK)
         List<AdminUser> results = adminUserRepository.findByEmailAndBusiness(user.getEmail(), business);
         return !results.isEmpty();
-}
+    }
 
     public void deleteManagerByEmail(String email) {
         Optional<AdminUser> admin = adminUserRepository.findByEmail(email);
@@ -204,7 +197,7 @@ public class AdminUserService {
     }
 
     public Optional<AdminUser> findByUserEmail(String email) {
-        return adminUserRepository.findByEmail(email); // email-based lookup
+        return adminUserRepository.findByEmail(email);
     }
 
     public List<AdminUser> findAllByUserEmail(String email) {
@@ -214,9 +207,4 @@ public class AdminUserService {
     public boolean hasSuperAdmin() {
         return adminUserRepository.countByRoleNameIgnoreCase("SUPER_ADMIN") > 0;
     }
-
-
-
-	
-
 }

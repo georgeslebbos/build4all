@@ -1,3 +1,4 @@
+// com/build4all/catalog/service/CategoryService.java
 package com.build4all.catalog.service;
 
 import com.build4all.catalog.domain.Category;
@@ -23,9 +24,5 @@ public class CategoryService {
 
     public List<Category> listByProject(Long projectId) {
         return repo.findByProject_IdOrderByNameAsc(projectId);
-    }
-
-    public List<Category> listByOwnerLink(Long aupId) {
-        return repo.findByOwnerProject_IdOrderByNameAsc(aupId);
     }
 }

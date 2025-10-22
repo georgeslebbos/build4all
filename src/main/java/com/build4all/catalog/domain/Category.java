@@ -1,6 +1,6 @@
+// com/build4all/catalog/domain/Category.java
 package com.build4all.catalog.domain;
 
-import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.project.domain.Project;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
@@ -18,11 +18,6 @@ public class Category {
     @ManyToOne(optional = false, fetch = FetchType.LAZY)
     @JoinColumn(name = "project_id", nullable = false)
     private Project project;
-
-    /** Optional per-owner filter (single-column FK to admin_user_projects.aup_id) */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "aup_id") // nullable: only used if you want owner-specific categories
-    private AdminUserProject ownerProject;
 
     @Column(name = "icon_name")
     private String iconName;
@@ -67,9 +62,6 @@ public class Category {
 
     public Project getProject() { return project; }
     public void setProject(Project project) { this.project = project; }
-
-    public AdminUserProject getOwnerProject() { return ownerProject; }
-    public void setOwnerProject(AdminUserProject ownerProject) { this.ownerProject = ownerProject; }
 
     public String getIconName() { return iconName; }
     public void setIconName(String iconName) { this.iconName = iconName; }

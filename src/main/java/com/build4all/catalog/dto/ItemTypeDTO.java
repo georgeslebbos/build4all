@@ -1,3 +1,4 @@
+// com/build4all/catalog/dto/ItemTypeDTO.java
 package com.build4all.catalog.dto;
 
 public class ItemTypeDTO {
@@ -34,13 +35,6 @@ public class ItemTypeDTO {
     public String getIconLib() { return iconLib; }
     public void setIconLib(String iconLib) { this.iconLib = iconLib; }
 
-	public Long getCategoryId() {
-		return categoryId;
-	}
-
-	public void setCategoryId(Long categoryId) {
-		this.categoryId = categoryId;
-	}
-    
-    
+	public Long getCategoryId() { return categoryId; }
+	public void setCategoryId(Long categoryId) { this.categoryId = categoryId; }
 }

@@ -1,19 +1,34 @@
 package com.build4all.business.domain;
 
+import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.catalog.domain.Item;
 import com.build4all.review.domain.Review;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-
-
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 @Entity
-@Table(name = "Businesses")
+@Table(
+    name = "businesses",
+    // Keep legacy table-wide uniqueness rules relaxed so we can allow duplicates across apps.
+    // Enforce scoping via composite unique constraints below:
+    uniqueConstraints = {
+        @UniqueConstraint(name = "uk_biz_app_email", columnNames = {"owner_project_link_id", "email"}),
+        @UniqueConstraint(name = "uk_biz_app_phone", columnNames = {"owner_project_link_id", "phone_number"}),
+        @UniqueConstraint(name = "uk_biz_app_name", columnNames = {"owner_project_link_id", "business_name"})
+    },
+    indexes = {
+        @Index(name = "idx_biz_app", columnList = "owner_project_link_id"),
+        @Index(name = "idx_biz_email", columnList = "email"),
+        @Index(name = "idx_biz_phone", columnList = "phone_number"),
+        @Index(name = "idx_biz_status", columnList = "status"),
+        @Index(name = "idx_biz_public", columnList = "is_public_profile")
+    }
+)
 public class Businesses {
 
     @Id
@@ -21,13 +36,18 @@ public class Businesses {
     @Column(name = "business_id")
     private Long id;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "aup_id", referencedColumnName = "aup_id", nullable = false)
+    private AdminUserProject ownerProjectLink;
+
     @Column(name = "business_name", nullable = false)
     private String businessName;
 
-    @Column(nullable = true, unique = true)
+    // IMPORTANT: remove global unique=true so duplicates across apps are allowed.
+    @Column(name = "email", nullable = true)
     private String email;
 
-    @Column(name = "phone_number",nullable = true,unique=true)
+    @Column(name = "phone_number", nullable = true)
     private String phoneNumber;
 
     @Column(name = "password_hash", nullable = false)
@@ -45,14 +65,14 @@ public class Businesses {
     @Column(name = "website_url")
     private String websiteUrl;
 
-    // ✅ FOREIGN KEY version of BusinessStatus
+    // FK -> BusinessStatus (keep same column name)
     @ManyToOne(fetch = FetchType.EAGER)
-    @JoinColumn(name = "status")  // Keep the same column name
+    @JoinColumn(name = "status")
     private BusinessStatus status;
 
     @Column(name = "is_public_profile", nullable = true)
     private Boolean isPublicProfile = true;
-    
+
     @Column(name = "stripe_account_id")
     private String stripeAccountId;
 
@@ -66,10 +86,9 @@ public class Businesses {
     @OneToMany(mappedBy = "business", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonIgnore
     private List<PendingManager> pendingManagers;
-    
+
     @OneToMany(mappedBy = "business", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Review> reviews;
-
 
     @Column(name = "last_login_at")
     private LocalDateTime lastLoginAt;
@@ -80,9 +99,7 @@ public class Businesses {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
-    // Constructors
-    public Businesses() {
-    }
+    public Businesses() {}
 
     public Businesses(String businessName, String email, String phoneNumber, String passwordHash,
                       String businessLogoUrl, String businessBannerUrl, String description, String websiteUrl) {
@@ -96,10 +113,13 @@ public class Businesses {
         this.websiteUrl = websiteUrl;
     }
 
-    // Getters and Setters
+    /* -------- getters / setters -------- */
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+
+    public AdminUserProject getOwnerProjectLink() { return ownerProjectLink; }
+    public void setOwnerProjectLink(AdminUserProject ownerProjectLink) { this.ownerProjectLink = ownerProjectLink; }
 
     public String getBusinessName() { return businessName; }
     public void setBusinessName(String businessName) { this.businessName = businessName; }
@@ -140,43 +160,29 @@ public class Businesses {
     public LocalDateTime getLastLoginAt() { return lastLoginAt; }
     public void setLastLoginAt(LocalDateTime lastLoginAt) { this.lastLoginAt = lastLoginAt; }
 
+    public String getStripeAccountId() { return stripeAccountId; }
+    public void setStripeAccountId(String stripeAccountId) { this.stripeAccountId = stripeAccountId; }
+
+    public String getFcmToken() { return fcmToken; }
+    public void setFcmToken(String fcmToken) { this.fcmToken = fcmToken; }
+
+    public List<Item> getItems() { return items; }
+    public void setItems(List<Item> items) { this.items = items; }
+
+    public List<PendingManager> getPendingManagers() { return pendingManagers; }
+    public void setPendingManagers(List<PendingManager> pendingManagers) { this.pendingManagers = pendingManagers; }
+
+    public List<Review> getReviews() { return reviews; }
+    public void setReviews(List<Review> reviews) { this.reviews = reviews; }
+
     @PrePersist
     protected void onCreate() {
         this.createdAt = this.updatedAt = LocalDateTime.now();
         if (this.isPublicProfile == null) this.isPublicProfile = true;
-        // ❌ don't set status here — it must be injected from service
     }
 
     @PreUpdate
     protected void onUpdate() {
         this.updatedAt = LocalDateTime.now();
     }
-    
-    public List<Item> getItems() {
-        return items;
-    }
-
-    public void setItems(List<Item> items) {
-        this.items = items;
-    }
-    
-    public String getStripeAccountId() {
-        return stripeAccountId;
-    }
-
-    public void setStripeAccountId(String stripeAccountId) {
-        this.stripeAccountId = stripeAccountId;
-    }
-
-	
-
-
-public String getFcmToken() {
-    return fcmToken;
-}
-
-public void setFcmToken(String fcmToken) {
-    this.fcmToken = fcmToken;
-}
-
 }

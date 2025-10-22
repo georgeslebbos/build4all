@@ -1,7 +1,6 @@
+// com/build4all/catalog/web/CategoryController.java
 package com.build4all.catalog.web;
 
-import com.build4all.admin.domain.AdminUserProject;
-import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.catalog.dto.CategoryRequest;
 import com.build4all.catalog.domain.Icon;
 import com.build4all.project.domain.Project;
@@ -25,16 +24,13 @@ public class CategoryController {
     private final CategoryRepository categoryRepo;
     private final IconRepository iconRepo;
     private final ProjectRepository projectRepo;
-    private final AdminUserProjectRepository aupRepo;
 
     public CategoryController(CategoryRepository categoryRepo,
                               IconRepository iconRepo,
-                              ProjectRepository projectRepo,
-                              AdminUserProjectRepository aupRepo) {
+                              ProjectRepository projectRepo) {
         this.categoryRepo = categoryRepo;
         this.iconRepo = iconRepo;
         this.projectRepo = projectRepo;
-        this.aupRepo = aupRepo;
     }
 
     @GetMapping
@@ -47,15 +43,6 @@ public class CategoryController {
         return categoryRepo.findByProject_IdOrderByNameAsc(projectId);
     }
 
-    // NEW: list by owner (adminId + projectId) -> resolves aup_id then filters
-    @GetMapping("/by-owner")
-    public ResponseEntity<?> listByOwner(@RequestParam Long adminId,
-                                         @RequestParam Long projectId) {
-        Optional<AdminUserProject> link = aupRepo.findByAdmin_AdminIdAndProject_Id(adminId, projectId);
-        if (link.isEmpty()) return ResponseEntity.badRequest().body("Owner-project link not found");
-        return ResponseEntity.ok(categoryRepo.findByOwnerProject_IdOrderByNameAsc(link.get().getId()));
-    }
-
     @GetMapping("/{id}")
     public ResponseEntity<Category> get(@PathVariable Long id) {
         return categoryRepo.findById(id)
@@ -65,9 +52,7 @@ public class CategoryController {
 
     @PostMapping
     public ResponseEntity<?> create(@RequestBody CategoryRequest req,
-                                    @RequestParam(defaultValue = "true") boolean ensureIconExists,
-                                    @RequestParam(required = false) Long aupId // optional owner link id
-    ) {
+                                    @RequestParam(defaultValue = "true") boolean ensureIconExists) {
         if (req.getProjectId() == null) return ResponseEntity.badRequest().body("projectId is required");
         if (req.getName() == null || req.getName().isBlank()) return ResponseEntity.badRequest().body("name is required");
 
@@ -102,19 +87,13 @@ public class CategoryController {
         entity.setIconName(iconName);
         entity.setIconLibrary(iconLib);
 
-        // optional link to owner for filtering
-        if (aupId != null) {
-            aupRepo.findById(aupId).ifPresent(entity::setOwnerProject);
-        }
-
         Category saved = categoryRepo.save(entity);
         return ResponseEntity.created(URI.create("/api/admin/categories/" + saved.getId())).body(saved);
     }
 
     @PostMapping("/batch")
     public ResponseEntity<?> createBatch(@RequestBody List<CategoryRequest> list,
-                                         @RequestParam(defaultValue = "true") boolean ensureIconExists,
-                                         @RequestParam(required = false) Long aupId) {
+                                         @RequestParam(defaultValue = "true") boolean ensureIconExists) {
         if (list == null || list.isEmpty()) return ResponseEntity.badRequest().body("payload is empty");
 
         Optional<CategoryRequest> missing = list.stream()
@@ -122,12 +101,6 @@ public class CategoryController {
                 .findFirst();
         if (missing.isPresent()) return ResponseEntity.badRequest().body("each item requires projectId and name");
 
-        AdminUserProject ownerLink = null;
-        if (aupId != null) {
-            ownerLink = aupRepo.findById(aupId).orElse(null);
-        }
-
-        AdminUserProject finalOwnerLink = ownerLink;
         List<Category> saved = list.stream().map(req -> {
             Project project = projectRepo.findById(req.getProjectId()).orElse(null);
             if (project == null) return null;
@@ -157,7 +130,6 @@ public class CategoryController {
             entity.setName(name);
             entity.setIconName(iconName);
             entity.setIconLibrary(iconLib);
-            if (finalOwnerLink != null) entity.setOwnerProject(finalOwnerLink);
 
             return categoryRepo.save(entity);
         }).filter(Objects::nonNull).collect(Collectors.toList());
@@ -168,8 +140,7 @@ public class CategoryController {
     @PutMapping("/{id}")
     public ResponseEntity<?> update(@PathVariable Long id,
                                     @RequestBody CategoryRequest req,
-                                    @RequestParam(defaultValue = "true") boolean ensureIconExists,
-                                    @RequestParam(required = false) Long aupId) {
+                                    @RequestParam(defaultValue = "true") boolean ensureIconExists) {
         Optional<Category> opt = categoryRepo.findById(id);
         if (opt.isEmpty()) return ResponseEntity.notFound().build();
         Category existing = opt.get();
@@ -219,15 +190,6 @@ public class CategoryController {
                         iconRepo.save(icon);
                     }
                 });
-            }
-        }
-
-        // set/clear owner link if provided explicitly
-        if (aupId != null) {
-            if (aupId <= 0) {
-                existing.setOwnerProject(null);
-            } else {
-                aupRepo.findById(aupId).ifPresent(existing::setOwnerProject);
             }
         }
 

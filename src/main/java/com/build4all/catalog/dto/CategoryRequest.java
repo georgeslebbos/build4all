@@ -1,3 +1,4 @@
+// com/build4all/catalog/dto/CategoryRequest.java
 package com.build4all.catalog.dto;
 
 public class CategoryRequest {

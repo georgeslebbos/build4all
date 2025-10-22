@@ -1,3 +1,4 @@
+// com/build4all/catalog/service/ItemTypeService.java
 package com.build4all.catalog.service;
 
 import com.build4all.catalog.domain.Category;
@@ -82,10 +83,5 @@ public class ItemTypeService {
     @Transactional(readOnly = true)
     public List<ItemType> listByCategory(Long categoryId) {
         return itemTypeRepository.findByCategory_IdOrderByNameAsc(categoryId);
-    }
-
-    @Transactional(readOnly = true)
-    public List<ItemType> listByOwnerLink(Long aupId) {
-        return itemTypeRepository.findByOwnerProject_IdOrderByNameAsc(aupId);
     }
 }
