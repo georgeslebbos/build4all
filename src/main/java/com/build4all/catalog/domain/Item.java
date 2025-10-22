@@ -21,7 +21,7 @@ public abstract class Item {
 
     // NEW: single FK to admin_user_projects (aup_id)
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "owner_project_link_id")
+    @JoinColumn(name = "aup_id")
     @com.fasterxml.jackson.annotation.JsonIgnore
     private AdminUserProject ownerProject;
 

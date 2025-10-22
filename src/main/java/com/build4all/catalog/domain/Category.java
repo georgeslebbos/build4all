@@ -21,7 +21,7 @@ public class Category {
 
     /** Optional per-owner filter (single-column FK to admin_user_projects.aup_id) */
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "owner_project_link_id") // nullable: only used if you want owner-specific categories
+    @JoinColumn(name = "aup_id") // nullable: only used if you want owner-specific categories
     private AdminUserProject ownerProject;
 
     @Column(name = "icon_name")

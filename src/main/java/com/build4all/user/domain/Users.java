@@ -36,7 +36,7 @@ public class Users {
 
     /** Unified tenant link (owner + project) */
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "owner_project_link_id", referencedColumnName = "aup_id", nullable = true)
+    @JoinColumn(name = "aup_id", referencedColumnName = "aup_id", nullable = true)
     private AdminUserProject ownerProject;
 
     @Column(nullable = false)

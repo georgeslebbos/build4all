@@ -29,7 +29,7 @@ public class ItemType {
 
     /** OPTIONAL: owner filter (single-column FK to admin_user_projects.aup_id) */
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "owner_project_link_id")
+    @JoinColumn(name = "aup_id")
     private AdminUserProject ownerProject;
 
     public ItemType() {}
