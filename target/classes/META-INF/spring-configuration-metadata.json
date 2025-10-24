@@ -1,12 +1,46 @@
 {
   "groups": [
     {
+      "name": "app",
+      "type": "com.build4all.app.config.AppEnvProperties",
+      "sourceType": "com.build4all.app.config.AppEnvProperties"
+    },
+    {
+      "name": "ci.webhook",
+      "type": "com.build4all.app.config.CiWebhookProperties",
+      "sourceType": "com.build4all.app.config.CiWebhookProperties"
+    },
+    {
       "name": "security.jwt",
       "type": "com.build4all.security.JwtProperties",
       "sourceType": "com.build4all.security.JwtProperties"
     }
   ],
   "properties": [
+    {
+      "name": "app.owner-project-link-id",
+      "type": "java.lang.String",
+      "description": "OwnerProjectLinkId used by the mobile app to scope tenant calls",
+      "sourceType": "com.build4all.app.config.AppEnvProperties"
+    },
+    {
+      "name": "app.ws-path",
+      "type": "java.lang.String",
+      "description": "Optional: websocket path to hand to the app",
+      "sourceType": "com.build4all.app.config.AppEnvProperties"
+    },
+    {
+      "name": "ci.webhook.token",
+      "type": "java.lang.String",
+      "description": "Shared secret header; optional",
+      "sourceType": "com.build4all.app.config.CiWebhookProperties"
+    },
+    {
+      "name": "ci.webhook.url",
+      "type": "java.lang.String",
+      "description": "Optional CI URL; if blank we skip",
+      "sourceType": "com.build4all.app.config.CiWebhookProperties"
+    },
     {
       "name": "security.jwt.expiration-time",
       "type": "java.lang.Long",

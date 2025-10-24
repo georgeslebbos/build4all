@@ -1,3 +1,4 @@
+// src/main/java/com/build4all/security/JwtUtil.java
 package com.build4all.security;
 
 import io.jsonwebtoken.Jwts;
@@ -16,16 +17,30 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Utility class for generating and parsing JWTs for:
+ * - Users  (role = USER)
+ * - Businesses (role = BUSINESS)
+ * - Admins (role = SUPER_ADMIN / OWNER / MANAGER)
+ *
+ * Also supports a short-lived "Owner Registration Token" used between OTP verification
+ * and final owner account creation.
+ */
 @Component
 public class JwtUtil {
 
+    /** HMAC signing key. */
     private final Key key;
+
+    /** Standard access token TTL in milliseconds. */
     private final long expirationTime;
 
     public JwtUtil(JwtProperties jwtProperties) {
         this.key = Keys.hmacShaKeyFor(jwtProperties.getSecretKey().getBytes());
         this.expirationTime = jwtProperties.getExpirationTime();
     }
+
+    /* ======================== LOGIN TOKENS ======================== */
 
     public String generateToken(Users user) {
         String subject = user.getEmail() != null ? user.getEmail() : user.getPhoneNumber();
@@ -45,9 +60,9 @@ public class JwtUtil {
     }
 
     public String generateToken(Businesses business) {
-        String subject = business.getEmail() != null && !business.getEmail().isEmpty()
-                         ? business.getEmail()
-                         : business.getPhoneNumber();
+        String subject = (business.getEmail() != null && !business.getEmail().isEmpty())
+                ? business.getEmail()
+                : business.getPhoneNumber();
 
         if (subject == null || subject.isEmpty()) {
             throw new IllegalArgumentException("Business must have either email or phone number to generate token");
@@ -66,7 +81,6 @@ public class JwtUtil {
                 .compact();
     }
 
-
     public String generateToken(AdminUser adminUser) {
         return Jwts.builder()
                 .setSubject(adminUser.getEmail())
@@ -79,8 +93,7 @@ public class JwtUtil {
                 .compact();
     }
 
-   
-
+    /* ======================== EXTRACTION HELPERS ======================== */
 
     public String extractRole(String token) {
         try {
@@ -106,7 +119,6 @@ public class JwtUtil {
                 .get("id", Long.class);
     }
 
-    // Optional alias used by controllers/services for clarity
     public Long extractAdminId(String token) {
         return extractId(token);
     }
@@ -157,7 +169,6 @@ public class JwtUtil {
         }
     }
 
-    // Convenience if you ever need it
     public boolean isManagerToken(String token) {
         try {
             String role = extractRole(token);
@@ -188,7 +199,7 @@ public class JwtUtil {
         return extractId(jwt);
     }
 
-    public String extractTokenFromRequest(HttpServletRequest request) {
+    public String extractTokenFromRequest(jakarta.servlet.http.HttpServletRequest request) {
         String bearerToken = request.getHeader("Authorization");
         if (bearerToken != null && bearerToken.toLowerCase().startsWith("bearer ")) {
             return bearerToken.substring(7).trim();
@@ -200,25 +211,13 @@ public class JwtUtil {
         if (!isUserToken(token)) {
             throw new RuntimeException("Invalid token for user");
         }
-
         Long tokenUserId = extractId(token);
         if (!tokenUserId.equals(userId)) {
             throw new RuntimeException("Token user ID does not match request user ID");
         }
     }
-    
-    
-    
 
-
-    private String normalize(String token) {
-        if (token == null) return null;
-        // strip optional "Bearer " (case-insensitive) and trim
-        return token.replaceFirst("(?i)^Bearer\\s+", "").trim();
-    }
-
-
- // ==== Owner Registration Token (short-lived) ====
+    /* ==================== OWNER REGISTRATION TOKEN ==================== */
 
     public String generateOwnerRegistrationToken(String email, String passwordHash, long ttlMillis) {
         long now = System.currentTimeMillis();
@@ -251,6 +250,10 @@ public class JwtUtil {
         return out;
     }
 
+    /* ==================== internal ==================== */
 
-
+    private String normalize(String token) {
+        if (token == null) return null;
+        return token.replaceFirst("(?i)^Bearer\\s+", "").trim();
+    }
 }

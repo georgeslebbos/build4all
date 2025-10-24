@@ -57,7 +57,8 @@ public class UserService {
        REGISTRATION – per tenant (by ownerProjectLinkId)
        ========================================================= */
     public boolean sendVerificationCodeForRegistration(Map<String, String> userData, Long ownerProjectLinkId) {
-        AdminUserProject link = linkById(ownerProjectLinkId);
+        // ensure tenant exists (throws if not)
+        linkById(ownerProjectLinkId);
 
         String email = userData.get("email");
         String phone = userData.get("phoneNumber");
@@ -68,10 +69,10 @@ public class UserService {
         if (!emailProvided && !phoneProvided) throw new IllegalArgumentException("Provide email or phone");
         if (emailProvided && phoneProvided)    throw new IllegalArgumentException("Provide only one: email OR phone");
 
-        // per-tenant uniqueness
-        if (emailProvided && userRepository.existsByEmailAndOwnerProject(email, link))
+        // per-tenant uniqueness — via *_OwnerProject_Id
+        if (emailProvided && userRepository.existsByEmailAndOwnerProject_Id(email, ownerProjectLinkId))
             throw new IllegalArgumentException("Email already in use in this app");
-        if (phoneProvided && userRepository.existsByPhoneNumberAndOwnerProject(phone, link))
+        if (phoneProvided && userRepository.existsByPhoneNumberAndOwnerProject_Id(phone, ownerProjectLinkId))
             throw new IllegalArgumentException("Phone already in use in this app");
 
         String statusStr = Optional.ofNullable(userData.get("status")).orElse("PENDING");
@@ -149,7 +150,7 @@ public class UserService {
         PendingUser pending = pendingUserRepository.findById(pendingId)
                 .orElseThrow(() -> new RuntimeException("Pending user not found."));
 
-        if (userRepository.existsByUsernameIgnoreCaseAndOwnerProject(username, link)) {
+        if (userRepository.existsByUsernameIgnoreCaseAndOwnerProject_Id(username, ownerProjectLinkId)) {
             throw new RuntimeException("Username already in use in this app.");
         }
 
@@ -183,25 +184,26 @@ public class UserService {
        LOOKUPS – tenant-scoped by ownerProjectLinkId
        ========================================================= */
     public Users findByEmail(String email, Long ownerProjectLinkId) {
-        return userRepository.findByEmailAndOwnerProject(email, linkById(ownerProjectLinkId));
+        return userRepository.findByEmailAndOwnerProject_Id(email, ownerProjectLinkId);
     }
     public Users findByPhoneNumber(String phone, Long ownerProjectLinkId) {
-        return userRepository.findByPhoneNumberAndOwnerProject(phone, linkById(ownerProjectLinkId));
+        return userRepository.findByPhoneNumberAndOwnerProject_Id(phone, ownerProjectLinkId);
     }
     public Users findByUsername(String username, Long ownerProjectLinkId) {
-        return userRepository.findByUsernameAndOwnerProject(username, linkById(ownerProjectLinkId));
+        return userRepository.findByUsernameAndOwnerProject_Id(username, ownerProjectLinkId);
     }
     public Users getUserByEmaill(String identifier, Long ownerProjectLinkId) {
-        var link = linkById(ownerProjectLinkId);
         Users user = identifier != null && identifier.contains("@")
-                ? userRepository.findByEmailAndOwnerProject(identifier, link)
-                : userRepository.findByPhoneNumberAndOwnerProject(identifier, link);
+                ? userRepository.findByEmailAndOwnerProject_Id(identifier, ownerProjectLinkId)
+                : userRepository.findByPhoneNumberAndOwnerProject_Id(identifier, ownerProjectLinkId);
         if (user == null) throw new RuntimeException("User not found in this app: " + identifier);
         return user;
     }
+ // UserService.java
     public Users getUserById(Long userId, Long ownerProjectLinkId) {
-        return userRepository.findByIdAndOwnerProject(userId, linkById(ownerProjectLinkId))
-                .orElseThrow(() -> new RuntimeException("User not found in this app: " + userId));
+        return userRepository.findByIdAndOwnerProject_Id(userId, ownerProjectLinkId)
+            .orElseThrow(() -> new RuntimeException(
+                "User not found in this app: id=" + userId + ", ownerProjectLinkId=" + ownerProjectLinkId));
     }
 
     /* =========================================================
@@ -210,8 +212,7 @@ public class UserService {
     private final Map<String, String> resetCodes = new ConcurrentHashMap<>();
 
     public boolean resetPassword(String email, Long ownerProjectLinkId) {
-        var link = linkById(ownerProjectLinkId);
-        Users user = userRepository.findByEmailAndOwnerProject(email, link);
+        Users user = userRepository.findByEmailAndOwnerProject_Id(email, ownerProjectLinkId);
         if (user == null) return false;
 
         String code = String.format("%06d", new Random().nextInt(999999));
@@ -285,9 +286,11 @@ public class UserService {
     public Users handleGoogleUser(String email, String fullName, String pictureUrl, String googleId,
                                   AtomicBoolean wasInactive, AtomicBoolean isNewUser,
                                   Long ownerProjectLinkId) {
-        var link = linkById(ownerProjectLinkId);
 
-        Users existingUser = userRepository.findByEmailAndOwnerProject(email, link);
+        // ensure tenant exists
+        AdminUserProject link = linkById(ownerProjectLinkId);
+
+        Users existingUser = userRepository.findByEmailAndOwnerProject_Id(email, ownerProjectLinkId);
         if (existingUser != null) {
             if (existingUser.getStatus()!=null && "INACTIVE".equals(existingUser.getStatus().getName())) {
                 existingUser.setStatus(getStatus("ACTIVE"));
@@ -332,14 +335,14 @@ public class UserService {
                                     AtomicBoolean isNewUser,
                                     Long ownerProjectLinkId) {
 
-        var link = linkById(ownerProjectLinkId);
+        AdminUserProject link = linkById(ownerProjectLinkId);
 
         Users user = null;
-        try { user = userRepository.findByFacebookIdAndOwnerProject(facebookId, link); }
+        try { user = userRepository.findByFacebookIdAndOwnerProject_Id(facebookId, ownerProjectLinkId); }
         catch (Exception ignored) {}
 
         if (user == null && email != null && !email.isBlank()) {
-            user = userRepository.findByEmailAndOwnerProject(email, link);
+            user = userRepository.findByEmailAndOwnerProject_Id(email, ownerProjectLinkId);
         }
 
         if (user != null) {
@@ -369,9 +372,9 @@ public class UserService {
 
         String candidate = baseUsername.toLowerCase().replaceAll("\\s+",".");
 
-        if (userRepository.existsByUsernameIgnoreCaseAndOwnerProject(candidate, link)) {
+        if (userRepository.existsByUsernameIgnoreCaseAndOwnerProject_Id(candidate, ownerProjectLinkId)) {
             int suffix = 1;
-            while (userRepository.existsByUsernameIgnoreCaseAndOwnerProject(candidate + suffix, link)) {
+            while (userRepository.existsByUsernameIgnoreCaseAndOwnerProject_Id(candidate + suffix, ownerProjectLinkId)) {
                 suffix++;
             }
             candidate = candidate + suffix;

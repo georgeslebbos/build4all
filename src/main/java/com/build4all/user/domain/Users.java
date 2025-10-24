@@ -14,14 +14,14 @@ import java.util.List;
 
 @Entity
 @Table(
-    name = "Users",
+    name = "users", // <- LOWERCASE physical table name
     uniqueConstraints = {
-        @UniqueConstraint(name = "uk_user_app_email_link",  columnNames = {"owner_project_link_id", "email"}),
-        @UniqueConstraint(name = "uk_user_app_phone_link",  columnNames = {"owner_project_link_id", "phone_number"}),
-        @UniqueConstraint(name = "uk_user_app_user_link",   columnNames = {"owner_project_link_id", "username"})
+        @UniqueConstraint(name = "uk_user_app_email_link",  columnNames = {"aup_id", "email"}),
+        @UniqueConstraint(name = "uk_user_app_phone_link",  columnNames = {"aup_id", "phone_number"}),
+        @UniqueConstraint(name = "uk_user_app_user_link",   columnNames = {"aup_id", "username"})
     },
     indexes = {
-        @Index(name = "idx_users_owner_project",  columnList = "owner_project_link_id"),
+        @Index(name = "idx_users_owner_project",  columnList = "aup_id"),
         @Index(name = "idx_users_email",          columnList = "email"),
         @Index(name = "idx_users_phone",          columnList = "phone_number"),
         @Index(name = "idx_users_username",       columnList = "username")
@@ -34,60 +34,38 @@ public class Users {
     @Column(name = "user_id")
     private Long id;
 
-    /** Unified tenant link (owner + project) */
+    /** Tenant link (owner + project) */
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "aup_id", referencedColumnName = "aup_id", nullable = true)
+    @JoinColumn(name = "aup_id", referencedColumnName = "aup_id", nullable = false)
     private AdminUserProject ownerProject;
 
-    @Column(nullable = false)
-    private String username;
+    @Column(nullable = false) private String username;
+    @Column(name = "first_name",  nullable = false) private String firstName;
+    @Column(name = "last_name",   nullable = false) private String lastName;
 
-    @Column(nullable = false)
-    private String firstName;
+    @Column(name = "email")        private String email;
+    @Column(name = "phone_number") private String phoneNumber;
 
-    @Column(nullable = false)
-    private String lastName;
+    @Column(name = "google_id")   private String googleId;
+    @Column(name = "facebook_id") private String facebookId;
 
-    /** uniqueness is per (owner_project_link_id) */
-    @Column(name = "email")
-    private String email;
+    @Column(name = "password_hash", nullable = false) private String passwordHash;
 
-    /** uniqueness is per (owner_project_link_id) */
-    @Column(name = "phone_number")
-    private String phoneNumber;
-
-    @Column(name = "google_id")
-    private String googleId;
-
-    @Column(name = "facebook_id")
-    private String facebookId;
-
-    @Column(nullable = false)
-    private String passwordHash;
-
-    @Column(name = "profile_picture_url")
-    private String profilePictureUrl;
+    @Column(name = "profile_picture_url") private String profilePictureUrl;
 
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "status")
-    private UserStatus status;
+    private UserStatus status; // nullable if you don’t always set it
 
-    @Column(name = "is_public_profile")
-    private Boolean isPublicProfile = true;
+    @Column(name = "is_public_profile") private Boolean isPublicProfile = true;
 
-    @Column(name = "fcm_token")
-    private String fcmToken;
+    @Column(name = "fcm_token")  private String fcmToken;
+    @Column(name = "last_login") private LocalDateTime lastLogin;
 
-    @Column(name = "last_login")
-    private LocalDateTime lastLogin;
+    @Column(name = "updated_at") private LocalDateTime updatedAt;
+    @Column(name = "created_at", updatable = false) private LocalDateTime createdAt;
 
-    @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
-
-    @Column(name = "created_at", updatable = false)
-    private LocalDateTime createdAt;
-
-    /* ---------- relations ---------- */
+    /* ---------- relations (unchanged) ---------- */
     @JsonIgnore
     @OneToMany(mappedBy = "user", cascade = CascadeType.REMOVE, orphanRemoval = true)
     private List<ItemBooking> itemBookings;
@@ -133,13 +111,10 @@ public class Users {
     private List<PostLikes> postLikes = new ArrayList<>();
 
     /* ---------- lifecycle ---------- */
-    @PrePersist
-    protected void onCreate() { this.createdAt = LocalDateTime.now(); }
+    @PrePersist protected void onCreate() { this.createdAt = LocalDateTime.now(); }
+    @PreUpdate  protected void onUpdate() { this.updatedAt = LocalDateTime.now(); }
 
-    @PreUpdate
-    protected void onUpdate() { this.updatedAt = LocalDateTime.now(); }
-
-    /* ---------- getters / setters ---------- */
+    /* ---------- getters/setters ---------- */
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 

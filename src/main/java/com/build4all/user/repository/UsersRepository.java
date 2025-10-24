@@ -15,20 +15,30 @@ import java.util.Optional;
 @Repository
 public interface UsersRepository extends JpaRepository<Users, Long> {
 
-    /* -------- tenant-scoped finders (via ownerProject link) -------- */
-
+    /* -------- tenant-scoped (by entity) — keep for compatibility -------- */
     Optional<Users> findByIdAndOwnerProject(Long id, AdminUserProject link);
-
     Users findByEmailAndOwnerProject(String email, AdminUserProject link);
     Users findByPhoneNumberAndOwnerProject(String phoneNumber, AdminUserProject link);
     Users findByUsernameAndOwnerProject(String username, AdminUserProject link);
-
     boolean existsByEmailAndOwnerProject(String email, AdminUserProject link);
     boolean existsByPhoneNumberAndOwnerProject(String phone, AdminUserProject link);
     boolean existsByUsernameIgnoreCaseAndOwnerProject(String username, AdminUserProject link);
-
     Optional<Users> findByGoogleIdAndOwnerProject(String googleId, AdminUserProject link);
     Users findByFacebookIdAndOwnerProject(String facebookId, AdminUserProject link);
+
+    /* -------- tenant-scoped (by ownerProject.id) — modern variants -------- */
+    Optional<Users> findByIdAndOwnerProject_Id(Long id, Long ownerProjectLinkId);
+
+    Users findByEmailAndOwnerProject_Id(String email, Long ownerProjectLinkId);
+    Users findByPhoneNumberAndOwnerProject_Id(String phoneNumber, Long ownerProjectLinkId);
+    Users findByUsernameAndOwnerProject_Id(String username, Long ownerProjectLinkId);
+
+    boolean existsByEmailAndOwnerProject_Id(String email, Long ownerProjectLinkId);
+    boolean existsByPhoneNumberAndOwnerProject_Id(String phone, Long ownerProjectLinkId);
+    boolean existsByUsernameIgnoreCaseAndOwnerProject_Id(String username, Long ownerProjectLinkId);
+
+    Optional<Users> findByGoogleIdAndOwnerProject_Id(String googleId, Long ownerProjectLinkId);
+    Users findByFacebookIdAndOwnerProject_Id(String facebookId, Long ownerProjectLinkId);
 
     /* -------- legacy/global (keep only if needed) -------- */
     Users findByEmail(String email);
@@ -57,4 +67,17 @@ public interface UsersRepository extends JpaRepository<Users, Long> {
     """)
     List<Users> findUsersWithMatchingCategories(@Param("userId") Long userId,
                                                 @Param("categories") List<Category> categories);
+
+    /* ----- robust, physical-column-based lookup to avoid join hiccups ----- */
+    @Query(
+        value = """
+                SELECT *
+                FROM "users" u
+                WHERE u.user_id = :id
+                  AND u.aup_id = :ownerProjectLinkId
+               """,
+        nativeQuery = true
+    )
+    Optional<Users> findByPkAndAupId(@Param("id") Long id,
+                                     @Param("ownerProjectLinkId") Long ownerProjectLinkId);
 }

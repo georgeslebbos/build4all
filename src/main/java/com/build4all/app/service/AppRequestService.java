@@ -1,3 +1,4 @@
+// src/main/java/com/build4all/app/service/AppRequestService.java
 package com.build4all.app.service;
 
 import com.build4all.app.domain.AppRequest;
@@ -18,15 +19,18 @@ public class AppRequestService {
     private final AdminUserProjectRepository aupRepo;
     private final AdminUsersRepository adminRepo;
     private final ProjectRepository projectRepo;
+    private final CiBuildService ciBuildService; // 👈 NEW
 
     public AppRequestService(AppRequestRepository appRequestRepo,
                              AdminUserProjectRepository aupRepo,
                              AdminUsersRepository adminRepo,
-                             ProjectRepository projectRepo) {
+                             ProjectRepository projectRepo,
+                             CiBuildService ciBuildService) { // 👈 inject
         this.appRequestRepo = appRequestRepo;
         this.aupRepo = aupRepo;
         this.adminRepo = adminRepo;
         this.projectRepo = projectRepo;
+        this.ciBuildService = ciBuildService;
     }
 
     public AppRequest createRequest(Long ownerId, Long projectId, String appName, String notes) {
@@ -63,6 +67,9 @@ public class AppRequestService {
 
         req.setStatus("APPROVED");
         appRequestRepo.save(req);
+
+        // 🔔 OPTIONAL: trigger CI build (no-op if not configured)
+        ciBuildService.triggerOwnerBuild(owner.getAdminId(), project.getId(), slug);
 
         return link;
     }

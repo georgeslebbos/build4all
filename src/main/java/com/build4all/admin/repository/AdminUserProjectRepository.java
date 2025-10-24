@@ -17,4 +17,6 @@ public interface AdminUserProjectRepository extends JpaRepository<AdminUserProje
     boolean existsByAdmin_AdminIdAndProject_Id(Long adminId, Long projectId);
 
     Optional<AdminUserProject> findBySlug(String slug);
+    
+    
 }
