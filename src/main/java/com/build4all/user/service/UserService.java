@@ -5,9 +5,15 @@ import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.catalog.domain.Category;
 import com.build4all.catalog.repository.CategoryRepository;
 import com.build4all.notifications.service.EmailService;
-import com.build4all.user.domain.*;
+import com.build4all.user.domain.PendingUser;
+import com.build4all.user.domain.UserCategories;
+import com.build4all.user.domain.UserStatus;
+import com.build4all.user.domain.Users;
 import com.build4all.user.dto.UserDto;
-import com.build4all.user.repository.*;
+import com.build4all.user.repository.PendingUserRepository;
+import com.build4all.user.repository.UserCategoriesRepository;
+import com.build4all.user.repository.UserStatusRepository;
+import com.build4all.user.repository.UsersRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -21,7 +27,13 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
+/**
+ * UserService (tenant-aware)
+ * - All main flows are scoped by ownerProjectLinkId (AdminUserProject.id)
+ * - Legacy/global helpers kept for backward compatibility with old controllers/clients
+ */
 @Service
 public class UserService {
 
@@ -32,33 +44,37 @@ public class UserService {
     @Autowired private PendingUserRepository pendingUserRepository;
     @Autowired private UserStatusRepository userStatusRepository;
 
-    // unified tenant link repo
+    /* Tenant link repository */
     @Autowired private AdminUserProjectRepository aupRepo;
 
-    @Autowired
     private final EmailService emailService;
-
     public UserService(EmailService emailService) { this.emailService = emailService; }
 
-    /* -------------------- Status helper -------------------- */
+    /* ============================ Helpers ============================ */
+
+    /** Resolve a UserStatus by name (throws if missing). */
     public UserStatus getStatus(String name) {
         return userStatusRepository.findByName(name.toUpperCase())
             .orElseThrow(() -> new RuntimeException("UserStatus " + name + " not found"));
     }
 
-    /* -------------------- Tenant helper -------------------- */
+    /** Ensure the tenant link exists and return it. */
     private AdminUserProject linkById(Long ownerProjectLinkId) {
-        if (ownerProjectLinkId == null) throw new RuntimeException("ownerProjectLinkId is required");
+        if (ownerProjectLinkId == null) throw new IllegalArgumentException("ownerProjectLinkId is required");
         return aupRepo.findById(ownerProjectLinkId)
                 .orElseThrow(() -> new RuntimeException("AdminUserProject not found: " + ownerProjectLinkId));
     }
 
-    /* =========================================================
-       REGISTRATION – per tenant (by ownerProjectLinkId)
-       ========================================================= */
+    /* ====================== Registration (tenant) ===================== */
+
+    /**
+     * Start registration:
+     * - Checks tenant-scoped email/phone uniqueness
+     * - Creates/updates a PendingUser with a verification code
+     * - Sends email code when email is provided
+     */
     public boolean sendVerificationCodeForRegistration(Map<String, String> userData, Long ownerProjectLinkId) {
-        // ensure tenant exists (throws if not)
-        linkById(ownerProjectLinkId);
+        linkById(ownerProjectLinkId); // validate tenant
 
         String email = userData.get("email");
         String phone = userData.get("phoneNumber");
@@ -69,7 +85,7 @@ public class UserService {
         if (!emailProvided && !phoneProvided) throw new IllegalArgumentException("Provide email or phone");
         if (emailProvided && phoneProvided)    throw new IllegalArgumentException("Provide only one: email OR phone");
 
-        // per-tenant uniqueness — via *_OwnerProject_Id
+        // tenant-scoped uniqueness
         if (emailProvided && userRepository.existsByEmailAndOwnerProject_Id(email, ownerProjectLinkId))
             throw new IllegalArgumentException("Email already in use in this app");
         if (phoneProvided && userRepository.existsByPhoneNumberAndOwnerProject_Id(phone, ownerProjectLinkId))
@@ -85,7 +101,7 @@ public class UserService {
         String code = phoneProvided ? "123456" : String.format("%06d", new Random().nextInt(999999));
 
         if (pending != null) {
-            if (Boolean.TRUE.equals(pending.isVerified())) return true;
+            if (Boolean.TRUE.equals(pending.isVerified())) return true; // already verified
             pending.setPasswordHash(passwordEncoder.encode(password));
             pending.setVerificationCode(code);
             pending.setCreatedAt(LocalDateTime.now());
@@ -117,6 +133,39 @@ public class UserService {
         return true;
     }
 
+    /**
+     * Resend verification code (email or phone).
+     * For SMS we keep a fixed code "123456" for testing/dev.
+     */
+    public boolean resendVerificationCode(String emailOrPhone) {
+        boolean isEmail = emailOrPhone != null && emailOrPhone.contains("@");
+        PendingUser pending = isEmail
+                ? pendingUserRepository.findByEmail(emailOrPhone)
+                : pendingUserRepository.findByPhoneNumber(emailOrPhone);
+        if (pending == null) throw new RuntimeException("No pending user found");
+
+        if (isEmail) {
+            String code = String.format("%06d", new Random().nextInt(999999));
+            pending.setVerificationCode(code);
+            pending.setCreatedAt(LocalDateTime.now());
+            pendingUserRepository.save(pending);
+
+            String html = """
+                <html><body style="font-family: Arial; padding: 20px;">
+                    <h2>build4all Verification</h2>
+                    <p>Your new verification code is:</p>
+                    <h1>%s</h1>
+                </body></html>
+            """.formatted(code);
+            emailService.sendHtmlEmail(emailOrPhone, "New Verification Code", html);
+        } else {
+            pending.setVerificationCode("123456"); // SMS/dev path
+            pending.setCreatedAt(LocalDateTime.now());
+            pendingUserRepository.save(pending);
+        }
+        return true;
+    }
+
     public Long verifyEmailCodeAndRegister(String email, String code) {
         PendingUser pending = pendingUserRepository.findByEmail(email);
         if (pending == null) throw new RuntimeException("No pending user for this email");
@@ -136,6 +185,9 @@ public class UserService {
         return pending.getId();
     }
 
+    /**
+     * Finish registration: create the real user in the right tenant.
+     */
     @Transactional
     public boolean completeUserProfile(Long pendingId,
                                        String username,
@@ -146,7 +198,6 @@ public class UserService {
                                        Long ownerProjectLinkId) throws IOException {
 
         AdminUserProject link = linkById(ownerProjectLinkId);
-
         PendingUser pending = pendingUserRepository.findById(pendingId)
                 .orElseThrow(() -> new RuntimeException("Pending user not found."));
 
@@ -180,9 +231,8 @@ public class UserService {
         return true;
     }
 
-    /* =========================================================
-       LOOKUPS – tenant-scoped by ownerProjectLinkId
-       ========================================================= */
+    /* ====================== Lookups (tenant) ====================== */
+
     public Users findByEmail(String email, Long ownerProjectLinkId) {
         return userRepository.findByEmailAndOwnerProject_Id(email, ownerProjectLinkId);
     }
@@ -193,22 +243,35 @@ public class UserService {
         return userRepository.findByUsernameAndOwnerProject_Id(username, ownerProjectLinkId);
     }
     public Users getUserByEmaill(String identifier, Long ownerProjectLinkId) {
-        Users user = identifier != null && identifier.contains("@")
+        Users user = (identifier != null && identifier.contains("@"))
                 ? userRepository.findByEmailAndOwnerProject_Id(identifier, ownerProjectLinkId)
                 : userRepository.findByPhoneNumberAndOwnerProject_Id(identifier, ownerProjectLinkId);
         if (user == null) throw new RuntimeException("User not found in this app: " + identifier);
         return user;
     }
- // UserService.java
+
+    /** Tenant-safe get by ID (uses fetch-join to avoid lazy issues in DTOs). */
     public Users getUserById(Long userId, Long ownerProjectLinkId) {
-        return userRepository.findByIdAndOwnerProject_Id(userId, ownerProjectLinkId)
-            .orElseThrow(() -> new RuntimeException(
-                "User not found in this app: id=" + userId + ", ownerProjectLinkId=" + ownerProjectLinkId));
+        if (userId == null || ownerProjectLinkId == null) {
+            throw new IllegalArgumentException("userId and ownerProjectLinkId are required");
+        }
+        return userRepository.fetchByIdAndOwnerProjectId(userId, ownerProjectLinkId)
+                .or(() -> userRepository.findByPkAndAupId(userId, ownerProjectLinkId))
+                .orElseThrow(() -> new RuntimeException(
+                        "User not found in this app: id=" + userId + ", ownerProjectLinkId=" + ownerProjectLinkId));
     }
 
-    /* =========================================================
-       PASSWORD RESET – tenant-scoped (key uses linkId now)
-       ========================================================= */
+    /** Tenant-safe DTO fetch. */
+    @Transactional(readOnly = true)
+    public UserDto getUserDtoByIdAndOwnerProject(Long userId, Long ownerProjectLinkId) {
+        Users u = userRepository.fetchByIdAndOwnerProjectId(userId, ownerProjectLinkId)
+            .orElseThrow(() -> new RuntimeException(
+                "User not found in this app: id=" + userId + ", ownerProjectLinkId=" + ownerProjectLinkId));
+        return new UserDto(u);
+    }
+
+    /* ==================== Password reset (tenant) ==================== */
+
     private final Map<String, String> resetCodes = new ConcurrentHashMap<>();
 
     public boolean resetPassword(String email, Long ownerProjectLinkId) {
@@ -227,10 +290,12 @@ public class UserService {
         emailService.sendHtmlEmail(email, "Password Reset Code", html);
         return true;
     }
+
     public boolean verifyResetCode(String email, String code, Long ownerProjectLinkId) {
         String key = email + "|" + ownerProjectLinkId;
         return code != null && code.equals(resetCodes.get(key));
     }
+
     public boolean updatePassword(String email, String code, String newPassword, Long ownerProjectLinkId) {
         if (!verifyResetCode(email, code, ownerProjectLinkId)) return false;
         Users user = findByEmail(email, ownerProjectLinkId);
@@ -241,23 +306,26 @@ public class UserService {
         return true;
     }
 
-    /* =========================================================
-       LISTS / DELETES (tenant filtered)
-       ========================================================= */
+    /* =================== Lists / Deletes (tenant) =================== */
+
+    /** Public profiles (ACTIVE) within tenant as DTOs. */
     public List<UserDto> getAllUserDtos(Long ownerProjectLinkId) {
         var link = linkById(ownerProjectLinkId);
         return userRepository.findAll().stream()
             .filter(u -> u.getOwnerProject()!=null && u.getOwnerProject().equals(link))
-            .filter(u -> u.getStatus()!=null && "ACTIVE".equals(u.getStatus().getName()))
+            .filter(u -> u.getStatus()!=null && "ACTIVE".equalsIgnoreCase(u.getStatus().getName()))
             .filter(Users::isPublicProfile)
             .map(UserDto::new)
             .toList();
     }
 
     public boolean deleteUserById(Long id) {
-        return userRepository.findById(id).map(u -> { userRepository.delete(u); return true; }).orElse(false);
+        return userRepository.findById(id)
+                .map(u -> { userRepository.delete(u); return true; })
+                .orElse(false);
     }
 
+    /** Self-delete with password confirmation. */
     public boolean deleteUserByIdWithPassword(Long id, String inputPassword) {
         Optional<Users> optionalUser = userRepository.findById(id);
         if (optionalUser.isEmpty()) return false;
@@ -268,6 +336,7 @@ public class UserService {
         return true;
     }
 
+    /** Save a profile image into /uploads and return its public URL path. */
     public String saveProfileImage(MultipartFile file) throws IOException {
         String filename = UUID.randomUUID() + "_" + file.getOriginalFilename();
         Path path = Paths.get("uploads");
@@ -280,19 +349,17 @@ public class UserService {
         return passwordEncoder.matches(rawPassword, user.getPasswordHash());
     }
 
-    /* =========================================================
-       SOCIAL LOGIN – tenant-scoped (ownerProjectLinkId)
-       ========================================================= */
+    /* =================== Social login (tenant) =================== */
+
     public Users handleGoogleUser(String email, String fullName, String pictureUrl, String googleId,
                                   AtomicBoolean wasInactive, AtomicBoolean isNewUser,
                                   Long ownerProjectLinkId) {
 
-        // ensure tenant exists
         AdminUserProject link = linkById(ownerProjectLinkId);
 
         Users existingUser = userRepository.findByEmailAndOwnerProject_Id(email, ownerProjectLinkId);
         if (existingUser != null) {
-            if (existingUser.getStatus()!=null && "INACTIVE".equals(existingUser.getStatus().getName())) {
+            if (existingUser.getStatus()!=null && "INACTIVE".equalsIgnoreCase(existingUser.getStatus().getName())) {
                 existingUser.setStatus(getStatus("ACTIVE"));
                 existingUser.setUpdatedAt(LocalDateTime.now());
                 wasInactive.set(true);
@@ -399,26 +466,24 @@ public class UserService {
         return userRepository.save(newUser);
     }
 
-    /* =========================================================
-       PUBLIC LIST (tenant filtered)
-       ========================================================= */
+    /* ================= Public list (tenant) ================= */
+
     public List<Users> getAllUsers(Long ownerProjectLinkId) {
         var link = linkById(ownerProjectLinkId);
         return userRepository.findAll().stream()
             .filter(u -> u.getOwnerProject()!=null && u.getOwnerProject().equals(link))
-            .filter(u -> u.getStatus()!=null && "ACTIVE".equals(u.getStatus().getName()))
+            .filter(u -> u.getStatus()!=null && "ACTIVE".equalsIgnoreCase(u.getStatus().getName()))
             .filter(Users::isPublicProfile)
             .toList();
     }
 
-    /* =========================================================
-       SCHEDULED CLEANUPS
-       ========================================================= */
+    /* ================ Scheduled cleanups (global) ================ */
+
     @Scheduled(cron = "0 0 2 * * *")
     public void softDeleteInactiveUsersAfter30Days() {
         LocalDateTime cutoff = LocalDateTime.now().minusDays(30);
         userRepository.findAll().stream()
-            .filter(u -> u.getStatus()!=null && "INACTIVE".equals(u.getStatus().getName()))
+            .filter(u -> u.getStatus()!=null && "INACTIVE".equalsIgnoreCase(u.getStatus().getName()))
             .filter(u -> u.getUpdatedAt() != null && u.getUpdatedAt().isBefore(cutoff))
             .forEach(u -> {
                 u.setStatus(getStatus("DELETED"));
@@ -431,12 +496,13 @@ public class UserService {
     public void permanentlyDeleteUsersAfter90Days() {
         LocalDateTime cutoff = LocalDateTime.now().minusDays(90);
         userRepository.findAll().stream()
-            .filter(u -> u.getStatus()!=null && "DELETED".equals(u.getStatus().getName()))
+            .filter(u -> u.getStatus()!=null && "DELETED".equalsIgnoreCase(u.getStatus().getName()))
             .filter(u -> u.getUpdatedAt() != null && u.getUpdatedAt().isBefore(cutoff))
             .forEach(userRepository::delete);
     }
 
-    /* -------- (optional legacy) -------- */
+    /* ============== Legacy/global convenience methods ============== */
+
     public boolean existsByUsername(String username) { return userRepository.existsByUsernameIgnoreCase(username); }
     public Optional<Users> findById(Long id) { return userRepository.findById(id); }
     public Users getUserById(Long userId) { return userRepository.findById(userId).orElseThrow(); }
@@ -449,6 +515,7 @@ public class UserService {
     public Users findByPhoneNumber(String phone) { return userRepository.findByPhoneNumber(phone); }
     public Users save(Users user) { return userRepository.save(user); }
 
+    /** Simple string list of the user's categories (legacy/global). */
     public List<String> getUserCategories(Long userId) {
         Users user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -457,6 +524,7 @@ public class UserService {
                 .toList();
     }
 
+    /** Swap a user's category mapping (legacy/global). */
     @Transactional
     public boolean updateUserCategory(Long userId, Long oldCategoryId, String newCategoryName) {
         Users user = userRepository.findById(userId)
@@ -481,6 +549,7 @@ public class UserService {
         return true;
     }
 
+    /** Remove a category mapping (legacy/global). */
     @Transactional
     public boolean deleteUserCategory(Long userId, Long categoryId) {
         Users user = userRepository.findById(userId)
@@ -496,6 +565,7 @@ public class UserService {
         return false;
     }
 
+    /** Replace all user's categories (legacy/global). */
     @Transactional
     public void replaceUserCategories(Long userId, List<Long> newCategoryIds) {
         Users user = userRepository.findById(userId)
@@ -516,5 +586,39 @@ public class UserService {
                 userCategoriesRepository.save(userCategory);
             }
         }
+    }
+
+    /* -------- Optional: simple friend suggestions by shared categories (legacy/global) -------- */
+    public List<Users> suggestFriendsByCategory(Long userId) {
+        Users currentUser = userRepository.findById(userId)
+            .orElseThrow(() -> new RuntimeException("User not found"));
+
+        List<Long> myCategoryIds = userCategoriesRepository.findById_User_Id(userId).stream()
+            .map(ui -> ui.getId().getCategory().getId())
+            .toList();
+
+        if (myCategoryIds.isEmpty()) return List.of();
+
+        List<UserCategories> shared = userCategoriesRepository.findByCategory_IdIn(myCategoryIds);
+
+        return shared.stream()
+            .map(ui -> ui.getId().getUser())
+            .filter(u -> !Objects.equals(u.getId(), userId))
+            .filter(u -> u.getStatus()!=null && "ACTIVE".equalsIgnoreCase(u.getStatus().getName()))
+            .filter(Users::isPublicProfile)
+            .distinct()
+            .collect(Collectors.toList());
+    }
+
+    /* -------- Visibility + status together (legacy/global) -------- */
+    public boolean updateVisibilityAndStatus(Long userId, boolean isPublicProfile, UserStatus newStatus) {
+        Users user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        user.setIsPublicProfile(isPublicProfile);
+        user.setStatus(newStatus);
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepository.save(user);
+        return true;
     }
 }
