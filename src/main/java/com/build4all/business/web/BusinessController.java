@@ -36,21 +36,34 @@ public class BusinessController {
     @Value("${app.base-domain}")
     private String baseDomain;
 
-    private boolean isAuthorized(String authHeader, Long businessId) {
+    private boolean isAuthorized(String authHeader, Long targetBusinessId) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) return false;
-        String jwt = authHeader.substring(7);
-        String role = jwtUtil.extractRole(jwt);
-        if ("SUPER_ADMIN".equals(role)) return true;
+        String jwt = authHeader.substring(7).trim();
 
-        String email = jwtUtil.extractUsername(jwt);
-        Businesses me;
-        try {
-            me = businessService.findByEmailOrThrow(email); // legacy global lookup for compatibility
-        } catch (Exception e) {
-            return false;
+        // SUPER_ADMIN and OWNER can access anything
+        if (jwtUtil.isSuperAdmin(jwt) || jwtUtil.isOwnerToken(jwt)) return true;
+
+        // BUSINESS token can only access its own business id
+        if (jwtUtil.isBusinessToken(jwt)) {
+            Long tokenBizId = jwtUtil.extractBusinessId(jwt); // <- this is the "id" claim
+            return tokenBizId != null && tokenBizId.equals(targetBusinessId);
         }
-        return me != null && me.getId().equals(businessId);
+
+        // Managers: allow only if you want managers to read their business.
+        // If you don't need this, return false here.
+        // (Uncomment and wire AdminUserService if you want manager scoping)
+        // if (jwtUtil.isManagerToken(jwt)) {
+        //     String adminPrincipal = jwtUtil.extractUsername(jwt); // email/username
+        //     var opt = adminUserService.findByUsernameOrEmail(adminPrincipal);
+        //     if (opt.isEmpty()) return false;
+        //     var admin = opt.get();
+        //     var b = admin.getBusiness();
+        //     return b != null && Objects.equals(b.getId(), targetBusinessId);
+        // }
+
+        return false;
     }
+
 
     @Operation(summary = "Get a business by ID")
     @ApiResponses({
@@ -64,14 +77,24 @@ public class BusinessController {
             @PathVariable Long id,
             @RequestHeader("Authorization") String authHeader) {
 
-        String token = authHeader.replace("Bearer ", "").trim();
-        if (!(jwtUtil.isBusinessToken(token) || jwtUtil.isAdminToken(token) || jwtUtil.isUserToken(token))) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied: Business, Admin or User token required");
+        String jwt = authHeader.replace("Bearer ", "").trim();
+
+        // Token type gate (BUSINESS / ADMIN / OWNER / USER)
+        if (!(jwtUtil.isBusinessToken(jwt) || jwtUtil.isAdminToken(jwt) || jwtUtil.isOwnerToken(jwt) || jwtUtil.isUserToken(jwt))) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "Access denied: Business, Admin, Owner or User token required"));
         }
 
-        if (!isAuthorized(authHeader, id)) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Access denied");
+        // Entity-level authorization
+        if (!isAuthorized(authHeader, id)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Access denied"));
+        }
+
         Businesses business = businessService.findById(id);
-        return business != null ? ResponseEntity.ok(business) : ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        return (business != null)
+                ? ResponseEntity.ok(business)
+                : ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Business not found"));
     }
 
     @Operation(summary = "Get all businesses")

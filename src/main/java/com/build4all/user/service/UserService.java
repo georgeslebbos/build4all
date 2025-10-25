@@ -621,4 +621,71 @@ public class UserService {
         userRepository.save(user);
         return true;
     }
+    
+
+    @Transactional
+    public void addUserCategories(Long userId, List<Long> categoryIds) {
+        if (userId == null) throw new IllegalArgumentException("userId is required");
+        if (categoryIds == null || categoryIds.isEmpty()) return; // nothing to add
+
+        Users user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        // Load all requested categories and validate they exist
+        List<Category> cats = categoryRepository.findAllById(categoryIds);
+        if (cats.size() != new HashSet<>(categoryIds).size()) {
+            throw new RuntimeException("One or more categories not found");
+        }
+
+        // Add missing links only
+        for (Category c : cats) {
+            UserCategories.UserCategoryId key = new UserCategories.UserCategoryId(user, c);
+            if (!userCategoriesRepository.existsById(key)) {
+                UserCategories uc = new UserCategories();
+                uc.setId(key);
+                uc.setCategory(c);
+                userCategoriesRepository.save(uc);
+            }
+        }
+    }
+    
+ // UserService.java
+
+    public boolean deleteUserProfileImage(Long userId) {
+        if (userId == null) throw new IllegalArgumentException("userId is required");
+
+        Optional<Users> opt = userRepository.findById(userId);
+        if (opt.isEmpty()) return false;
+
+        Users user = opt.get();
+        String url = user.getProfilePictureUrl();
+
+        if (url == null || url.isBlank()) return false; // nothing to delete
+
+        // Only delete local files we manage (security/safety)
+        // Expecting "/uploads/<filename>"
+        try {
+            if (url.startsWith("/uploads/")) {
+                String fileName = url.substring("/uploads/".length()).replace("\\", "/");
+                if (!fileName.isBlank()) {
+                    Path uploads = Paths.get("uploads");
+                    Path filePath = uploads.resolve(fileName).normalize();
+                    // Ensure we don't escape the uploads dir
+                    if (filePath.startsWith(uploads.toAbsolutePath()) || filePath.startsWith(uploads)) {
+                        Files.deleteIfExists(filePath);
+                    }
+                }
+            }
+        } catch (Exception ignore) {
+            // We still proceed to null the DB field even if the physical delete failed
+            // (e.g., file already gone). Swallowing is acceptable for this legacy route.
+        }
+
+        user.setProfilePictureUrl(null);
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepository.save(user);
+        return true;
+    }
+
+
 }

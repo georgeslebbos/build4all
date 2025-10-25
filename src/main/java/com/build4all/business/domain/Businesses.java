@@ -38,6 +38,7 @@ public class Businesses {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "aup_id", referencedColumnName = "aup_id", nullable = false)
+    @JsonIgnore                    // <- add this
     private AdminUserProject ownerProjectLink;
 
     @Column(name = "business_name", nullable = false)
@@ -87,8 +88,11 @@ public class Businesses {
     @JsonIgnore
     private List<PendingManager> pendingManagers;
 
+ // Businesses.java
     @OneToMany(mappedBy = "business", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonIgnore                   // ⬅️ add this
     private List<Review> reviews;
+
 
     @Column(name = "last_login_at")
     private LocalDateTime lastLoginAt;
