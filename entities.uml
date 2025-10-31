@@ -1,0 +1,1214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Diagram>
+  <ID>JAVA</ID>
+  <OriginalElement>com.build4all.entities</OriginalElement>
+  <nodes>
+    <node x="2050.232552581262" y="3614.5">com.build4all.entities.DataInitializer</node>
+    <node x="1321.7325525812619" y="2584.0">com.build4all.entities.FeedType</node>
+    <node x="531.5847673677482" y="346.0">com.build4all.entities.AppSettings</node>
+    <node x="1848.2325525812619" y="3558.0">com.build4all.entities.PendingManager</node>
+    <node x="2353.674713193115" y="2584.0">com.build4all.entities.BusinessStatus</node>
+    <node x="1458.7325525812619" y="1672.0">com.build4all.entities.UserInterests.UserInterestId</node>
+    <node x="1369.125" y="0.0">com.build4all.entities.Comments</node>
+    <node x="284.5847673677482" y="302.0">com.build4all.entities.Booking</node>
+    <node x="2185.192160611853" y="3049.0">com.build4all.entities.Role</node>
+    <node x="2391.192160611853" y="2939.0">com.build4all.entities.PendingBusiness</node>
+    <node x="1220.5671606118533" y="982.0">com.build4all.entities.Users</node>
+    <node x="1337.4247131931152" y="651.0">com.build4all.entities.PostLikes</node>
+    <node x="759.625" y="3060.0">com.build4all.entities.product.Product</node>
+    <node x="1099.9247131931152" y="3872.0">com.build4all.entities.BookingCancellationRequest</node>
+    <node x="919.625" y="3027.0">com.build4all.entities.activity.Activity</node>
+    <node x="1797.959767367748" y="2884.0">com.build4all.entities.Businesses</node>
+    <node x="393.77549394518655" y="11.0">com.build4all.entities.Currency</node>
+    <node x="1511.1075525812619" y="2268.0">com.build4all.entities.ItemType</node>
+    <node x="1164.4247131931152" y="4174.0">com.build4all.entities.BookingCancellationRequest.State</node>
+    <node x="109.08476736774833" y="684.0">com.build4all.entities.UserStatus</node>
+    <node x="1181.75" y="3016.0">com.build4all.entities.activity.UserActivityFeed</node>
+    <node x="877.7149458253671" y="651.0">com.build4all.entities.Friendship</node>
+    <node x="1493.1075525812619" y="2028.0">com.build4all.entities.Interests</node>
+    <node x="2213.232552581262" y="3481.0">com.build4all.entities.AdminUsers</node>
+    <node x="1156.4247131931152" y="3448.0">com.build4all.entities.BusinessUser</node>
+    <node x="1300.375" y="258.0">com.build4all.entities.Posts</node>
+    <node x="1093.4247131931152" y="596.0">com.build4all.entities.ChatMessages</node>
+    <node x="2891.232552581262" y="0.0">com.build4all.entities.PaymentMethod</node>
+    <node x="2657.232552581262" y="0.0">com.build4all.entities.Theme</node>
+    <node x="1542.6075525812619" y="1844.0">com.build4all.entities.UserInterests</node>
+    <node x="0.0" y="1136.0">com.build4all.entities.PendingUser</node>
+    <node x="1063.1075525812619" y="2474.0">com.build4all.entities.Item</node>
+    <node x="1989.084767367748" y="618.0">com.build4all.entities.Notifications</node>
+    <node x="1030.3575525812619" y="55.0">com.build4all.entities.PostVisibility</node>
+    <node x="2207.549713193115" y="3927.0">com.build4all.entities.BusinessAdmins</node>
+    <node x="2003.084767367748" y="346.0">com.build4all.entities.NotificationTypeEntity</node>
+    <node x="2442.232552581262" y="3580.0">com.build4all.entities.BusinessAdminsId</node>
+    <node x="284.25" y="629.0">com.build4all.entities.ItemBooking</node>
+    <node x="1783.084767367748" y="607.0">com.build4all.entities.Review</node>
+  </nodes>
+  <notes />
+  <edges>
+    <edge source="com.build4all.entities.Booking" target="com.build4all.entities.Users" relationship="TO_ONE">
+      <point x="56.75" y="93.0" />
+      <point x="454.8347673677482" y="554.0" />
+      <point x="486.5" y="554.0" />
+      <point x="486.75" y="870.0" />
+      <point x="1358.0671606118533" y="870.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.BookingCancellationRequest" target="com.build4all.entities.BookingCancellationRequest.State" relationship="DEPENDENCY">
+      <point x="-80.66666666666674" y="126.0" />
+      <point x="1140.2580465264487" y="4149.0" />
+      <point x="1183.2580465264487" y="4149.0" />
+      <point x="-37.66666666666674" y="-49.0" />
+    </edge>
+    <edge source="com.build4all.entities.Review" target="com.build4all.entities.Item" relationship="TO_ONE">
+      <point x="-46.5" y="115.0" />
+      <point x="1829.584767367748" y="2442.0" />
+      <point x="1151.1075525812619" y="2442.0" />
+      <point x="1151.1075525812619" y="2452.0" />
+      <point x="1109.6075525812619" y="2452.0" />
+      <point x="-46.5" y="-148.0" />
+    </edge>
+    <edge source="com.build4all.entities.Review" target="com.build4all.entities.Users" relationship="TO_ONE">
+      <point x="-46.5" y="115.0" />
+      <point x="1829.584767367748" y="920.0" />
+      <point x="1358.0671606118533" y="920.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.BookingCancellationRequest" target="com.build4all.entities.ItemBooking" relationship="TO_ONE">
+      <point x="-60.5" y="-126.0" />
+      <point x="1160.4247131931152" y="3851.0" />
+      <point x="808.3830465264485" y="3851.0" />
+      <point x="808.3830465264485" y="3841.0" />
+      <point x="341.3347673677482" y="3841.0" />
+      <point x="341.3347673677482" y="880.0" />
+      <point x="329.5" y="880.0" />
+      <point x="-45.25" y="93.0" />
+    </edge>
+    <edge source="com.build4all.entities.PendingManager" target="com.build4all.entities.Businesses" relationship="TO_ONE">
+      <point x="45.25" y="-71.0" />
+      <point x="1983.9825525812619" y="3406.0" />
+      <point x="1963.0671606118533" y="3406.0" />
+      <point x="1963.0671606118533" y="3356.0" />
+      <point x="2002.709767367748" y="3356.0" />
+      <point x="68.25" y="225.0" />
+    </edge>
+    <edge source="com.build4all.entities.activity.UserActivityFeed" target="com.build4all.entities.FeedType" relationship="TO_ONE">
+      <point x="-50.25" y="-93.0" />
+      <point x="1232.0" y="2862.0" />
+      <point x="1162.5" y="2862.0" />
+      <point x="1162.5" y="2812.0" />
+      <point x="1350.7325525812619" y="2812.0" />
+      <point x="-29.0" y="38.0" />
+    </edge>
+    <edge source="com.build4all.entities.Item" target="com.build4all.entities.ItemType" relationship="TO_ONE">
+      <point x="-46.5" y="-148.0" />
+      <point x="1109.6075525812619" y="2452.0" />
+      <point x="1151.1075525812619" y="2452.0" />
+      <point x="1151.1075525812619" y="2442.0" />
+      <point x="1556.3575525812619" y="2442.0" />
+      <point x="-45.25" y="71.0" />
+    </edge>
+    <edge source="com.build4all.entities.Businesses" target="com.build4all.entities.Item" relationship="TO_MANY">
+      <point x="-68.25" y="-225.0" />
+      <point x="1866.209767367748" y="2862.0" />
+      <point x="1923.75" y="2862.0" />
+      <point x="1923.75" y="2832.0" />
+      <point x="1214.25" y="2832.0" />
+      <point x="1214.25" y="2802.0" />
+      <point x="1156.1075525812619" y="2802.0" />
+      <point x="0.0" y="148.0" />
+    </edge>
+    <edge source="com.build4all.entities.AdminUsers" target="com.build4all.entities.Role" relationship="DEPENDENCY">
+      <point x="-52.25" y="-148.0" />
+      <point x="2265.482552581262" y="3426.0" />
+      <point x="2304.192160611853" y="3426.0" />
+      <point x="2304.192160611853" y="3376.0" />
+      <point x="2278.192160611853" y="3376.0" />
+      <point x="0.0" y="60.0" />
+    </edge>
+    <edge source="com.build4all.entities.DataInitializer" target="com.build4all.entities.Role" relationship="CREATE">
+      <point x="0.0" y="-14.5" />
+      <point x="2121.732552581262" y="3426.0" />
+      <point x="2216.192160611853" y="3426.0" />
+      <point x="-62.0" y="60.0" />
+    </edge>
+    <edge source="com.build4all.entities.ItemType" target="com.build4all.entities.Interests" relationship="DEPENDENCY">
+      <point x="-45.25" y="-71.0" />
+      <point x="1556.3575525812619" y="2241.0" />
+      <point x="1547.3575525812619" y="2241.0" />
+      <point x="-54.25" y="93.0" />
+    </edge>
+    <edge source="com.build4all.entities.UserInterests.UserInterestId" target="com.build4all.entities.UserInterests" relationship="INNER_CLASS">
+      <point x="54.33333333333337" y="49.0" />
+      <point x="1594.5658859145954" y="1822.0" />
+      <point x="1635.6075525812619" y="1822.0" />
+      <point x="0.0" y="-60.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.Posts" relationship="TO_MANY">
+      <point x="66.25" y="-313.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1358.0671606118533" y="870.0" />
+      <point x="1533.9247131931152" y="870.0" />
+      <point x="1533.9247131931152" y="574.0" />
+      <point x="1520.214945825367" y="574.0" />
+      <point x="1520.214945825367" y="564.0" />
+      <point x="1451.875" y="564.0" />
+      <point x="50.5" y="137.0" />
+    </edge>
+    <edge source="com.build4all.entities.Posts" target="com.build4all.entities.Users" relationship="TO_MANY">
+      <point x="50.5" y="137.0" />
+      <point x="1451.875" y="564.0" />
+      <point x="1520.214945825367" y="564.0" />
+      <point x="1520.214945825367" y="574.0" />
+      <point x="1533.9247131931152" y="574.0" />
+      <point x="1533.9247131931152" y="870.0" />
+      <point x="1358.0671606118533" y="870.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.BusinessUser" target="com.build4all.entities.UserStatus" relationship="TO_ONE">
+      <point x="46.5" y="-181.0" />
+      <point x="1295.9247131931152" y="3426.0" />
+      <point x="1254.4247131931152" y="3426.0" />
+      <point x="1254.4247131931152" y="3376.0" />
+      <point x="202.5000000000001" y="3376.0" />
+      <point x="202.5" y="890.0" />
+      <point x="199.83476736774833" y="890.0" />
+      <point x="30.25" y="38.0" />
+    </edge>
+    <edge source="com.build4all.entities.BusinessAdmins" target="com.build4all.entities.BusinessAdminsId" relationship="TO_ONE">
+      <point x="0.0" y="-71.0" />
+      <point x="2300.549713193115" y="3831.0" />
+      <point x="2484.732552581262" y="3831.0" />
+      <point x="-42.5" y="49.0" />
+    </edge>
+    <edge source="com.build4all.entities.Notifications" target="com.build4all.entities.Users" relationship="TO_ONE">
+      <point x="-64.0" y="104.0" />
+      <point x="2053.084767367748" y="940.0" />
+      <point x="1358.0671606118533" y="940.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.activity.UserActivityFeed" target="com.build4all.entities.Users" relationship="TO_ONE">
+      <point x="-50.25" y="-93.0" />
+      <point x="1232.0" y="2862.0" />
+      <point x="1162.5" y="2862.0" />
+      <point x="1162.5" y="2812.0" />
+      <point x="1052.6075525812619" y="2812.0" />
+      <point x="1052.6075525812619" y="1650.0" />
+      <point x="1219.0254939451866" y="1650.0" />
+      <point x="1219.0254939451866" y="1640.0" />
+      <point x="1286.8171606118533" y="1640.0" />
+      <point x="-66.25" y="313.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.UserInterests" relationship="DEPENDENCY">
+      <point x="66.25" y="313.0" />
+      <point x="1419.3171606118533" y="1630.0" />
+      <point x="1590.9421606118533" y="1630.0" />
+      <point x="1590.9421606118533" y="1640.0" />
+      <point x="1671.8575525812619" y="1640.0" />
+      <point x="1671.8575525812619" y="1822.0" />
+      <point x="1697.6075525812619" y="1822.0" />
+      <point x="61.99999999999994" y="-60.0" />
+    </edge>
+    <edge source="com.build4all.entities.Posts" target="com.build4all.entities.Users" relationship="TO_ONE">
+      <point x="50.5" y="137.0" />
+      <point x="1451.875" y="564.0" />
+      <point x="1520.214945825367" y="564.0" />
+      <point x="1520.214945825367" y="574.0" />
+      <point x="1533.9247131931152" y="574.0" />
+      <point x="1533.9247131931152" y="870.0" />
+      <point x="1358.0671606118533" y="870.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.Item" target="com.build4all.entities.Businesses" relationship="DEPENDENCY">
+      <point x="62.0" y="148.0" />
+      <point x="1218.1075525812619" y="2792.0" />
+      <point x="1314.25" y="2792.0" />
+      <point x="1314.25" y="2822.0" />
+      <point x="1935.6921606118533" y="2822.0" />
+      <point x="1935.6921606118533" y="2862.0" />
+      <point x="2002.709767367748" y="2862.0" />
+      <point x="68.25" y="-225.0" />
+    </edge>
+    <edge source="com.build4all.entities.Businesses" target="com.build4all.entities.Item" relationship="DEPENDENCY">
+      <point x="68.25" y="-225.0" />
+      <point x="2002.709767367748" y="2862.0" />
+      <point x="1935.6921606118533" y="2862.0" />
+      <point x="1935.6921606118533" y="2822.0" />
+      <point x="1314.25" y="2822.0" />
+      <point x="1314.25" y="2792.0" />
+      <point x="1218.1075525812619" y="2792.0" />
+      <point x="62.0" y="148.0" />
+    </edge>
+    <edge source="com.build4all.entities.BusinessAdmins" target="com.build4all.entities.Businesses" relationship="TO_ONE">
+      <point x="0.0" y="-71.0" />
+      <point x="2300.549713193115" y="3831.0" />
+      <point x="2039.7325525812619" y="3831.0" />
+      <point x="2039.7325525812619" y="3406.0" />
+      <point x="1963.0671606118533" y="3406.0" />
+      <point x="1963.0671606118533" y="3356.0" />
+      <point x="2002.709767367748" y="3356.0" />
+      <point x="68.25" y="225.0" />
+    </edge>
+    <edge source="com.build4all.entities.ItemBooking" target="com.build4all.entities.Booking" relationship="DEPENDENCY">
+      <point x="-45.25" y="-93.0" />
+      <point x="329.5" y="574.0" />
+      <point x="366.38304652644854" y="574.0" />
+      <point x="366.38304652644854" y="564.0" />
+      <point x="341.3347673677482" y="564.0" />
+      <point x="-56.75" y="93.0" />
+    </edge>
+    <edge source="com.build4all.entities.Booking" target="com.build4all.entities.ItemBooking" relationship="DEPENDENCY">
+      <point x="-56.75" y="93.0" />
+      <point x="341.3347673677482" y="564.0" />
+      <point x="366.38304652644854" y="564.0" />
+      <point x="366.38304652644854" y="574.0" />
+      <point x="329.5" y="574.0" />
+      <point x="-45.25" y="-93.0" />
+    </edge>
+    <edge source="com.build4all.entities.activity.UserActivityFeed" target="com.build4all.entities.Item" relationship="TO_ONE">
+      <point x="-50.25" y="-93.0" />
+      <point x="1232.0" y="2862.0" />
+      <point x="1162.5" y="2862.0" />
+      <point x="1162.5" y="2852.0" />
+      <point x="1214.25" y="2852.0" />
+      <point x="1214.25" y="2802.0" />
+      <point x="1156.1075525812619" y="2802.0" />
+      <point x="0.0" y="148.0" />
+    </edge>
+    <edge source="com.build4all.entities.UserInterests.UserInterestId" target="com.build4all.entities.Interests" relationship="TO_ONE">
+      <point x="-54.33333333333337" y="49.0" />
+      <point x="1485.8992192479286" y="1792.0" />
+      <point x="1499.5" y="1792.0" />
+      <point x="1499.5" y="1802.0" />
+      <point x="1521.1075525812619" y="1802.0" />
+      <point x="1521.1075525812619" y="1996.0" />
+      <point x="1561.334767367748" y="1996.0" />
+      <point x="1561.334767367748" y="2006.0" />
+      <point x="1547.3575525812619" y="2006.0" />
+      <point x="-54.25" y="-93.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.ChatMessages" relationship="TO_MANY">
+      <point x="66.25" y="-313.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1358.0671606118533" y="870.0" />
+      <point x="1261.4247131931152" y="870.0" />
+      <point x="56.0" y="126.0" />
+    </edge>
+    <edge source="com.build4all.entities.PostLikes" target="com.build4all.entities.Posts" relationship="DEPENDENCY">
+      <point x="-46.5" y="-71.0" />
+      <point x="1383.9247131931152" y="574.0" />
+      <point x="1367.875" y="574.0" />
+      <point x="1367.875" y="564.0" />
+      <point x="1350.875" y="564.0" />
+      <point x="-50.5" y="137.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.Notifications" relationship="TO_MANY">
+      <point x="66.25" y="-313.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1358.0671606118533" y="940.0" />
+      <point x="2053.084767367748" y="940.0" />
+      <point x="-64.0" y="104.0" />
+    </edge>
+    <edge source="com.build4all.entities.Review" target="com.build4all.entities.Businesses" relationship="TO_ONE">
+      <point x="-46.5" y="115.0" />
+      <point x="1829.584767367748" y="910.0" />
+      <point x="1866.209767367748" y="910.0" />
+      <point x="1866.209767367748" y="2812.0" />
+      <point x="1923.75" y="2812.0" />
+      <point x="1923.75" y="2862.0" />
+      <point x="1866.209767367748" y="2862.0" />
+      <point x="-68.25" y="-225.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.UserStatus" relationship="DEPENDENCY">
+      <point x="-66.25" y="-313.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1156.0671606118533" y="920.0" />
+      <point x="139.33476736774833" y="920.0" />
+      <point x="-30.25" y="38.0" />
+    </edge>
+    <edge source="com.build4all.entities.UserInterests.UserInterestId" target="com.build4all.entities.Users" relationship="TO_ONE">
+      <point x="-40.75" y="-49.0" />
+      <point x="1499.4825525812619" y="1650.0" />
+      <point x="1219.0254939451866" y="1650.0" />
+      <point x="1219.0254939451866" y="1640.0" />
+      <point x="1286.8171606118533" y="1640.0" />
+      <point x="-66.25" y="313.0" />
+    </edge>
+    <edge source="com.build4all.entities.AppSettings" target="com.build4all.entities.Currency" relationship="TO_ONE">
+      <point x="-46.5" y="-49.0" />
+      <point x="578.0847673677482" y="237.0" />
+      <point x="345.15049394518655" y="237.0" />
+      <point x="345.15049394518655" y="227.0" />
+      <point x="440.27549394518655" y="227.0" />
+      <point x="-46.5" y="82.0" />
+    </edge>
+    <edge source="com.build4all.entities.Comments" target="com.build4all.entities.Posts" relationship="TO_ONE">
+      <point x="57.5" y="93.0" />
+      <point x="1541.625" y="227.0" />
+      <point x="1740.125" y="227.0" />
+      <point x="1740.125" y="237.0" />
+      <point x="1451.875" y="237.0" />
+      <point x="50.5" y="-137.0" />
+    </edge>
+    <edge source="com.build4all.entities.ItemBooking" target="com.build4all.entities.Item" relationship="DEPENDENCY">
+      <point x="45.25" y="93.0" />
+      <point x="420.0" y="880.0" />
+      <point x="352.3347673677482" y="880.0" />
+      <point x="352.3347673677481" y="2432.0" />
+      <point x="1161.1075525812619" y="2432.0" />
+      <point x="1161.1075525812619" y="2452.0" />
+      <point x="1202.6075525812619" y="2452.0" />
+      <point x="46.5" y="-148.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.PostLikes" relationship="DEPENDENCY">
+      <point x="-66.25" y="-313.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1156.0671606118533" y="880.0" />
+      <point x="1383.9247131931152" y="880.0" />
+      <point x="-46.5" y="71.0" />
+    </edge>
+    <edge source="com.build4all.entities.PostLikes" target="com.build4all.entities.Users" relationship="DEPENDENCY">
+      <point x="-46.5" y="71.0" />
+      <point x="1383.9247131931152" y="880.0" />
+      <point x="1156.0671606118533" y="880.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="-66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.Notifications" target="com.build4all.entities.NotificationTypeEntity" relationship="DEPENDENCY">
+      <point x="64.0" y="-104.0" />
+      <point x="2181.084767367748" y="574.0" />
+      <point x="2153.084767367748" y="574.0" />
+      <point x="50.0" y="49.0" />
+    </edge>
+    <edge source="com.build4all.entities.Booking" target="com.build4all.entities.Currency" relationship="TO_ONE">
+      <point x="-56.75" y="-93.0" />
+      <point x="341.3347673677482" y="237.0" />
+      <point x="345.15049394518655" y="237.0" />
+      <point x="345.15049394518655" y="227.0" />
+      <point x="440.27549394518655" y="227.0" />
+      <point x="-46.5" y="82.0" />
+    </edge>
+    <edge source="com.build4all.entities.activity.UserActivityFeed" target="com.build4all.entities.FeedType" relationship="DEPENDENCY">
+      <point x="50.25" y="-93.0" />
+      <point x="1332.5" y="2862.0" />
+      <point x="1339.0" y="2862.0" />
+      <point x="1339.0" y="2852.0" />
+      <point x="1408.7325525812619" y="2852.0" />
+      <point x="29.0" y="38.0" />
+    </edge>
+    <edge source="com.build4all.entities.Item" target="com.build4all.entities.Businesses" relationship="TO_ONE">
+      <point x="0.0" y="148.0" />
+      <point x="1156.1075525812619" y="2802.0" />
+      <point x="1214.25" y="2802.0" />
+      <point x="1214.25" y="2832.0" />
+      <point x="1923.75" y="2832.0" />
+      <point x="1923.75" y="2862.0" />
+      <point x="1866.209767367748" y="2862.0" />
+      <point x="-68.25" y="-225.0" />
+    </edge>
+    <edge source="com.build4all.entities.Review" target="com.build4all.entities.Item" relationship="DEPENDENCY">
+      <point x="46.5" y="115.0" />
+      <point x="1922.584767367748" y="920.0" />
+      <point x="1877.209767367748" y="920.0" />
+      <point x="1877.209767367748" y="2432.0" />
+      <point x="1161.1075525812619" y="2432.0" />
+      <point x="1161.1075525812619" y="2452.0" />
+      <point x="1202.6075525812619" y="2452.0" />
+      <point x="46.5" y="-148.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.PostLikes" relationship="TO_MANY">
+      <point x="66.25" y="-313.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1358.0671606118533" y="870.0" />
+      <point x="1476.9247131931152" y="870.0" />
+      <point x="46.5" y="71.0" />
+    </edge>
+    <edge source="com.build4all.entities.BookingCancellationRequest.State" target="com.build4all.entities.BookingCancellationRequest" relationship="INNER_CLASS">
+      <point x="0.0" y="-49.0" />
+      <point x="0.0" y="126.0" />
+    </edge>
+    <edge source="com.build4all.entities.AdminUsers" target="com.build4all.entities.Businesses" relationship="DEPENDENCY">
+      <point x="-52.25" y="-148.0" />
+      <point x="2265.482552581262" y="3426.0" />
+      <point x="2304.192160611853" y="3426.0" />
+      <point x="2304.192160611853" y="3386.0" />
+      <point x="1897.3171606118533" y="3386.0" />
+      <point x="1897.3171606118533" y="3376.0" />
+      <point x="1866.209767367748" y="3376.0" />
+      <point x="-68.25" y="225.0" />
+    </edge>
+    <edge source="com.build4all.entities.Booking" target="com.build4all.entities.Users" relationship="DEPENDENCY">
+      <point x="-56.75" y="93.0" />
+      <point x="341.3347673677482" y="564.0" />
+      <point x="366.38304652644854" y="564.0" />
+      <point x="366.38304652644854" y="574.0" />
+      <point x="475.75" y="574.0" />
+      <point x="475.75" y="880.0" />
+      <point x="1156.0671606118533" y="880.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="-66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.AdminUsers" target="com.build4all.entities.Role" relationship="TO_ONE">
+      <point x="52.25" y="-148.0" />
+      <point x="2369.982552581262" y="3426.0" />
+      <point x="2314.192160611853" y="3426.0" />
+      <point x="2314.192160611853" y="3416.0" />
+      <point x="2340.192160611853" y="3416.0" />
+      <point x="62.0" y="60.0" />
+    </edge>
+    <edge source="com.build4all.entities.BookingCancellationRequest" target="com.build4all.entities.Users" relationship="DEPENDENCY">
+      <point x="60.5" y="-126.0" />
+      <point x="1281.4247131931152" y="3851.0" />
+      <point x="1254.4247131931152" y="3851.0" />
+      <point x="1254.4247131931152" y="3831.0" />
+      <point x="1742.9825525812619" y="3831.0" />
+      <point x="1742.9825525812619" y="1640.0" />
+      <point x="1590.9421606118533" y="1640.0" />
+      <point x="1590.9421606118533" y="1630.0" />
+      <point x="1419.3171606118533" y="1630.0" />
+      <point x="66.25" y="313.0" />
+    </edge>
+    <edge source="com.build4all.entities.PendingUser" target="com.build4all.entities.UserStatus" relationship="TO_ONE">
+      <point x="45.25" y="-159.0" />
+      <point x="135.75" y="950.0" />
+      <point x="202.5" y="950.0" />
+      <point x="202.5" y="890.0" />
+      <point x="199.83476736774833" y="890.0" />
+      <point x="30.25" y="38.0" />
+    </edge>
+    <edge source="com.build4all.entities.Interests" target="com.build4all.entities.UserInterests" relationship="TO_MANY">
+      <point x="-54.25" y="-93.0" />
+      <point x="1547.3575525812619" y="2006.0" />
+      <point x="1561.334767367748" y="2006.0" />
+      <point x="1561.334767367748" y="1996.0" />
+      <point x="1589.1075525812619" y="1996.0" />
+      <point x="-46.5" y="60.0" />
+    </edge>
+    <edge source="com.build4all.entities.ItemBooking" target="com.build4all.entities.Booking" relationship="TO_ONE">
+      <point x="45.25" y="-93.0" />
+      <point x="420.0" y="564.0" />
+      <point x="486.5" y="564.0" />
+      <point x="486.5" y="554.0" />
+      <point x="454.8347673677482" y="554.0" />
+      <point x="56.75" y="93.0" />
+    </edge>
+    <edge source="com.build4all.entities.PendingBusiness" target="com.build4all.entities.BusinessStatus" relationship="TO_ONE">
+      <point x="-45.25" y="-170.0" />
+      <point x="2436.442160611853" y="2832.0" />
+      <point x="2411.334767367748" y="2832.0" />
+      <point x="2411.334767367748" y="2792.0" />
+      <point x="2390.424713193115" y="2792.0" />
+      <point x="-36.75" y="38.0" />
+    </edge>
+    <edge source="com.build4all.entities.Friendship" target="com.build4all.entities.Users" relationship="DEPENDENCY">
+      <point x="-45.25" y="71.0" />
+      <point x="922.9649458253671" y="880.0" />
+      <point x="1156.0671606118533" y="880.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="-66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.Friendship" relationship="DEPENDENCY">
+      <point x="-66.25" y="-313.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1156.0671606118533" y="880.0" />
+      <point x="922.9649458253671" y="880.0" />
+      <point x="-45.25" y="71.0" />
+    </edge>
+    <edge source="com.build4all.entities.Booking" target="com.build4all.entities.ItemBooking" relationship="TO_MANY">
+      <point x="56.75" y="93.0" />
+      <point x="454.8347673677482" y="554.0" />
+      <point x="486.5" y="554.0" />
+      <point x="486.5" y="564.0" />
+      <point x="420.0" y="564.0" />
+      <point x="45.25" y="-93.0" />
+    </edge>
+    <edge source="com.build4all.entities.BookingCancellationRequest" target="com.build4all.entities.BusinessUser" relationship="TO_ONE">
+      <point x="-60.5" y="-126.0" />
+      <point x="1160.4247131931152" y="3851.0" />
+      <point x="808.3830465264485" y="3851.0" />
+      <point x="808.3830465264485" y="3841.0" />
+      <point x="1202.9247131931152" y="3841.0" />
+      <point x="-46.5" y="181.0" />
+    </edge>
+    <edge source="com.build4all.entities.Booking" target="com.build4all.entities.Currency" relationship="DEPENDENCY">
+      <point x="56.75" y="-93.0" />
+      <point x="454.8347673677482" y="227.0" />
+      <point x="631.8830465264485" y="227.0" />
+      <point x="631.8830465264485" y="217.0" />
+      <point x="533.2754939451866" y="217.0" />
+      <point x="46.5" y="82.0" />
+    </edge>
+    <edge source="com.build4all.entities.ChatMessages" target="com.build4all.entities.Users" relationship="DEPENDENCY">
+      <point x="-56.0" y="126.0" />
+      <point x="1149.4247131931152" y="880.0" />
+      <point x="1156.0671606118533" y="880.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="-66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.PostLikes" target="com.build4all.entities.Users" relationship="TO_ONE">
+      <point x="46.5" y="71.0" />
+      <point x="1476.9247131931152" y="870.0" />
+      <point x="1358.0671606118533" y="870.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.ChatMessages" relationship="DEPENDENCY">
+      <point x="-66.25" y="-313.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1156.0671606118533" y="880.0" />
+      <point x="1149.4247131931152" y="880.0" />
+      <point x="-56.0" y="126.0" />
+    </edge>
+    <edge source="com.build4all.entities.Notifications" target="com.build4all.entities.Businesses" relationship="TO_ONE">
+      <point x="-64.0" y="104.0" />
+      <point x="2053.084767367748" y="2812.0" />
+      <point x="1923.75" y="2812.0" />
+      <point x="1923.75" y="2862.0" />
+      <point x="1866.209767367748" y="2862.0" />
+      <point x="-68.25" y="-225.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.ItemBooking" relationship="TO_MANY">
+      <point x="66.25" y="-313.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1358.0671606118533" y="890.0" />
+      <point x="341.3347673677482" y="890.0" />
+      <point x="341.3347673677482" y="880.0" />
+      <point x="329.5" y="880.0" />
+      <point x="-45.25" y="93.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.UserStatus" relationship="TO_ONE">
+      <point x="66.25" y="-313.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1358.0671606118533" y="900.0" />
+      <point x="202.5" y="900.0" />
+      <point x="202.5" y="890.0" />
+      <point x="199.83476736774833" y="890.0" />
+      <point x="30.25" y="38.0" />
+    </edge>
+    <edge source="com.build4all.entities.UserInterests" target="com.build4all.entities.Interests" relationship="TO_ONE">
+      <point x="-46.5" y="60.0" />
+      <point x="1589.1075525812619" y="1996.0" />
+      <point x="1561.334767367748" y="1996.0" />
+      <point x="1561.334767367748" y="2006.0" />
+      <point x="1547.3575525812619" y="2006.0" />
+      <point x="-54.25" y="-93.0" />
+    </edge>
+    <edge source="com.build4all.entities.UserInterests" target="com.build4all.entities.UserInterests.UserInterestId" relationship="DEPENDENCY">
+      <point x="62.0" y="-60.0" />
+      <point x="1697.6075525812619" y="1822.0" />
+      <point x="1671.8575525812619" y="1822.0" />
+      <point x="1671.8575525812619" y="1812.0" />
+      <point x="1532.1075525812619" y="1812.0" />
+      <point x="1532.1075525812619" y="1802.0" />
+      <point x="1540.2325525812619" y="1802.0" />
+      <point x="0.0" y="49.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.Review" relationship="TO_MANY">
+      <point x="66.25" y="-313.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1358.0671606118533" y="920.0" />
+      <point x="1829.584767367748" y="920.0" />
+      <point x="-46.5" y="115.0" />
+    </edge>
+    <edge source="com.build4all.entities.activity.UserActivityFeed" target="com.build4all.entities.Item" relationship="DEPENDENCY">
+      <point x="50.25" y="-93.0" />
+      <point x="1332.5" y="2862.0" />
+      <point x="1339.0" y="2862.0" />
+      <point x="1339.0" y="2842.0" />
+      <point x="1314.25" y="2842.0" />
+      <point x="1314.25" y="2792.0" />
+      <point x="1218.1075525812619" y="2792.0" />
+      <point x="62.0" y="148.0" />
+    </edge>
+    <edge source="com.build4all.entities.ItemBooking" target="com.build4all.entities.Users" relationship="TO_ONE">
+      <point x="-45.25" y="93.0" />
+      <point x="329.5" y="880.0" />
+      <point x="341.3347673677482" y="880.0" />
+      <point x="341.3347673677482" y="890.0" />
+      <point x="1358.0671606118533" y="890.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.Businesses" target="com.build4all.entities.Review" relationship="DEPENDENCY">
+      <point x="68.25" y="-225.0" />
+      <point x="2002.709767367748" y="2862.0" />
+      <point x="1935.6921606118533" y="2862.0" />
+      <point x="1935.6921606118533" y="2802.0" />
+      <point x="1877.209767367748" y="2802.0" />
+      <point x="1877.209767367748" y="920.0" />
+      <point x="1922.584767367748" y="920.0" />
+      <point x="46.5" y="115.0" />
+    </edge>
+    <edge source="com.build4all.entities.Review" target="com.build4all.entities.Businesses" relationship="DEPENDENCY">
+      <point x="46.5" y="115.0" />
+      <point x="1922.584767367748" y="920.0" />
+      <point x="1877.209767367748" y="920.0" />
+      <point x="1877.209767367748" y="2802.0" />
+      <point x="1935.6921606118533" y="2802.0" />
+      <point x="1935.6921606118533" y="2862.0" />
+      <point x="2002.709767367748" y="2862.0" />
+      <point x="68.25" y="-225.0" />
+    </edge>
+    <edge source="com.build4all.entities.Posts" target="com.build4all.entities.Comments" relationship="TO_MANY">
+      <point x="50.5" y="-137.0" />
+      <point x="1451.875" y="237.0" />
+      <point x="1740.125" y="237.0" />
+      <point x="1740.125" y="227.0" />
+      <point x="1541.625" y="227.0" />
+      <point x="57.5" y="93.0" />
+    </edge>
+    <edge source="com.build4all.entities.Notifications" target="com.build4all.entities.NotificationTypeEntity" relationship="TO_ONE">
+      <point x="-64.0" y="-104.0" />
+      <point x="-50.0" y="49.0" />
+    </edge>
+    <edge source="com.build4all.entities.Businesses" target="com.build4all.entities.BusinessStatus" relationship="TO_ONE">
+      <point x="-68.25" y="-225.0" />
+      <point x="1866.209767367748" y="2862.0" />
+      <point x="1923.75" y="2862.0" />
+      <point x="1923.75" y="2842.0" />
+      <point x="2411.334767367748" y="2842.0" />
+      <point x="2411.334767367748" y="2792.0" />
+      <point x="2390.424713193115" y="2792.0" />
+      <point x="-36.75" y="38.0" />
+    </edge>
+    <edge source="com.build4all.entities.BusinessAdmins" target="com.build4all.entities.Businesses" relationship="DEPENDENCY">
+      <point x="-62.0" y="-71.0" />
+      <point x="2238.549713193115" y="3851.0" />
+      <point x="2090.317160611853" y="3851.0" />
+      <point x="2090.317160611853" y="3841.0" />
+      <point x="1837.7325525812619" y="3841.0" />
+      <point x="1837.7325525812619" y="3406.0" />
+      <point x="1897.3171606118533" y="3406.0" />
+      <point x="1897.3171606118533" y="3376.0" />
+      <point x="1866.209767367748" y="3376.0" />
+      <point x="-68.25" y="225.0" />
+    </edge>
+    <edge source="com.build4all.entities.Posts" target="com.build4all.entities.PostVisibility" relationship="TO_ONE">
+      <point x="50.5" y="-137.0" />
+      <point x="1451.875" y="227.0" />
+      <point x="1132.3575525812619" y="227.0" />
+      <point x="34.0" y="38.0" />
+    </edge>
+    <edge source="com.build4all.entities.PostLikes" target="com.build4all.entities.Posts" relationship="TO_ONE">
+      <point x="46.5" y="-71.0" />
+      <point x="1476.9247131931152" y="574.0" />
+      <point x="1520.214945825367" y="574.0" />
+      <point x="1520.214945825367" y="564.0" />
+      <point x="1451.875" y="564.0" />
+      <point x="50.5" y="137.0" />
+    </edge>
+    <edge source="com.build4all.entities.BusinessUser" target="com.build4all.entities.UserStatus" relationship="DEPENDENCY">
+      <point x="-46.5" y="-181.0" />
+      <point x="1202.9247131931152" y="3426.0" />
+      <point x="1244.4247131931152" y="3426.0" />
+      <point x="1244.4247131931152" y="3386.0" />
+      <point x="191.5000000000001" y="3386.0" />
+      <point x="191.5" y="960.0" />
+      <point x="139.33476736774833" y="960.0" />
+      <point x="-30.25" y="38.0" />
+    </edge>
+    <edge source="com.build4all.entities.Comments" target="com.build4all.entities.Users" relationship="DEPENDENCY">
+      <point x="-57.5" y="93.0" />
+      <point x="1426.625" y="207.0" />
+      <point x="1069.214945825367" y="207.0" />
+      <point x="1069.214945825367" y="880.0" />
+      <point x="1156.0671606118533" y="880.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="-66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.Comments" relationship="DEPENDENCY">
+      <point x="-66.25" y="-313.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1156.0671606118533" y="880.0" />
+      <point x="1069.214945825367" y="880.0" />
+      <point x="1069.214945825367" y="207.0" />
+      <point x="1426.625" y="207.0" />
+      <point x="-57.5" y="93.0" />
+    </edge>
+    <edge source="com.build4all.entities.PendingUser" target="com.build4all.entities.UserStatus" relationship="DEPENDENCY">
+      <point x="-45.25" y="-159.0" />
+      <point x="45.25" y="960.0" />
+      <point x="139.33476736774833" y="960.0" />
+      <point x="-30.25" y="38.0" />
+    </edge>
+    <edge source="com.build4all.entities.UserInterests.UserInterestId" target="com.build4all.entities.Users" relationship="DEPENDENCY">
+      <point x="40.75" y="-49.0" />
+      <point x="1580.9825525812619" y="1640.0" />
+      <point x="1590.9421606118533" y="1640.0" />
+      <point x="1590.9421606118533" y="1630.0" />
+      <point x="1419.3171606118533" y="1630.0" />
+      <point x="66.25" y="313.0" />
+    </edge>
+    <edge source="com.build4all.entities.Posts" target="com.build4all.entities.Comments" relationship="DEPENDENCY">
+      <point x="-50.5" y="-137.0" />
+      <point x="1350.875" y="237.0" />
+      <point x="867.6075525812619" y="237.0" />
+      <point x="867.6075525812619" y="227.0" />
+      <point x="1069.214945825367" y="227.0" />
+      <point x="1069.214945825367" y="207.0" />
+      <point x="1426.625" y="207.0" />
+      <point x="-57.5" y="93.0" />
+    </edge>
+    <edge source="com.build4all.entities.Comments" target="com.build4all.entities.Posts" relationship="DEPENDENCY">
+      <point x="-57.5" y="93.0" />
+      <point x="1426.625" y="207.0" />
+      <point x="1069.214945825367" y="207.0" />
+      <point x="1069.214945825367" y="227.0" />
+      <point x="867.6075525812619" y="227.0" />
+      <point x="867.6075525812619" y="237.0" />
+      <point x="1350.875" y="237.0" />
+      <point x="-50.5" y="-137.0" />
+    </edge>
+    <edge source="com.build4all.entities.activity.Activity" target="com.build4all.entities.Item" relationship="GENERALIZATION">
+      <point x="0.0" y="-82.0" />
+      <point x="1020.125" y="2862.0" />
+      <point x="984.1330465264485" y="2862.0" />
+      <point x="984.1330465264485" y="2852.0" />
+      <point x="1094.1075525812619" y="2852.0" />
+      <point x="-62.0" y="148.0" />
+    </edge>
+    <edge source="com.build4all.entities.ItemType" target="com.build4all.entities.Interests" relationship="TO_ONE">
+      <point x="45.25" y="-71.0" />
+      <point x="1646.8575525812619" y="2241.0" />
+      <point x="1655.8575525812619" y="2241.0" />
+      <point x="54.25" y="93.0" />
+    </edge>
+    <edge source="com.build4all.entities.AdminUsers" target="com.build4all.entities.Businesses" relationship="TO_ONE">
+      <point x="52.25" y="-148.0" />
+      <point x="2369.982552581262" y="3426.0" />
+      <point x="2314.192160611853" y="3426.0" />
+      <point x="2314.192160611853" y="3366.0" />
+      <point x="1963.0671606118533" y="3366.0" />
+      <point x="1963.0671606118533" y="3356.0" />
+      <point x="2002.709767367748" y="3356.0" />
+      <point x="68.25" y="225.0" />
+    </edge>
+    <edge source="com.build4all.entities.BookingCancellationRequest" target="com.build4all.entities.Users" relationship="TO_ONE">
+      <point x="-60.5" y="-126.0" />
+      <point x="1160.4247131931152" y="3851.0" />
+      <point x="808.3830465264485" y="3851.0" />
+      <point x="808.3830465264485" y="3841.0" />
+      <point x="749.125" y="3841.0" />
+      <point x="749.125" y="1650.0" />
+      <point x="1219.0254939451866" y="1650.0" />
+      <point x="1219.0254939451866" y="1640.0" />
+      <point x="1286.8171606118533" y="1640.0" />
+      <point x="-66.25" y="313.0" />
+    </edge>
+    <edge source="com.build4all.entities.Item" target="com.build4all.entities.Currency" relationship="DEPENDENCY">
+      <point x="46.5" y="-148.0" />
+      <point x="1202.6075525812619" y="2452.0" />
+      <point x="1161.1075525812619" y="2452.0" />
+      <point x="1161.1075525812619" y="2432.0" />
+      <point x="728.0847673677482" y="2432.0" />
+      <point x="728.0847673677482" y="227.0" />
+      <point x="631.8830465264485" y="227.0" />
+      <point x="631.8830465264485" y="217.0" />
+      <point x="533.2754939451866" y="217.0" />
+      <point x="46.5" y="82.0" />
+    </edge>
+    <edge source="com.build4all.entities.Friendship" target="com.build4all.entities.Users" relationship="TO_ONE">
+      <point x="45.25" y="71.0" />
+      <point x="1013.4649458253671" y="870.0" />
+      <point x="1358.0671606118533" y="870.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.Interests" target="com.build4all.entities.UserInterests" relationship="DEPENDENCY">
+      <point x="54.25" y="-93.0" />
+      <point x="1655.8575525812619" y="2006.0" />
+      <point x="1580.459767367748" y="2006.0" />
+      <point x="1580.459767367748" y="1986.0" />
+      <point x="1682.1075525812619" y="1986.0" />
+      <point x="46.5" y="60.0" />
+    </edge>
+    <edge source="com.build4all.entities.UserInterests" target="com.build4all.entities.Interests" relationship="DEPENDENCY">
+      <point x="46.5" y="60.0" />
+      <point x="1682.1075525812619" y="1986.0" />
+      <point x="1580.459767367748" y="1986.0" />
+      <point x="1580.459767367748" y="2006.0" />
+      <point x="1655.8575525812619" y="2006.0" />
+      <point x="54.25" y="-93.0" />
+    </edge>
+    <edge source="com.build4all.entities.BusinessUser" target="com.build4all.entities.Businesses" relationship="DEPENDENCY">
+      <point x="-46.5" y="-181.0" />
+      <point x="1202.9247131931152" y="3426.0" />
+      <point x="1244.4247131931152" y="3426.0" />
+      <point x="1244.4247131931152" y="3396.0" />
+      <point x="1897.3171606118533" y="3396.0" />
+      <point x="1897.3171606118533" y="3376.0" />
+      <point x="1866.209767367748" y="3376.0" />
+      <point x="-68.25" y="225.0" />
+    </edge>
+    <edge source="com.build4all.entities.product.Product" target="com.build4all.entities.Item" relationship="GENERALIZATION">
+      <point x="0.0" y="-49.0" />
+      <point x="829.625" y="2862.0" />
+      <point x="984.1330465264485" y="2862.0" />
+      <point x="984.1330465264485" y="2852.0" />
+      <point x="1094.1075525812619" y="2852.0" />
+      <point x="-62.0" y="148.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.Friendship" relationship="TO_MANY">
+      <point x="66.25" y="-313.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1358.0671606118533" y="870.0" />
+      <point x="1013.4649458253671" y="870.0" />
+      <point x="45.25" y="71.0" />
+    </edge>
+    <edge source="com.build4all.entities.AppSettings" target="com.build4all.entities.Currency" relationship="DEPENDENCY">
+      <point x="46.5" y="-49.0" />
+      <point x="671.0847673677482" y="227.0" />
+      <point x="631.8830465264485" y="227.0" />
+      <point x="631.8830465264485" y="217.0" />
+      <point x="533.2754939451866" y="217.0" />
+      <point x="46.5" y="82.0" />
+    </edge>
+    <edge source="com.build4all.entities.ChatMessages" target="com.build4all.entities.Users" relationship="TO_ONE">
+      <point x="56.0" y="126.0" />
+      <point x="1261.4247131931152" y="870.0" />
+      <point x="1358.0671606118533" y="870.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.Review" relationship="DEPENDENCY">
+      <point x="-66.25" y="-313.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1156.0671606118533" y="930.0" />
+      <point x="1877.209767367748" y="930.0" />
+      <point x="1877.209767367748" y="920.0" />
+      <point x="1922.584767367748" y="920.0" />
+      <point x="46.5" y="115.0" />
+    </edge>
+    <edge source="com.build4all.entities.Review" target="com.build4all.entities.Users" relationship="DEPENDENCY">
+      <point x="46.5" y="115.0" />
+      <point x="1922.584767367748" y="920.0" />
+      <point x="1877.209767367748" y="920.0" />
+      <point x="1877.209767367748" y="930.0" />
+      <point x="1156.0671606118533" y="930.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="-66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.Businesses" target="com.build4all.entities.Review" relationship="TO_MANY">
+      <point x="-68.25" y="-225.0" />
+      <point x="1866.209767367748" y="2862.0" />
+      <point x="1923.75" y="2862.0" />
+      <point x="1923.75" y="2812.0" />
+      <point x="1866.209767367748" y="2812.0" />
+      <point x="1866.209767367748" y="910.0" />
+      <point x="1829.584767367748" y="910.0" />
+      <point x="-46.5" y="115.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.ItemBooking" relationship="DEPENDENCY">
+      <point x="-66.25" y="-313.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1156.0671606118533" y="910.0" />
+      <point x="352.3347673677482" y="910.0" />
+      <point x="352.3347673677482" y="880.0" />
+      <point x="420.0" y="880.0" />
+      <point x="45.25" y="93.0" />
+    </edge>
+    <edge source="com.build4all.entities.ItemBooking" target="com.build4all.entities.Users" relationship="DEPENDENCY">
+      <point x="45.25" y="93.0" />
+      <point x="420.0" y="880.0" />
+      <point x="352.3347673677482" y="880.0" />
+      <point x="352.3347673677482" y="910.0" />
+      <point x="1156.0671606118533" y="910.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="-66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.UserInterests" target="com.build4all.entities.UserInterests.UserInterestId" relationship="TO_ONE">
+      <point x="-62.0" y="-60.0" />
+      <point x="1573.6075525812619" y="1822.0" />
+      <point x="1494.25" y="1822.0" />
+      <point x="1494.25" y="1812.0" />
+      <point x="1499.5" y="1812.0" />
+      <point x="1499.5" y="1792.0" />
+      <point x="1485.8992192479286" y="1792.0" />
+      <point x="-54.33333333333337" y="49.0" />
+    </edge>
+    <edge source="com.build4all.entities.BusinessAdmins" target="com.build4all.entities.AdminUsers" relationship="TO_ONE">
+      <point x="0.0" y="-71.0" />
+      <point x="2300.549713193115" y="3831.0" />
+      <point x="2369.982552581262" y="3831.0" />
+      <point x="52.25" y="148.0" />
+    </edge>
+    <edge source="com.build4all.entities.PendingBusiness" target="com.build4all.entities.BusinessStatus" relationship="DEPENDENCY">
+      <point x="45.25" y="-170.0" />
+      <point x="2526.942160611853" y="2822.0" />
+      <point x="2421.334767367748" y="2822.0" />
+      <point x="2421.334767367748" y="2792.0" />
+      <point x="2463.924713193115" y="2792.0" />
+      <point x="36.75" y="38.0" />
+    </edge>
+    <edge source="com.build4all.entities.Businesses" target="com.build4all.entities.PendingManager" relationship="TO_MANY">
+      <point x="68.25" y="225.0" />
+      <point x="2002.709767367748" y="3356.0" />
+      <point x="1963.0671606118533" y="3356.0" />
+      <point x="1963.0671606118533" y="3406.0" />
+      <point x="1983.9825525812619" y="3406.0" />
+      <point x="45.25" y="-71.0" />
+    </edge>
+    <edge source="com.build4all.entities.Notifications" target="com.build4all.entities.Businesses" relationship="DEPENDENCY">
+      <point x="64.0" y="104.0" />
+      <point x="2181.084767367748" y="940.0" />
+      <point x="2511.174713193115" y="940.0" />
+      <point x="2511.174713193115" y="2802.0" />
+      <point x="1935.6921606118533" y="2802.0" />
+      <point x="1935.6921606118533" y="2862.0" />
+      <point x="2002.709767367748" y="2862.0" />
+      <point x="68.25" y="-225.0" />
+    </edge>
+    <edge source="com.build4all.entities.BusinessAdmins" target="com.build4all.entities.BusinessAdminsId" relationship="CREATE">
+      <point x="62.0" y="-71.0" />
+      <point x="2362.549713193115" y="3851.0" />
+      <point x="2569.732552581262" y="3851.0" />
+      <point x="42.5" y="49.0" />
+    </edge>
+    <edge source="com.build4all.entities.BookingCancellationRequest" target="com.build4all.entities.BusinessUser" relationship="DEPENDENCY">
+      <point x="60.5" y="-126.0" />
+      <point x="1281.4247131931152" y="3851.0" />
+      <point x="1254.4247131931152" y="3851.0" />
+      <point x="1254.4247131931152" y="3831.0" />
+      <point x="1295.9247131931152" y="3831.0" />
+      <point x="46.5" y="181.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.Notifications" relationship="DEPENDENCY">
+      <point x="-66.25" y="-313.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1156.0671606118533" y="950.0" />
+      <point x="2511.174713193115" y="950.0" />
+      <point x="2511.174713193115" y="940.0" />
+      <point x="2181.084767367748" y="940.0" />
+      <point x="64.0" y="104.0" />
+    </edge>
+    <edge source="com.build4all.entities.Notifications" target="com.build4all.entities.Users" relationship="DEPENDENCY">
+      <point x="64.0" y="104.0" />
+      <point x="2181.084767367748" y="940.0" />
+      <point x="2511.174713193115" y="940.0" />
+      <point x="2511.174713193115" y="950.0" />
+      <point x="1156.0671606118533" y="950.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="-66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.BookingCancellationRequest" target="com.build4all.entities.BookingCancellationRequest.State" relationship="TO_ONE">
+      <point x="80.66666666666674" y="126.0" />
+      <point x="1301.5913798597821" y="4149.0" />
+      <point x="1258.5913798597821" y="4149.0" />
+      <point x="37.66666666666674" y="-49.0" />
+    </edge>
+    <edge source="com.build4all.entities.Posts" target="com.build4all.entities.PostVisibility" relationship="DEPENDENCY">
+      <point x="-50.5" y="-137.0" />
+      <point x="1350.875" y="237.0" />
+      <point x="867.6075525812619" y="237.0" />
+      <point x="867.6075525812619" y="217.0" />
+      <point x="1064.3575525812619" y="217.0" />
+      <point x="-34.0" y="38.0" />
+    </edge>
+    <edge source="com.build4all.entities.Posts" target="com.build4all.entities.Users" relationship="DEPENDENCY">
+      <point x="-50.5" y="137.0" />
+      <point x="1350.875" y="564.0" />
+      <point x="1367.875" y="564.0" />
+      <point x="1367.875" y="574.0" />
+      <point x="1082.9247131931152" y="574.0" />
+      <point x="1082.9247131931152" y="880.0" />
+      <point x="1156.0671606118533" y="880.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="-66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.Posts" relationship="DEPENDENCY">
+      <point x="-66.25" y="-313.0" />
+      <point x="1286.8171606118533" y="960.0" />
+      <point x="1156.0671606118533" y="960.0" />
+      <point x="1156.0671606118533" y="880.0" />
+      <point x="1082.9247131931152" y="880.0" />
+      <point x="1082.9247131931152" y="574.0" />
+      <point x="1367.875" y="574.0" />
+      <point x="1367.875" y="564.0" />
+      <point x="1350.875" y="564.0" />
+      <point x="-50.5" y="137.0" />
+    </edge>
+    <edge source="com.build4all.entities.Comments" target="com.build4all.entities.Users" relationship="TO_ONE">
+      <point x="57.5" y="93.0" />
+      <point x="1541.625" y="227.0" />
+      <point x="1740.125" y="227.0" />
+      <point x="1740.125" y="870.0" />
+      <point x="1358.0671606118533" y="870.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="66.25" y="-313.0" />
+    </edge>
+    <edge source="com.build4all.entities.ItemBooking" target="com.build4all.entities.Item" relationship="TO_ONE">
+      <point x="-45.25" y="93.0" />
+      <point x="329.5" y="880.0" />
+      <point x="341.3347673677482" y="880.0" />
+      <point x="341.3347673677481" y="2442.0" />
+      <point x="1151.1075525812619" y="2442.0" />
+      <point x="1151.1075525812619" y="2452.0" />
+      <point x="1109.6075525812619" y="2452.0" />
+      <point x="-46.5" y="-148.0" />
+    </edge>
+    <edge source="com.build4all.entities.BusinessUser" target="com.build4all.entities.Businesses" relationship="TO_ONE">
+      <point x="46.5" y="-181.0" />
+      <point x="1295.9247131931152" y="3426.0" />
+      <point x="1254.4247131931152" y="3426.0" />
+      <point x="1254.4247131931152" y="3416.0" />
+      <point x="1963.0671606118533" y="3416.0" />
+      <point x="1963.0671606118533" y="3356.0" />
+      <point x="2002.709767367748" y="3356.0" />
+      <point x="68.25" y="225.0" />
+    </edge>
+    <edge source="com.build4all.entities.activity.UserActivityFeed" target="com.build4all.entities.Users" relationship="DEPENDENCY">
+      <point x="50.25" y="-93.0" />
+      <point x="1332.5" y="2862.0" />
+      <point x="1339.0" y="2862.0" />
+      <point x="1339.0" y="2852.0" />
+      <point x="1448.2325525812619" y="2852.0" />
+      <point x="1448.2325525812619" y="1640.0" />
+      <point x="1590.9421606118533" y="1640.0" />
+      <point x="1590.9421606118533" y="1630.0" />
+      <point x="1419.3171606118533" y="1630.0" />
+      <point x="66.25" y="313.0" />
+    </edge>
+    <edge source="com.build4all.entities.UserInterests.UserInterestId" target="com.build4all.entities.Interests" relationship="DEPENDENCY">
+      <point x="0.0" y="49.0" />
+      <point x="1540.2325525812619" y="1802.0" />
+      <point x="1532.1075525812619" y="1802.0" />
+      <point x="1532.1075525812619" y="1986.0" />
+      <point x="1580.459767367748" y="1986.0" />
+      <point x="1580.459767367748" y="2006.0" />
+      <point x="1655.8575525812619" y="2006.0" />
+      <point x="54.25" y="-93.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.Comments" relationship="TO_MANY">
+      <point x="66.25" y="-313.0" />
+      <point x="1419.3171606118533" y="960.0" />
+      <point x="1358.0671606118533" y="960.0" />
+      <point x="1358.0671606118533" y="870.0" />
+      <point x="1740.125" y="870.0" />
+      <point x="1740.125" y="227.0" />
+      <point x="1541.625" y="227.0" />
+      <point x="57.5" y="93.0" />
+    </edge>
+    <edge source="com.build4all.entities.Item" target="com.build4all.entities.Currency" relationship="TO_ONE">
+      <point x="-46.5" y="-148.0" />
+      <point x="1109.6075525812619" y="2452.0" />
+      <point x="1151.1075525812619" y="2452.0" />
+      <point x="1151.1075525812619" y="2442.0" />
+      <point x="268.0" y="2442.0" />
+      <point x="268.0" y="237.0" />
+      <point x="345.15049394518655" y="237.0" />
+      <point x="345.15049394518655" y="227.0" />
+      <point x="440.27549394518655" y="227.0" />
+      <point x="-46.5" y="82.0" />
+    </edge>
+    <edge source="com.build4all.entities.BookingCancellationRequest" target="com.build4all.entities.ItemBooking" relationship="DEPENDENCY">
+      <point x="60.5" y="-126.0" />
+      <point x="1281.4247131931152" y="3851.0" />
+      <point x="1254.4247131931152" y="3851.0" />
+      <point x="1254.4247131931152" y="3831.0" />
+      <point x="352.3347673677482" y="3831.0" />
+      <point x="352.3347673677482" y="880.0" />
+      <point x="420.0" y="880.0" />
+      <point x="45.25" y="93.0" />
+    </edge>
+    <edge source="com.build4all.entities.Users" target="com.build4all.entities.UserInterests" relationship="TO_MANY">
+      <point x="-66.25" y="313.0" />
+      <point x="1286.8171606118533" y="1640.0" />
+      <point x="1219.0254939451866" y="1640.0" />
+      <point x="1218.7754939451866" y="1802.0" />
+      <point x="1494.25" y="1802.0" />
+      <point x="1494.25" y="1822.0" />
+      <point x="1573.6075525812619" y="1822.0" />
+      <point x="-62.0" y="-60.0" />
+    </edge>
+    <edge source="com.build4all.entities.Item" target="com.build4all.entities.ItemType" relationship="DEPENDENCY">
+      <point x="46.5" y="-148.0" />
+      <point x="1202.6075525812619" y="2452.0" />
+      <point x="1161.1075525812619" y="2452.0" />
+      <point x="1161.1075525812619" y="2432.0" />
+      <point x="1646.8575525812619" y="2432.0" />
+      <point x="45.25" y="71.0" />
+    </edge>
+    <edge source="com.build4all.entities.Businesses" target="com.build4all.entities.BusinessStatus" relationship="DEPENDENCY">
+      <point x="68.25" y="-225.0" />
+      <point x="2002.709767367748" y="2862.0" />
+      <point x="1935.6921606118533" y="2862.0" />
+      <point x="1935.6921606118533" y="2852.0" />
+      <point x="2421.334767367748" y="2852.0" />
+      <point x="2421.334767367748" y="2792.0" />
+      <point x="2463.924713193115" y="2792.0" />
+      <point x="36.75" y="38.0" />
+    </edge>
+    <edge source="com.build4all.entities.Businesses" target="com.build4all.entities.PendingManager" relationship="DEPENDENCY">
+      <point x="-68.25" y="225.0" />
+      <point x="1866.209767367748" y="3376.0" />
+      <point x="1897.3171606118533" y="3376.0" />
+      <point x="1897.3171606118533" y="3406.0" />
+      <point x="1893.4825525812619" y="3406.0" />
+      <point x="-45.25" y="-71.0" />
+    </edge>
+    <edge source="com.build4all.entities.PendingManager" target="com.build4all.entities.Businesses" relationship="DEPENDENCY">
+      <point x="-45.25" y="-71.0" />
+      <point x="1893.4825525812619" y="3406.0" />
+      <point x="1897.3171606118533" y="3406.0" />
+      <point x="1897.3171606118533" y="3376.0" />
+      <point x="1866.209767367748" y="3376.0" />
+      <point x="-68.25" y="225.0" />
+    </edge>
+    <edge source="com.build4all.entities.BusinessAdmins" target="com.build4all.entities.AdminUsers" relationship="DEPENDENCY">
+      <point x="-62.0" y="-71.0" />
+      <point x="2238.549713193115" y="3851.0" />
+      <point x="2090.317160611853" y="3851.0" />
+      <point x="2090.317160611853" y="3841.0" />
+      <point x="2265.482552581262" y="3841.0" />
+      <point x="-52.25" y="148.0" />
+    </edge>
+  </edges>
+  <settings layout="Hierarchic" zoom="0.6827120223671947" showDependencies="true" x="488.41492048324346" y="249.99249198006964" />
+  <SelectedNodes />
+  <Categories>
+    <Category>Fields</Category>
+    <Category>Inner Classes</Category>
+  </Categories>
+  <SCOPE>All</SCOPE>
+  <VISIBILITY>private</VISIBILITY>
+</Diagram>
+
