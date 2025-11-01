@@ -10,6 +10,8 @@ import com.build4all.project.domain.Project;
 import com.build4all.project.repository.ProjectRepository;
 import com.build4all.theme.domain.Theme;
 import com.build4all.theme.repository.ThemeRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +19,8 @@ import java.time.LocalDate;
 
 @Service
 public class AppRequestService {
+
+    private static final Logger log = LoggerFactory.getLogger(AppRequestService.class);
 
     private final AppRequestRepository appRequestRepo;
     private final AdminUserProjectRepository aupRepo;
@@ -39,10 +43,7 @@ public class AppRequestService {
         this.ciBuildService = ciBuildService;
     }
 
-    /**
-     * Create a request WITHOUT auto-approval (kept for backward compatibility).
-     * If you want auto-approval, use createAndAutoApprove(...) instead.
-     */
+    /** Create request without auto-approval (kept for compatibility). */
     public AppRequest createRequest(Long ownerId, Long projectId,
                                     String appName, String slug,
                                     String logoUrl, Long themeId, String notes) {
@@ -52,18 +53,13 @@ public class AppRequestService {
         r.setAppName(appName);
         r.setSlug(slugifyOrKeep(slug, appName));
         r.setLogoUrl(logoUrl);
-        r.setThemeId(themeId); // may be null
+        r.setThemeId(themeId);
         r.setNotes(notes);
-        // status is left to entity default (likely "PENDING")
+        // status defaults to PENDING
         return appRequestRepo.save(r);
     }
 
-    /**
-     * NEW: Create AND auto-approve in one shot.
-     * - Persists the AppRequest with status APPROVED
-     * - Provisions/updates AdminUserProject link
-     * - Triggers CI build
-     */
+    /** Create AND auto-approve. */
     @Transactional
     public AdminUserProject createAndAutoApprove(Long ownerId, Long projectId,
                                                  String appName, String slug,
@@ -77,16 +73,13 @@ public class AppRequestService {
         r.setLogoUrl(logoUrl);
         r.setThemeId(themeId);
         r.setNotes(notes);
-        r.setStatus("APPROVED"); // mark immediately as APPROVED
+        r.setStatus("APPROVED");
         r = appRequestRepo.save(r);
 
-        return provisionAndTrigger(r); // main workflow
+        return provisionAndTrigger(r);
     }
 
-    /**
-     * Manual approve (kept as-is for compatibility).
-     * Now delegates to the same provisioning/CI logic used by auto-approve.
-     */
+    /** Approve a PENDING request then run provisioning/CI logic. */
     @Transactional
     public AdminUserProject approve(Long requestId) {
         AppRequest req = appRequestRepo.findById(requestId)
@@ -94,11 +87,8 @@ public class AppRequestService {
         if (!"PENDING".equals(req.getStatus())) {
             throw new IllegalStateException("Request already decided");
         }
-
-        // Flip status and persist before provisioning
         req.setStatus("APPROVED");
         appRequestRepo.save(req);
-
         return provisionAndTrigger(req);
     }
 
@@ -113,27 +103,26 @@ public class AppRequestService {
         appRequestRepo.save(req);
     }
 
+    /** Called by CI callback controller to persist the APK URL (app-scoped). */
     @Transactional
-    public AdminUserProject setApkUrl(Long adminId, Long projectId, String apkUrl) {
+    public AdminUserProject setApkUrl(Long adminId, Long projectId, String slug, String apkUrl) {
         AdminUserProject link = aupRepo
-                .findByAdmin_AdminIdAndProject_Id(adminId, projectId)
-                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found"));
+                .findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slug)
+                .orElseThrow(() -> new IllegalArgumentException("OwnerProject app not found"));
         link.setApkUrl(apkUrl);
         return aupRepo.save(link);
     }
- 
 
-
-    // -------------------------
-    // Internal helpers
-    // -------------------------
+    // ---------- internal helpers ----------
 
     /**
-     * Shared logic for both manual approve and auto-approve:
+     * Provision a DISTINCT app row per (owner, project, slug):
      * - Resolve owner/project
-     * - Pick theme (requested or default active)
-     * - Ensure/Update AdminUserProject link (slug, dates, license, ACTIVE)
-     * - Trigger CI with all inputs
+     * - Resolve theme (requested or active)
+     * - Ensure unique slug per owner+project (append -2, -3, ...)
+     * - Upsert AdminUserProject (status ACTIVE, appName, slug, dates, license, theme)
+     * - Clear apkUrl
+     * - Trigger CI (null-safe)
      */
     private AdminUserProject provisionAndTrigger(AppRequest req) {
         AdminUser owner = adminRepo.findById(req.getOwnerId())
@@ -142,44 +131,52 @@ public class AppRequestService {
                 .orElseThrow(() -> new IllegalArgumentException("Project not found"));
 
         Long chosenThemeId = resolveThemeId(req.getThemeId());
-
-        String slug = (req.getSlug() != null && !req.getSlug().isBlank())
+        String desiredSlug = (req.getSlug() != null && !req.getSlug().isBlank())
                 ? req.getSlug().trim().toLowerCase()
                 : slugify(req.getAppName());
+        String uniqueSlug = ensureUniqueSlug(owner.getAdminId(), project.getId(), desiredSlug);
 
         LocalDate now = LocalDate.now();
         LocalDate end = now.plusMonths(1);
 
         AdminUserProject link = aupRepo
-                .findByAdmin_AdminIdAndProject_Id(owner.getAdminId(), project.getId())
-                .orElseGet(() -> new AdminUserProject(owner, project, null, now, end));
+                .findByAdmin_AdminIdAndProject_IdAndSlug(owner.getAdminId(), project.getId(), uniqueSlug)
+                .orElseGet(() -> {
+                    AdminUserProject n = new AdminUserProject(owner, project, null, now, end);
+                    n.setSlug(uniqueSlug);
+                    return n;
+                });
 
         link.setStatus("ACTIVE");
-        link.setSlug(slug);
+        link.setAppName(req.getAppName());
         link.setValidFrom(now);
         link.setEndTo(end);
         link.setThemeId(chosenThemeId);
 
         if (link.getLicenseId() == null || link.getLicenseId().isBlank()) {
-            link.setLicenseId("LIC-" + owner.getAdminId() + "-" + project.getId() + "-" + now);
+            link.setLicenseId("LIC-" + owner.getAdminId() + "-" + project.getId() + "-" + now + "-" + uniqueSlug);
         }
 
-        // ❗️ KEY LINE: ensure create/auto returns apkUrl = null.
-        // If there’s any old placeholder value, wipe it now.
+        // Clear any old APK URL so UI won't show stale value.
         link.setApkUrl(null);
+        link = aupRepo.save(link);
 
-        aupRepo.save(link);
+        // Build OPL (never null).
+        String opl = owner.getAdminId() + "-" + project.getId();
 
-        // Fire CI build (non-blocking). The callback will set the real apkUrl later.
-        ciBuildService.triggerOwnerBuild(
+        boolean ok = ciBuildService.dispatchOwnerAndroidBuild(
                 owner.getAdminId(),
                 project.getId(),
-                slug,
-                chosenThemeId,
+                opl,
+                uniqueSlug,
                 req.getAppName(),
+                chosenThemeId,
                 req.getLogoUrl()
         );
 
+        if (!ok) {
+            log.warn("CI dispatch did NOT return 2xx (apkUrl will remain null until a successful run).");
+        }
         return link;
     }
 
@@ -192,9 +189,7 @@ public class AppRequestService {
     }
 
     private static String slugifyOrKeep(String maybeSlug, String fallbackName) {
-        if (maybeSlug != null && !maybeSlug.isBlank()) {
-            return slugify(maybeSlug);
-        }
+        if (maybeSlug != null && !maybeSlug.isBlank()) return slugify(maybeSlug);
         return slugify(fallbackName);
     }
 
@@ -203,5 +198,20 @@ public class AppRequestService {
         return s.trim().toLowerCase()
                 .replaceAll("[^a-z0-9]+", "-")
                 .replaceAll("(^-|-$)", "");
+    }
+
+    /** Ensure slug uniqueness per (owner, project) by appending -2, -3, ... */
+    private String ensureUniqueSlug(Long ownerId, Long projectId, String baseSlug) {
+        if (baseSlug == null || baseSlug.isBlank()) baseSlug = "app";
+        String candidate = baseSlug;
+        int i = 2;
+        while (aupRepo.existsByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, candidate)) {
+            candidate = baseSlug + "-" + i;
+            i++;
+            if (i > 500) { // safety
+                throw new IllegalStateException("Could not generate a unique slug");
+            }
+        }
+        return candidate;
     }
 }

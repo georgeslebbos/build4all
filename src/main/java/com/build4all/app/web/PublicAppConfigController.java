@@ -1,4 +1,3 @@
-// src/main/java/com/build4all/app/web/PublicAppConfigController.java
 package com.build4all.app.web;
 
 import com.build4all.app.config.AppEnvProperties;
@@ -36,16 +35,14 @@ public class PublicAppConfigController {
         );
     }
 
-    /**
-     * Returns the mobile theme for a specific owner+project.
-     * If that link has no theme, falls back to the active global theme.
-     */
+    // ✅ app-scoped theme (recommended)
     @GetMapping("/mobile-theme")
     public ResponseEntity<?> themeForOwnerProject(@RequestParam Long ownerId,
-                                                  @RequestParam Long projectId) {
-        return aupRepo.findByAdmin_AdminIdAndProject_Id(ownerId, projectId)
+                                                  @RequestParam Long projectId,
+                                                  @RequestParam String slug) {
+        return aupRepo.findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slug)
             .map(link -> {
-                Long themeId = link.getThemeId(); // <- stored as Long on AdminUserProject
+                Long themeId = link.getThemeId();
                 Optional<Theme> selectedOrActive = themeService.getSelectedOrActive(themeId);
                 return selectedOrActive
                     .<ResponseEntity<?>>map(t -> ResponseEntity.ok(new ThemeMobileDTO(t)))

@@ -1,14 +1,16 @@
-// src/main/java/com/build4all/app/web/OwnerAppRequestController.java
 package com.build4all.app.web;
 
 import com.build4all.app.domain.AppRequest;
 import com.build4all.app.dto.CreateAppRequestDto;
 import com.build4all.app.repository.AppRequestRepository;
 import com.build4all.app.service.AppRequestService;
+import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.dto.OwnerProjectView;
 import com.build4all.admin.repository.AdminUserProjectRepository;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import java.util.List;
+
+import java.util.*;
 
 @RestController
 @RequestMapping("/api/owner")
@@ -27,16 +29,73 @@ public class OwnerAppRequestController {
     }
 
     @PostMapping("/app-requests")
-    public AppRequest create(@RequestParam Long ownerId, @RequestBody CreateAppRequestDto dto) {
-        return service.createRequest(
-                ownerId,
-                dto.projectId(),
-                dto.appName(),
-                dto.slug(),
-                dto.logoUrl(),
-                dto.themeId(),
-                dto.notes()
-        );
+    public ResponseEntity<?> create(@RequestParam Long ownerId,
+                                    @RequestBody CreateAppRequestDto dto) {
+        try {
+            AppRequest r = service.createRequest(
+                    ownerId,
+                    dto.projectId(),
+                    dto.appName(),
+                    dto.slug(),
+                    dto.logoUrl(),
+                    dto.themeId(),
+                    dto.notes()
+            );
+            Map<String, Object> body = new HashMap<>();
+            body.put("message", "Request created");
+            body.put("requestId", r.getId());
+            body.put("status", r.getStatus());
+            body.put("appName", nz(r.getAppName()));
+            body.put("slug", nz(r.getSlug()));
+            return ResponseEntity.ok(body);
+        } catch (Exception ex) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("error", "Internal error");
+            err.put("details", ex.getClass().getSimpleName());
+            return ResponseEntity.internalServerError().body(err);
+        }
+    }
+
+    @PostMapping("/app-requests/auto")
+    public ResponseEntity<?> createAndAutoApprove(@RequestParam Long ownerId,
+                                                  @RequestBody CreateAppRequestDto dto) {
+        try {
+            AdminUserProject link = service.createAndAutoApprove(
+                    ownerId,
+                    dto.projectId(),
+                    dto.appName(),
+                    dto.slug(),
+                    dto.logoUrl(),
+                    dto.themeId(),
+                    dto.notes()
+            );
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("message", "APK build started");
+            body.put("adminId", link.getAdmin().getAdminId());
+            body.put("projectId", link.getProject().getId());
+            body.put("slug", nz(link.getSlug()));
+            body.put("appName", nz(link.getAppName()));
+            body.put("status", nz(link.getStatus()));
+            body.put("licenseId", nz(link.getLicenseId()));
+            body.put("themeId", link.getThemeId());
+            body.put("validFrom", link.getValidFrom());
+            body.put("endTo", link.getEndTo());
+            body.put("apkUrl", nz(link.getApkUrl())); // empty until CI callback
+            return ResponseEntity.ok(body);
+
+        } catch (IllegalArgumentException | IllegalStateException ex) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("error", "Bad request");
+            err.put("details", ex.getMessage());
+            return ResponseEntity.badRequest().body(err);
+
+        } catch (Exception ex) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("error", "Internal error");
+            err.put("details", ex.getClass().getSimpleName());
+            return ResponseEntity.internalServerError().body(err);
+        }
     }
 
     @GetMapping("/app-requests")
@@ -48,19 +107,6 @@ public class OwnerAppRequestController {
     public List<OwnerProjectView> myApps(@RequestParam Long ownerId) {
         return aupRepo.findOwnerProjectsSlim(ownerId);
     }
-    
-    @PostMapping("/app-requests/auto")
-    public Object createAndAutoApprove(@RequestParam Long ownerId,
-                                       @RequestBody CreateAppRequestDto dto) {
-        return service.createAndAutoApprove(
-                ownerId,
-                dto.projectId(),
-                dto.appName(),
-                dto.slug(),
-                dto.logoUrl(),
-                dto.themeId(),
-                dto.notes()
-        );
-    }
 
+    private static String nz(String s) { return s == null ? "" : s; }
 }

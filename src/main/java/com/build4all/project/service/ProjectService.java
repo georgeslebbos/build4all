@@ -9,7 +9,10 @@ import com.build4all.project.repository.ProjectRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class ProjectService {
@@ -59,7 +62,7 @@ public class ProjectService {
 
     @Transactional
     public void delete(Long id) {
-        // Clean owner links for this project, then delete the project
+        // Delete ALL app rows belonging to this project, then delete the project
         var links = linkRepo.findByProject_Id(id);
         if (!links.isEmpty()) {
             linkRepo.deleteAll(links);
@@ -72,7 +75,15 @@ public class ProjectService {
     @Transactional
     public Project save(Project p) { return repo.save(p); }
 
-    /** Link owner/admin (adminId) to project (projectId). Idempotent. */
+    /**
+     * Link owner/admin (adminId) to project (projectId).
+     * In the new model, the existence of ANY app row under (owner, project) is considered the "link".
+     *
+     * Backward-compat behavior:
+     * - If no app exists yet for (owner, project), create a minimal placeholder app row so
+     *   old flows that relied on "link creation" keep working.
+     * - If you prefer NO placeholder, simply return when "exists" is false (see comment below).
+     */
     @Transactional
     public void linkProjectToOwner(Long adminId, Long projectId) {
         AdminUser owner = adminRepo.findById(adminId)
@@ -81,25 +92,61 @@ public class ProjectService {
                 .orElseThrow(() -> new IllegalArgumentException("Project not found: " + projectId));
 
         boolean exists = linkRepo.existsByAdmin_AdminIdAndProject_Id(adminId, projectId);
-        if (!exists) {
-            AdminUserProject link = new AdminUserProject(owner, project, null, null, null);
-            link.setStatus("ACTIVE");
-            linkRepo.save(link);
-        }
+        if (exists) return;
+
+        // ---- Option A (default): create a minimal placeholder app row to establish the link
+        LocalDate now = LocalDate.now();
+        String baseSlug = "app";
+        String uniqueSlug = ensureUniqueSlug(adminId, projectId, baseSlug);
+
+        AdminUserProject link = new AdminUserProject(owner, project, null, now, now.plusMonths(1));
+        link.setStatus("ACTIVE");
+        link.setSlug(uniqueSlug);
+        link.setAppName(project.getProjectName()); // display name; harmless
+        link.setLicenseId("LIC-" + adminId + "-" + projectId + "-" + now + "-" + uniqueSlug);
+        link.setApkUrl(null);
+        linkRepo.save(link);
+
+        // ---- Option B: if you DON'T want a placeholder, comment the block above and uncomment:
+        // return;
     }
 
-    /** Projects linked to a given AdminUser (owner/admin). */
+    /**
+     * Projects linked to a given AdminUser (owner/admin).
+     * Deduplicated (because multiple apps may exist under the same project).
+     */
     @Transactional(readOnly = true)
     public List<Project> findByOwnerAdminId(Long adminId) {
-        return linkRepo.findByAdmin_AdminId(adminId)
-                .stream()
-                .map(AdminUserProject::getProject)
-                .toList();
+        var rows = linkRepo.findByAdmin_AdminId(adminId);
+        if (rows.isEmpty()) return List.of();
+
+        // Deduplicate by projectId, preserving order
+        Map<Long, Project> unique = new LinkedHashMap<>();
+        for (AdminUserProject l : rows) {
+            Project p = l.getProject();
+            if (p != null) unique.putIfAbsent(p.getId(), p);
+        }
+        return List.copyOf(unique.values());
     }
 
-    /** Guard: is this admin linked to the project? */
+    /** Guard: is this admin linked to the project? (i.e., any app row exists) */
     @Transactional(readOnly = true)
     public boolean isOwnerLinkedToProject(Long adminId, Long projectId) {
         return linkRepo.existsByAdmin_AdminIdAndProject_Id(adminId, projectId);
+    }
+
+    // ---------- helpers ----------
+
+    /** Ensure slug uniqueness per (owner, project) by appending -2, -3, ... */
+    private String ensureUniqueSlug(Long ownerId, Long projectId, String baseSlug) {
+        if (baseSlug == null || baseSlug.isBlank()) baseSlug = "app";
+        String candidate = baseSlug;
+        int i = 2;
+        while (linkRepo.existsByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, candidate)) {
+            candidate = baseSlug + "-" + i;
+            i++;
+            if (i > 500) throw new IllegalStateException("Could not generate a unique slug");
+        }
+        return candidate;
     }
 }

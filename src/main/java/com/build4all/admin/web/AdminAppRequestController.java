@@ -10,12 +10,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-/**
- * Super Admin endpoints:
- *  - List pending requests
- *  - Approve / Reject
- *  - Set APK URL for an owner-project link
- */
 @RestController
 @RequestMapping("/api/admin")
 public class AdminAppRequestController {
@@ -45,10 +39,12 @@ public class AdminAppRequestController {
         service.reject(id);
     }
 
-    @PutMapping("/owner-projects/{adminId}/{projectId}/apk-url")
+    // ✅ now app-scoped (slug in path)
+    @PutMapping("/owner-projects/{adminId}/{projectId}/apps/{slug}/apk-url")
     public AdminUserProject setApk(@PathVariable Long adminId,
                                    @PathVariable Long projectId,
+                                   @PathVariable String slug,
                                    @RequestBody SetApkUrlDto body) {
-        return service.setApkUrl(adminId, projectId, body.apkUrl());
+        return service.setApkUrl(adminId, projectId, slug, body.apkUrl());
     }
 }

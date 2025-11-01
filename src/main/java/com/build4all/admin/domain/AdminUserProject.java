@@ -1,4 +1,3 @@
-// src/main/java/com/build4all/admin/domain/AdminUserProject.java
 package com.build4all.admin.domain;
 
 import com.build4all.project.domain.Project;
@@ -10,9 +9,10 @@ import java.time.LocalDateTime;
 @Entity
 @Table(
     name = "admin_user_projects",
-    uniqueConstraints = @UniqueConstraint(
-        name = "uk_aup_admin_project", columnNames = {"admin_id", "project_id"}
-    ),
+    uniqueConstraints = {
+        // ✅ allow multiple apps per (owner, project) distinguished by slug
+        @UniqueConstraint(name = "uk_aup_owner_project_slug", columnNames = {"admin_id", "project_id", "slug"})
+    },
     indexes = {
         @Index(name = "idx_aup_admin", columnList = "admin_id"),
         @Index(name = "idx_aup_project", columnList = "project_id"),
@@ -48,13 +48,16 @@ public class AdminUserProject {
     @Column(name = "status", length = 16)
     private String status = "ACTIVE"; // ACTIVE | SUSPENDED | EXPIRED | DELETED
 
-    @Column(name = "slug", length = 128)
+    @Column(name = "slug", length = 128)  // unique per owner+project
     private String slug;
+
+    @Column(name = "app_name", length = 128) // display name; can be duplicated
+    private String appName;
 
     @Column(name = "apk_url", columnDefinition = "TEXT")
     private String apkUrl;
 
-    /** 🆕 Theme chosen for this owner+project (nullable => fallback to default) */
+    /** Theme chosen for this owner+project app (nullable => fallback to default) */
     @Column(name = "theme_id")
     private Long themeId;
 
@@ -73,6 +76,7 @@ public class AdminUserProject {
                             LocalDate endTo,
                             String status,
                             String slug,
+                            String appName,
                             String apkUrl,
                             Long themeId) {
         this.admin = admin;
@@ -82,6 +86,7 @@ public class AdminUserProject {
         this.endTo = endTo;
         this.status = status;
         this.slug = slug;
+        this.appName = appName;
         this.apkUrl = apkUrl;
         this.themeId = themeId;
     }
@@ -91,7 +96,7 @@ public class AdminUserProject {
                             String licenseId,
                             LocalDate validFrom,
                             LocalDate endTo) {
-        this(admin, project, licenseId, validFrom, endTo, "ACTIVE", null, null, null);
+        this(admin, project, licenseId, validFrom, endTo, "ACTIVE", null, null, null, null);
     }
 
     @PrePersist
@@ -117,6 +122,8 @@ public class AdminUserProject {
     public void setStatus(String status) { this.status = status; }
     public String getSlug() { return slug; }
     public void setSlug(String slug) { this.slug = slug; }
+    public String getAppName() { return appName; }
+    public void setAppName(String appName) { this.appName = appName; }
     public String getApkUrl() { return apkUrl; }
     public void setApkUrl(String apkUrl) { this.apkUrl = apkUrl; }
     public Long getThemeId() { return themeId; }
