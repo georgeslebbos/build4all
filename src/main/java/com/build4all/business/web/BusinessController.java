@@ -319,33 +319,43 @@ public class BusinessController {
     @Operation(summary = "Check Stripe connection")
     @GetMapping("/{id}/stripe-status")
     public ResponseEntity<?> stripeStatus(@PathVariable Long id, @RequestHeader("Authorization") String authHeader) {
-        if (!isAuthorized(authHeader, id)) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Unauthorized"));
+        if (!isAuthorized(authHeader, id)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Unauthorized"));
+        }
 
         Businesses b = businessService.findById(id);
-        if (b == null) return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Business not found"));
+        if (b == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", "Business not found"));
+        }
 
         String acct = b.getStripeAccountId();
         if (acct == null || acct.isBlank()) {
-            return ResponseEntity.ok(Map.of(
-                    "stripeConnected", false,
-                    "detailsSubmitted", false,
-                    "chargesEnabled", false,
-                    "stripeAccountId", null
-            ));
+            // Use a mutable map that tolerates null values
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("stripeConnected", false);
+            body.put("detailsSubmitted", false);
+            body.put("chargesEnabled", false);
+            body.put("stripeAccountId", null); // fine here
+            return ResponseEntity.ok(body);
         }
 
         try {
             Account account = Account.retrieve(acct);
             boolean charges = account.getChargesEnabled();
             boolean details = account.getDetailsSubmitted();
-            return ResponseEntity.ok(Map.of(
-                    "stripeConnected", charges && details,
-                    "detailsSubmitted", details,
-                    "chargesEnabled", charges,
-                    "stripeAccountId", acct
-            ));
+
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("stripeConnected", charges && details);
+            body.put("detailsSubmitted", details);
+            body.put("chargesEnabled", charges);
+            body.put("stripeAccountId", acct);
+            return ResponseEntity.ok(body);
+
         } catch (StripeException e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "Stripe error: " + e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Stripe error: " + e.getMessage()));
         }
     }
 
