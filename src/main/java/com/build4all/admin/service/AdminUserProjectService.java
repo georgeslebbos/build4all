@@ -10,9 +10,18 @@ import com.build4all.project.domain.Project;
 import com.build4all.project.repository.ProjectRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths; // <-- IMPORTANT: java.nio.file.Paths (no swagger Paths!)
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class AdminUserProjectService {
@@ -43,9 +52,17 @@ public class AdminUserProjectService {
                 l.getValidFrom(),
                 l.getEndTo(),
                 l.getThemeId(),
-                nz(l.getApkUrl())
+                nz(l.getApkUrl()),
+                nz(l.getLogoUrl())
             ))
             .toList();
+    }
+
+    /** Get one app row (owner+project+slug). */
+    @Transactional(readOnly = true)
+    public AdminUserProject get(Long adminId, Long projectId, String slug) {
+        return linkRepo.findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slugify(slug))
+            .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
     }
 
     /**
@@ -83,7 +100,6 @@ public class AdminUserProjectService {
             link.setStatus("ACTIVE");
             link.setSlug(uniqueSlug);
         } else {
-            // update fields for the same app
             if (req.getLicenseId() != null) link.setLicenseId(req.getLicenseId());
             if (req.getValidFrom() != null) link.setValidFrom(req.getValidFrom());
             if (req.getEndTo() != null) link.setEndTo(req.getEndTo());
@@ -104,6 +120,34 @@ public class AdminUserProjectService {
         link.setApkUrl(null);
 
         linkRepo.save(link);
+    }
+
+    /** Upload & save logo, return its public URL. */
+    @Transactional
+    public String updateAppLogo(Long adminId, Long projectId, String slug, MultipartFile file) throws IOException {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("Logo file is empty");
+        }
+
+        var link = linkRepo.findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slugify(slug))
+                .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
+
+        Path uploadDir = Paths.get("uploads/owner", String.valueOf(adminId), String.valueOf(projectId), slugify(slug));
+        if (!Files.exists(uploadDir)) Files.createDirectories(uploadDir);
+
+        String original = file.getOriginalFilename() == null ? "logo.png" : file.getOriginalFilename();
+        String ext = original.lastIndexOf('.') >= 0 ? original.substring(original.lastIndexOf('.')) : ".png";
+        String stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String safe = UUID.randomUUID() + "_" + stamp + ext;
+
+        Files.copy(file.getInputStream(), uploadDir.resolve(safe), StandardCopyOption.REPLACE_EXISTING);
+
+        String publicUrl = "/uploads/owner/" + adminId + "/" + projectId + "/" + slugify(slug) + "/" + safe;
+
+        link.setLogoUrl(publicUrl);
+        linkRepo.save(link);
+
+        return publicUrl;
     }
 
     /** Update only license/validity for an existing app (owner+project+slug). */

@@ -14,6 +14,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+import java.io.IOException;
+import java.nio.file.*;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.UUID;
+
 
 import java.time.LocalDate;
 
@@ -149,6 +156,7 @@ public class AppRequestService {
 
         link.setStatus("ACTIVE");
         link.setAppName(req.getAppName());
+        link.setLogoUrl(req.getLogoUrl());
         link.setValidFrom(now);
         link.setEndTo(end);
         link.setThemeId(chosenThemeId);
@@ -193,13 +201,7 @@ public class AppRequestService {
         return slugify(fallbackName);
     }
 
-    private static String slugify(String s) {
-        if (s == null) return null;
-        return s.trim().toLowerCase()
-                .replaceAll("[^a-z0-9]+", "-")
-                .replaceAll("(^-|-$)", "");
-    }
-
+  
     /** Ensure slug uniqueness per (owner, project) by appending -2, -3, ... */
     private String ensureUniqueSlug(Long ownerId, Long projectId, String baseSlug) {
         if (baseSlug == null || baseSlug.isBlank()) baseSlug = "app";
@@ -214,4 +216,48 @@ public class AppRequestService {
         }
         return candidate;
     }
+    
+    public AdminUserProject createAndAutoApproveWithLogoFile(
+            Long ownerId, Long projectId,
+            String appName, String slug,
+            MultipartFile logoFile,      // <-- file here
+            Long themeId, String notes
+    ) throws IOException {
+
+        String logoUrl = null;
+        if (logoFile != null && !logoFile.isEmpty()) {
+            logoUrl = saveOwnerAppLogoToUploads(ownerId, projectId, slug, logoFile);
+        }
+
+        // call your existing createAndAutoApprove(...) which expects a URL
+        return createAndAutoApprove(ownerId, projectId, appName, slug, logoUrl, themeId, notes);
+    }
+
+    /** EXACT same style as BusinessService: write under uploads/, return "/uploads/..." URL */
+    private String saveOwnerAppLogoToUploads(Long ownerId, Long projectId, String slug, MultipartFile file) throws IOException {
+        Path dir = Paths.get("uploads/owner", String.valueOf(ownerId), String.valueOf(projectId), slugify1(slug));
+        if (!Files.exists(dir)) Files.createDirectories(dir);
+
+        String original = file.getOriginalFilename() == null ? "logo.png" : file.getOriginalFilename();
+        String ext = original.lastIndexOf('.') >= 0 ? original.substring(original.lastIndexOf('.')) : ".png";
+        String stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String safe = UUID.randomUUID() + "_" + stamp + ext;
+
+        Files.copy(file.getInputStream(), dir.resolve(safe), StandardCopyOption.REPLACE_EXISTING);
+
+        return "/uploads/owner/" + ownerId + "/" + projectId + "/" + slugify(slug) + "/" + safe;
+    }
+
+    private static String slugify1(String s) {
+        if (s == null) return "app";
+        return s.trim().toLowerCase().replaceAll("[^a-z0-9]+","-").replaceAll("(^-|-$)","");
+    }
+    
+    private static String slugify(String s) {
+        if (s == null) return null;
+        return s.trim().toLowerCase()
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("(^-|-$)", "");
+    }
+
 }

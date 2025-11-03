@@ -61,19 +61,14 @@ public class OwnerAppRequestController {
                                                   @RequestBody CreateAppRequestDto dto) {
         try {
             AdminUserProject link = service.createAndAutoApprove(
-                    ownerId,
-                    dto.projectId(),
-                    dto.appName(),
-                    dto.slug(),
-                    dto.logoUrl(),
-                    dto.themeId(),
-                    dto.notes()
-            );
+                    ownerId, dto.projectId(), dto.appName(), dto.slug(),
+                    dto.logoUrl(), dto.themeId(), dto.notes());
 
             Map<String, Object> body = new HashMap<>();
             body.put("message", "APK build started");
-            body.put("adminId", link.getAdmin().getAdminId());
-            body.put("projectId", link.getProject().getId());
+            // ✅ use the values you already have
+            body.put("adminId", ownerId);
+            body.put("projectId", dto.projectId());
             body.put("slug", nz(link.getSlug()));
             body.put("appName", nz(link.getAppName()));
             body.put("status", nz(link.getStatus()));
@@ -81,8 +76,9 @@ public class OwnerAppRequestController {
             body.put("themeId", link.getThemeId());
             body.put("validFrom", link.getValidFrom());
             body.put("endTo", link.getEndTo());
-            body.put("apkUrl", nz(link.getApkUrl())); // empty until CI callback
+            body.put("apkUrl", nz(link.getApkUrl()));
             return ResponseEntity.ok(body);
+
 
         } catch (IllegalArgumentException | IllegalStateException ex) {
             Map<String, Object> err = new HashMap<>();

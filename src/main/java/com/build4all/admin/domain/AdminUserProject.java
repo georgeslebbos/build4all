@@ -53,7 +53,12 @@ public class AdminUserProject {
 
     @Column(name = "app_name", length = 128) // display name; can be duplicated
     private String appName;
+    
 
+    @Column(name = "logo_url", columnDefinition = "TEXT")
+    private String logoUrl;
+
+  
     @Column(name = "apk_url", columnDefinition = "TEXT")
     private String apkUrl;
 
@@ -131,7 +136,12 @@ public class AdminUserProject {
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt;}
+    public String getLogoUrl() { return logoUrl; }
+    public void setLogoUrl(String logoUrl) { this.logoUrl = logoUrl; }
+
+
+    
 
     @Transient public Long getAdminId() { return admin != null ? admin.getAdminId() : null; }
     @Transient public Long getProjectId() { return project != null ? project.getId() : null; }
