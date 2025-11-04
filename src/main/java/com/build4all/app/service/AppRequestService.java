@@ -15,14 +15,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+
 import java.io.IOException;
 import java.nio.file.*;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
-
-
-import java.time.LocalDate;
 
 @Service
 public class AppRequestService {
@@ -120,16 +119,29 @@ public class AppRequestService {
         return aupRepo.save(link);
     }
 
+    /** NEW: persist by row id (AdminUserProject.id). */
+    @Transactional
+    public void setApkUrlByLinkId(Long linkId, String apkUrl) {
+        AdminUserProject link = aupRepo.findById(linkId)
+                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
+        link.setApkUrl(apkUrl);
+        aupRepo.save(link);
+    }
+
+    /** NEW: persist by (ownerId, projectId, slug). */
+    @Transactional
+    public void setApkUrlByOwnerProjectSlug(Long ownerId, Long projectId, String slug, String apkUrl) {
+        AdminUserProject link = aupRepo
+                .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slug)
+                .orElseThrow(() -> new IllegalArgumentException("OwnerProject app not found for slug: " + slug));
+        link.setApkUrl(apkUrl);
+        aupRepo.save(link);
+    }
+
     // ---------- internal helpers ----------
 
     /**
-     * Provision a DISTINCT app row per (owner, project, slug):
-     * - Resolve owner/project
-     * - Resolve theme (requested or active)
-     * - Ensure unique slug per owner+project (append -2, -3, ...)
-     * - Upsert AdminUserProject (status ACTIVE, appName, slug, dates, license, theme)
-     * - Clear apkUrl
-     * - Trigger CI (null-safe)
+     * Provision a DISTINCT app row per (owner, project, slug) and trigger CI.
      */
     private AdminUserProject provisionAndTrigger(AppRequest req) {
         AdminUser owner = adminRepo.findById(req.getOwnerId())
@@ -201,7 +213,6 @@ public class AppRequestService {
         return slugify(fallbackName);
     }
 
-  
     /** Ensure slug uniqueness per (owner, project) by appending -2, -3, ... */
     private String ensureUniqueSlug(Long ownerId, Long projectId, String baseSlug) {
         if (baseSlug == null || baseSlug.isBlank()) baseSlug = "app";
@@ -216,11 +227,11 @@ public class AppRequestService {
         }
         return candidate;
     }
-    
+
     public AdminUserProject createAndAutoApproveWithLogoFile(
             Long ownerId, Long projectId,
             String appName, String slug,
-            MultipartFile logoFile,      // <-- file here
+            MultipartFile logoFile,
             Long themeId, String notes
     ) throws IOException {
 
@@ -229,11 +240,10 @@ public class AppRequestService {
             logoUrl = saveOwnerAppLogoToUploads(ownerId, projectId, slug, logoFile);
         }
 
-        // call your existing createAndAutoApprove(...) which expects a URL
         return createAndAutoApprove(ownerId, projectId, appName, slug, logoUrl, themeId, notes);
     }
 
-    /** EXACT same style as BusinessService: write under uploads/, return "/uploads/..." URL */
+    /** Save under uploads/, return "/uploads/..." URL */
     private String saveOwnerAppLogoToUploads(Long ownerId, Long projectId, String slug, MultipartFile file) throws IOException {
         Path dir = Paths.get("uploads/owner", String.valueOf(ownerId), String.valueOf(projectId), slugify1(slug));
         if (!Files.exists(dir)) Files.createDirectories(dir);
@@ -252,12 +262,11 @@ public class AppRequestService {
         if (s == null) return "app";
         return s.trim().toLowerCase().replaceAll("[^a-z0-9]+","-").replaceAll("(^-|-$)","");
     }
-    
+
     private static String slugify(String s) {
         if (s == null) return null;
         return s.trim().toLowerCase()
                 .replaceAll("[^a-z0-9]+", "-")
                 .replaceAll("(^-|-$)", "");
     }
-
 }
