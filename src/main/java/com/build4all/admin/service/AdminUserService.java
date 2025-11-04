@@ -1,6 +1,7 @@
 package com.build4all.admin.service;
 
 import com.build4all.admin.domain.AdminUser;
+import com.build4all.admin.dto.AdminUserProfileDTO;
 import com.build4all.business.domain.Businesses;
 import com.build4all.review.repository.ReviewRepository;
 import com.build4all.role.domain.Role;
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -146,6 +148,7 @@ public class AdminUserService {
         return result;
     }
 
+    
     @Transactional
     public void deleteUserAndDependencies(Long userId) {
         reviewRepository.deleteByCustomer_Id(userId);
@@ -206,5 +209,26 @@ public class AdminUserService {
 
     public boolean hasSuperAdmin() {
         return adminUserRepository.countByRoleNameIgnoreCase("SUPER_ADMIN") > 0;
+    }
+    
+    public AdminUser requireById(Long adminId) {
+        return adminUserRepository.findById(adminId)
+                .orElseThrow(() -> new NoSuchElementException("Admin user not found: " + adminId));
+    }
+
+    public AdminUserProfileDTO toProfileDTO(AdminUser a) {
+        return new AdminUserProfileDTO(
+                a.getAdminId(),
+                a.getUsername(),
+                a.getFirstName(),
+                a.getLastName(),
+                a.getEmail(),
+                a.getRole() != null ? a.getRole().getName() : null,
+                a.getBusiness() != null ? a.getBusiness().getId() : null,
+                a.getNotifyItemUpdates(),
+                a.getNotifyUserFeedback(),
+                a.getCreatedAt(),
+                a.getUpdatedAt()
+        );
     }
 }
