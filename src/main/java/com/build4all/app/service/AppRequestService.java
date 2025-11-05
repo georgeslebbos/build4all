@@ -130,14 +130,56 @@ public class AppRequestService {
 
     /** NEW: persist by (ownerId, projectId, slug). */
     @Transactional
-    public void setApkUrlByOwnerProjectSlug(Long ownerId, Long projectId, String slug, String apkUrl) {
-        AdminUserProject link = aupRepo
-                .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slug)
-                .orElseThrow(() -> new IllegalArgumentException("OwnerProject app not found for slug: " + slug));
-        link.setApkUrl(apkUrl);
-        aupRepo.save(link);
+    public void setApkUrlByLinkId(Long ownerId, Long linkId, String relUrl) {
+        AdminUserProject row = aupRepo.findById(linkId)
+                .orElseThrow(() -> new IllegalArgumentException("App link not found"));
+        if (row.getAdmin() == null || !ownerId.equals(row.getAdmin().getAdminId())) {
+            throw new SecurityException("Forbidden: link does not belong to this owner");
+        }
+        row.setApkUrl(normalizeRel(relUrl));
+    }
+    
+    private static String normalizeRel(String rel) {
+        if (rel == null || rel.isBlank()) {
+            throw new IllegalArgumentException("Empty apk path");
+        }
+        String s = rel.replace('\\', '/').trim();
+        if (!s.startsWith("/")) s = "/" + s;
+        if (!s.startsWith("/uploads/")) {
+            throw new IllegalArgumentException("APK path must be under /uploads/");
+        }
+        return s;
     }
 
+    /** Persist relative IPA path by link id, with owner validation. */
+    @Transactional
+    public void setIpaUrlByLinkId(Long ownerId, Long linkId, String relUrl) {
+        AdminUserProject row = aupRepo.findById(linkId)
+                .orElseThrow(() -> new IllegalArgumentException("App link not found"));
+        if (row.getAdmin() == null || !ownerId.equals(row.getAdmin().getAdminId())) {
+            throw new SecurityException("Forbidden: link does not belong to this owner");
+        }
+        row.setIpaUrl(normalizeRel(relUrl));
+    }
+
+    /** Persist relative IPA path by (owner + project + slug). */
+    @Transactional
+    public void setIpaUrlByOwnerProjectSlug(Long ownerId, Long projectId, String slug, String relUrl) {
+        AdminUserProject row = aupRepo
+                .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slugify(slug))
+                .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
+        row.setIpaUrl(normalizeRel(relUrl));
+    }
+
+    /** Persist relative APK path by (owner + project + slug). */
+    @Transactional
+    public void setApkUrlByOwnerProjectSlug(Long ownerId, Long projectId, String slug, String relUrl) {
+        AdminUserProject row = aupRepo
+                .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slugify(slug))
+                .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
+        row.setApkUrl(normalizeRel(relUrl));
+    }
+   
     // ---------- internal helpers ----------
 
     /**

@@ -12,12 +12,13 @@ public class AdminAppAssignmentResponse {
     private LocalDate endTo;
     private Long themeId;
     private String apkUrl;
+    private String ipaUrl;
     private String logoUrl; // <— new
 
     public AdminAppAssignmentResponse(Long projectId, String projectName,
                                       String appName, String slug, String status, String licenseId,
                                       LocalDate validFrom, LocalDate endTo,
-                                      Long themeId, String apkUrl, String logoUrl) {
+                                      Long themeId, String apkUrl,String ipaUrl, String logoUrl) {
         this.projectId = projectId;
         this.projectName = projectName;
         this.appName = appName;
@@ -28,6 +29,7 @@ public class AdminAppAssignmentResponse {
         this.endTo = endTo;
         this.themeId = themeId;
         this.apkUrl = apkUrl;
+        this.ipaUrl =ipaUrl;
         this.logoUrl = logoUrl;
     }
 
@@ -43,4 +45,5 @@ public class AdminAppAssignmentResponse {
     public Long getThemeId() { return themeId; }
     public String getApkUrl() { return apkUrl; }
     public String getLogoUrl() { return logoUrl; }
+    public String getIpaUrl() { return ipaUrl; }
 }

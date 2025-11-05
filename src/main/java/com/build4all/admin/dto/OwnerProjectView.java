@@ -6,4 +6,5 @@ public interface OwnerProjectView {
     String getSlug();
     String getAppName();   // ⬅️ NEW
     String getApkUrl();
+    String getIpaUrl(); // NEW
 }

@@ -59,7 +59,7 @@ public class OwnerBuildController {
 
             // 🔴 persist RELATIVE url to DB
             if (req.ownerProjectLinkId() != null) {
-                appRequestService.setApkUrlByLinkId(req.ownerProjectLinkId(), result.relUrl());
+            	appRequestService.setApkUrlByLinkId(ownerId, req.ownerProjectLinkId(), result.relUrl());
             } else if (req.projectId() != null && req.slug() != null && !req.slug().isBlank()) {
                 appRequestService.setApkUrlByOwnerProjectSlug(
                         ownerId, req.projectId(), req.slug().trim().toLowerCase(), result.relUrl());
@@ -77,4 +77,42 @@ public class OwnerBuildController {
                     .body(Map.of("message", "Build failed", "error", e.getMessage()));
         }
     }
+    
+    @PostMapping("/ios")
+    public ResponseEntity<?> saveIpa(@RequestHeader("Authorization") String auth,
+                                     @RequestBody Map<String, Object> body) {
+        String token = auth.replaceFirst("(?i)^Bearer\\s+", "").trim();
+        if (!jwt.isAdminOrOwner(token)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Forbidden"));
+        }
+        Long ownerId = jwt.extractId(token);
+
+        Long linkId   = body.get("ownerProjectLinkId") instanceof Number n ? n.longValue() : null;
+        Long projectId= body.get("projectId") instanceof Number n2 ? n2.longValue() : null;
+        String slug   = (String) body.get("slug");
+        String ipaRel = (String) body.get("ipaRelUrl"); // must start with /uploads/
+
+        if (ipaRel == null || ipaRel.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "ipaRelUrl is required"));
+        }
+
+        if (linkId != null) {
+            appRequestService.setIpaUrlByLinkId(ownerId, linkId, ipaRel);
+        } else if (projectId != null && slug != null && !slug.isBlank()) {
+            appRequestService.setIpaUrlByOwnerProjectSlug(ownerId, projectId, slug.trim().toLowerCase(), ipaRel);
+        } else {
+            return ResponseEntity.badRequest().body(Map.of("message", "Provide ownerProjectLinkId or (projectId+slug)"));
+        }
+
+        String publicBaseUrl = System.getProperty("uploads.public-base-url",
+                System.getenv().getOrDefault("UPLOADS_PUBLIC_BASE_URL", ""));
+        String publicUrl = publicBaseUrl.replaceAll("/+$","") + ipaRel;
+
+        return ResponseEntity.ok(Map.of(
+                "message", "iOS IPA saved",
+                "ipaUrl", publicUrl,
+                "ipaRelUrl", ipaRel
+        ));
+    }
+
 }

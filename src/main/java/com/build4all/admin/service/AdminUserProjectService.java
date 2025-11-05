@@ -53,10 +53,12 @@ public class AdminUserProjectService {
                 l.getEndTo(),
                 l.getThemeId(),
                 nz(l.getApkUrl()),
+                nz(l.getIpaUrl()),     // NEW
                 nz(l.getLogoUrl())
             ))
             .toList();
     }
+
 
     /** Get one app row (owner+project+slug). */
     @Transactional(readOnly = true)

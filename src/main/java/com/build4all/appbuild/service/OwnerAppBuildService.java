@@ -1,4 +1,6 @@
 package com.build4all.appbuild.service;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -23,11 +25,15 @@ public class OwnerAppBuildService {
     @Value("${builder.flutter-bin:}") private String builderFlutterBin;
 
     public BuildResult buildOwnerApk(BuildRequest req) throws Exception {
-        // ensure owner bucket exists
-        String ownerBucket = uploadsRoot + File.separator + "apk"
-                + File.separator + req.ownerId()
-                + File.separator + req.projectId();
-        Files.createDirectories(new File(ownerBucket).toPath());
+        // --- use absolute, normalized uploads root ---
+        Path root = Paths.get(uploadsRoot).toAbsolutePath().normalize();
+
+        // owner bucket: <root>/apk/<owner>/<project>
+        Path ownerBucketPath = root
+                .resolve("apk")
+                .resolve(String.valueOf(req.ownerId()))
+                .resolve(String.valueOf(req.projectId()));
+        Files.createDirectories(ownerBucketPath);
 
         String script = projectDir + File.separator + "build_owner_apk.ps1";
 
@@ -45,7 +51,7 @@ public class OwnerAppBuildService {
         cmd.add("-APP_ROLE");              cmd.add(req.appRole());
         cmd.add("-OWNER_ATTACH_MODE");     cmd.add(req.ownerAttachMode());
         cmd.add("-APP_LOGO_URL");          cmd.add(req.appLogoUrl() == null ? "" : req.appLogoUrl());
-        cmd.add("-OWNER_BUCKET");          cmd.add(ownerBucket);
+        cmd.add("-OWNER_BUCKET");          cmd.add(ownerBucketPath.toString()); // <-- pass absolute bucket
         cmd.add("-PROJECT_DIR");           cmd.add(projectDir);
 
         if (builderFlutterBin != null && !builderFlutterBin.isBlank()) {
@@ -63,20 +69,49 @@ public class OwnerAppBuildService {
         int code = p.waitFor();
         if (code != 0) throw new RuntimeException("Builder failed ("+code+"):\n"+log);
 
-        // last line printed by the script = absolute file path
+        // --- Extract absolute apk path from log (last existing .apk line) ---
         String[] lines = log.toString().trim().split("\n");
-        String apkAbsPath = lines[lines.length - 1].trim();
+        String apkAbsPathStr = null;
+        for (int i = lines.length - 1; i >= 0; i--) {
+            String candidate = lines[i].trim().replace("\"","").replace("\\\\","\\");
+            if (candidate.toLowerCase().endsWith(".apk") && new File(candidate).exists()) {
+                apkAbsPathStr = candidate;
+                break;
+            }
+        }
+        if (apkAbsPathStr == null) {
+            throw new RuntimeException("Could not find built APK path in builder output:\n" + log);
+        }
 
-        // compute relative path under /uploads
-        String rel = apkAbsPath.replace("\\","/")
-                .replaceFirst("^" + uploadsRoot.replace("\\","/"), "")
-                .replaceAll("^/+", "");  // remove leading slashes
-        String relUrl = "/" + rel;       // ensure it starts with "/"
+        // --- Normalize / compute relative URL under /uploads/ ---
+        Path apkAbs = Paths.get(apkAbsPathStr).toAbsolutePath().normalize();
+        String relUrl;
 
-        // keep public URL for convenience (response)
-        String publicUrl = publicBaseUrl.replaceAll("/+$","") + "/" + rel;
+        if (apkAbs.startsWith(root)) {
+            // path is inside uploadsRoot -> /uploads/<subpath>
+            String sub = root.relativize(apkAbs).toString().replace("\\","/");
+            relUrl = "/uploads/" + sub;
+        } else {
+            // Fallback: find /uploads/ segment anywhere in the absolute path
+            String s = apkAbs.toString().replace("\\","/");
+            int idx = s.toLowerCase().lastIndexOf("/uploads/");
+            if (idx >= 0) {
+                relUrl = s.substring(idx); // starts with /uploads/...
+            } else {
+                throw new IllegalStateException(
+                        "Built APK is not under uploads root.\napk=" + apkAbs + "\nroot=" + root);
+            }
+        }
 
-        return new BuildResult(apkAbsPath, relUrl, publicUrl, LocalDateTime.now());
+        // public URL only for convenience (not stored in DB)
+        String publicUrl = publicBaseUrl.replaceAll("/+$","") + relUrl;
+
+        return new BuildResult(
+                apkAbs.toString(),
+                relUrl,         // <== this starts with /uploads/  ✅
+                publicUrl,
+                LocalDateTime.now()
+        );
     }
 
     /* records */

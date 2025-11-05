@@ -61,6 +61,9 @@ public class AdminUserProject {
   
     @Column(name = "apk_url", columnDefinition = "TEXT")
     private String apkUrl;
+    
+    @Column(name = "ipa_url", columnDefinition = "TEXT") // NEW
+    private String ipaUrl;
 
     /** Theme chosen for this owner+project app (nullable => fallback to default) */
     @Column(name = "theme_id")
@@ -139,6 +142,9 @@ public class AdminUserProject {
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt;}
     public String getLogoUrl() { return logoUrl; }
     public void setLogoUrl(String logoUrl) { this.logoUrl = logoUrl; }
+  
+    public String getIpaUrl() { return ipaUrl; }          // NEW
+    public void setIpaUrl(String ipaUrl) { this.ipaUrl = ipaUrl; } // NEW
 
 
     
