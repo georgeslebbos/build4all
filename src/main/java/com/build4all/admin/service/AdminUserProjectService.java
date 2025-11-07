@@ -42,20 +42,23 @@ public class AdminUserProjectService {
     @Transactional(readOnly = true)
     public List<AdminAppAssignmentResponse> list(Long adminId) {
         return linkRepo.findByAdmin_AdminId(adminId).stream()
-            .map(l -> new AdminAppAssignmentResponse(
-                l.getProject().getId(),
-                l.getProject().getProjectName(),
-                nz(l.getAppName()),
-                nz(l.getSlug()),
-                nz(l.getStatus()),
-                nz(l.getLicenseId()),
-                l.getValidFrom(),
-                l.getEndTo(),
-                l.getThemeId(),
-                nz(l.getApkUrl()),
-                nz(l.getIpaUrl()),     // NEW
-                nz(l.getLogoUrl())
-            ))
+        		// AdminUserProjectService.list(...)
+        		.map(l -> new AdminAppAssignmentResponse(
+        		    l.getProject().getId(),
+        		    l.getProject().getProjectName(),
+        		    nz(l.getAppName()),
+        		    nz(l.getSlug()),
+        		    nz(l.getStatus()),
+        		    nz(l.getLicenseId()),
+        		    l.getValidFrom(),
+        		    l.getEndTo(),
+        		    l.getThemeId(),
+        		    nz(l.getApkUrl()),
+        		    nz(l.getIpaUrl()),
+        		    nz(l.getBundleUrl()), // <— NEW
+        		    nz(l.getLogoUrl())
+        		))
+
             .toList();
     }
 
@@ -120,6 +123,7 @@ public class AdminUserProjectService {
 
         // Clear stale APK on (re)assignment (optional)
         link.setApkUrl(null);
+        link.setBundleUrl(null); 
 
         linkRepo.save(link);
     }

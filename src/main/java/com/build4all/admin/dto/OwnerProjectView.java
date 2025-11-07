@@ -7,4 +7,5 @@ public interface OwnerProjectView {
     String getAppName();   // ⬅️ NEW
     String getApkUrl();
     String getIpaUrl(); // NEW
+    String getBundleUrl();
 }

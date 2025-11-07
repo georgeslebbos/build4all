@@ -1,4 +1,6 @@
- package com.build4all.admin.dto;
+// src/main/java/com/build4all/admin/dto/AdminAppAssignmentResponse.java
+package com.build4all.admin.dto;
+
 import java.time.LocalDate;
 
 public class AdminAppAssignmentResponse {
@@ -13,12 +15,13 @@ public class AdminAppAssignmentResponse {
     private Long themeId;
     private String apkUrl;
     private String ipaUrl;
-    private String logoUrl; // <— new
+    private String bundleUrl; // <— NEW
+    private String logoUrl;
 
-    public AdminAppAssignmentResponse(Long projectId, String projectName,
-                                      String appName, String slug, String status, String licenseId,
-                                      LocalDate validFrom, LocalDate endTo,
-                                      Long themeId, String apkUrl,String ipaUrl, String logoUrl) {
+    public AdminAppAssignmentResponse(
+            Long projectId, String projectName, String appName, String slug, String status,
+            String licenseId, LocalDate validFrom, LocalDate endTo, Long themeId,
+            String apkUrl, String ipaUrl, String bundleUrl, String logoUrl) {
         this.projectId = projectId;
         this.projectName = projectName;
         this.appName = appName;
@@ -29,11 +32,12 @@ public class AdminAppAssignmentResponse {
         this.endTo = endTo;
         this.themeId = themeId;
         this.apkUrl = apkUrl;
-        this.ipaUrl =ipaUrl;
+        this.ipaUrl = ipaUrl;
+        this.bundleUrl = bundleUrl;
         this.logoUrl = logoUrl;
     }
 
-    // getters only if you like immutability, or add setters if needed
+    // getters only (or add setters if you need)
     public Long getProjectId() { return projectId; }
     public String getProjectName() { return projectName; }
     public String getAppName() { return appName; }
@@ -44,6 +48,7 @@ public class AdminAppAssignmentResponse {
     public LocalDate getEndTo() { return endTo; }
     public Long getThemeId() { return themeId; }
     public String getApkUrl() { return apkUrl; }
-    public String getLogoUrl() { return logoUrl; }
     public String getIpaUrl() { return ipaUrl; }
+    public String getBundleUrl() { return bundleUrl; }
+    public String getLogoUrl() { return logoUrl; }
 }

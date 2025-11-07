@@ -311,4 +311,25 @@ public class AppRequestService {
                 .replaceAll("[^a-z0-9]+", "-")
                 .replaceAll("(^-|-$)", "");
     }
+    
+    @Transactional
+    public void setBundleUrlByLinkId(Long ownerId, Long linkId, String relUrl) {
+        AdminUserProject row = aupRepo.findById(linkId)
+                .orElseThrow(() -> new IllegalArgumentException("App link not found"));
+        if (row.getAdmin() == null || !ownerId.equals(row.getAdmin().getAdminId())) {
+            throw new SecurityException("Forbidden: link does not belong to this owner");
+        }
+        row.setBundleUrl(normalizeRel(relUrl)); // <-- add bundleUrl column in entity if not present
+        aupRepo.save(row);
+    }
+
+    /** NEW: persist relative AAB path by (owner + project + slug). */
+    @Transactional
+    public void setBundleUrlByOwnerProjectSlug(Long ownerId, Long projectId, String slug, String relUrl) {
+        AdminUserProject row = aupRepo
+                .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slugify(slug))
+                .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
+        row.setBundleUrl(normalizeRel(relUrl));
+        aupRepo.save(row);
+    }
 }

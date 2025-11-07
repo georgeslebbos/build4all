@@ -81,20 +81,22 @@ public class AdminUserProjectsController {
                                                                @PathVariable Long projectId,
                                                                @PathVariable String slug) {
         var l = service.get(adminId, projectId, slug);
+     // AdminUserProjectsController.artifact(...)
         return ResponseEntity.ok(new AdminAppAssignmentResponse(
-        	    l.getProject().getId(),
-        	    l.getProject().getProjectName(),
-        	    l.getAppName() == null ? "" : l.getAppName(),
-        	    l.getSlug(),
-        	    l.getStatus() == null ? "" : l.getStatus(),
-        	    l.getLicenseId() == null ? "" : l.getLicenseId(),
-        	    l.getValidFrom(),
-        	    l.getEndTo(),
-        	    l.getThemeId(),
-        	    l.getApkUrl() == null ? "" : l.getApkUrl(),
-        	    l.getIpaUrl() == null ? "" : l.getIpaUrl(),   // NEW
-        	    l.getLogoUrl() == null ? "" : l.getLogoUrl()
-        	));
+            l.getProject().getId(),
+            l.getProject().getProjectName(),
+            l.getAppName() == null ? "" : l.getAppName(),
+            l.getSlug(),
+            l.getStatus() == null ? "" : l.getStatus(),
+            l.getLicenseId() == null ? "" : l.getLicenseId(),
+            l.getValidFrom(),
+            l.getEndTo(),
+            l.getThemeId(),
+            l.getApkUrl() == null ? "" : l.getApkUrl(),
+            l.getIpaUrl() == null ? "" : l.getIpaUrl(),
+            l.getBundleUrl() == null ? "" : l.getBundleUrl(),  // <— NEW
+            l.getLogoUrl() == null ? "" : l.getLogoUrl()
+        ));
 
     }
 

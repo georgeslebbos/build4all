@@ -114,5 +114,61 @@ public class OwnerBuildController {
                 "ipaRelUrl", ipaRel
         ));
     }
+    
+    public record BuildAabRequest(
+            Long ownerProjectLinkId,
+            Long projectId,
+            String slug,
+            String appName,
+            String apiBaseUrl,
+            String wsPath,
+            String appRole,
+            String ownerAttachMode,
+            String appLogoUrl,
+            Integer versionCode, // optional
+            String  versionName  // optional (handled inside Flutter normally)
+    ) {}
+
+    @PostMapping("/aab")
+    public ResponseEntity<?> buildAab(@RequestHeader("Authorization") String auth,
+                                      @RequestBody BuildAabRequest req) {
+        try {
+            String token = auth.replaceFirst("(?i)^Bearer\\s+", "").trim();
+            if (!jwt.isAdminOrOwner(token)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Forbidden"));
+            }
+            Long ownerId = jwt.extractId(token);
+
+            var result = service.buildOwnerAab(new OwnerAppBuildService.BuildRequest(
+                    ownerId,
+                    req.ownerProjectLinkId() == null ? 0L : req.ownerProjectLinkId(),
+                    req.projectId(),
+                    req.appName(),
+                    req.apiBaseUrl(),
+                    req.wsPath() == null ? "/api/ws" : req.wsPath(),
+                    req.appRole() == null ? "both" : req.appRole(),
+                    req.ownerAttachMode() == null ? "header" : req.ownerAttachMode(),
+                    req.appLogoUrl()
+            ));
+
+            // persist RELATIVE bundle url in DB
+            if (req.ownerProjectLinkId() != null) {
+                appRequestService.setBundleUrlByLinkId(ownerId, req.ownerProjectLinkId(), result.relUrl());
+            } else if (req.projectId() != null && req.slug() != null && !req.slug().isBlank()) {
+                appRequestService.setBundleUrlByOwnerProjectSlug(
+                        ownerId, req.projectId(), req.slug().trim().toLowerCase(), result.relUrl());
+            } // else can't persist
+
+            return ResponseEntity.ok(Map.of(
+                    "message", "Build completed",
+                    "bundleUrl", result.publicUrl(),  // full public URL
+                    "bundleRelUrl", result.relUrl(),  // relative path saved in DB
+                    "builtAt", result.builtAt().toString()
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Build failed", "error", e.getMessage()));
+        }
+    }
 
 }

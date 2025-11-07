@@ -114,6 +114,88 @@ public class OwnerAppBuildService {
         );
     }
 
+  
+    
+    public BuildResult buildOwnerAab(BuildRequest req) throws Exception {
+        Path root = Paths.get(uploadsRoot).toAbsolutePath().normalize();
+
+        // owner bucket: <root>/aab/<owner>/<project>
+        Path ownerBucketPath = root
+                .resolve("aab")
+                .resolve(String.valueOf(req.ownerId()))
+                .resolve(String.valueOf(req.projectId()));
+        Files.createDirectories(ownerBucketPath);
+
+        String script = projectDir + File.separator + "build_owner_aab.ps1";
+
+        List<String> cmd = new ArrayList<>();
+        cmd.add(builderScript);
+        cmd.add("-NoProfile");
+        cmd.add("-ExecutionPolicy"); cmd.add("Bypass");
+        cmd.add("-File");            cmd.add(script);
+
+        cmd.add("-APP_NAME");              cmd.add(req.appName());
+        cmd.add("-API_BASE_URL");          cmd.add(req.apiBaseUrl());
+        cmd.add("-OWNER_PROJECT_LINK_ID"); cmd.add(String.valueOf(req.ownerProjectLinkId()));
+        cmd.add("-PROJECT_ID");            cmd.add(String.valueOf(req.projectId()));
+        cmd.add("-WS_PATH");               cmd.add(req.wsPath());
+        cmd.add("-APP_ROLE");              cmd.add(req.appRole());
+        cmd.add("-OWNER_ATTACH_MODE");     cmd.add(req.ownerAttachMode());
+        cmd.add("-APP_LOGO_URL");          cmd.add(req.appLogoUrl() == null ? "" : req.appLogoUrl());
+        cmd.add("-OWNER_BUCKET");          cmd.add(ownerBucketPath.toString());
+        cmd.add("-PROJECT_DIR");           cmd.add(projectDir);
+        if (builderFlutterBin != null && !builderFlutterBin.isBlank()) {
+            cmd.add("-FLUTTER_BIN"); cmd.add(builderFlutterBin);
+        }
+
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.redirectErrorStream(true);
+        Process p = pb.start();
+
+        StringBuilder log = new StringBuilder();
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream(), "UTF-8"))) {
+            String line; while ((line = br.readLine()) != null) log.append(line).append("\n");
+        }
+        int code = p.waitFor();
+        if (code != 0) throw new RuntimeException("Builder failed ("+code+"):\n"+log);
+
+        // find last existing .aab path the script printed
+        String[] lines = log.toString().trim().split("\n");
+        String aabAbsPathStr = null;
+        for (int i = lines.length - 1; i >= 0; i--) {
+            String candidate = lines[i].trim().replace("\"","").replace("\\\\","\\");
+            if (candidate.toLowerCase().endsWith(".aab") && new File(candidate).exists()) {
+                aabAbsPathStr = candidate;
+                break;
+            }
+        }
+        if (aabAbsPathStr == null) {
+            throw new RuntimeException("Could not find built AAB path in builder output:\n" + log);
+        }
+
+        Path aabAbs = Paths.get(aabAbsPathStr).toAbsolutePath().normalize();
+        String relUrl;
+        if (aabAbs.startsWith(root)) {
+            String sub = root.relativize(aabAbs).toString().replace("\\","/");
+            relUrl = "/uploads/" + sub;
+        } else {
+            String s = aabAbs.toString().replace("\\","/");
+            int idx = s.toLowerCase().lastIndexOf("/uploads/");
+            if (idx >= 0) relUrl = s.substring(idx);
+            else throw new IllegalStateException("Built AAB is not under uploads root.\naab=" + aabAbs + "\nroot=" + root);
+        }
+
+        String publicUrl = publicBaseUrl.replaceAll("/+$","") + relUrl;
+
+        return new BuildResult(
+                aabAbs.toString(),   // apkPath field name kept for reuse, fine
+                relUrl,
+                publicUrl,
+                LocalDateTime.now()
+        );
+    }
+
+  
     /* records */
 
     public record BuildRequest(

@@ -64,6 +64,9 @@ public class AdminUserProject {
     
     @Column(name = "ipa_url", columnDefinition = "TEXT") // NEW
     private String ipaUrl;
+    
+    @Column(name = "bundle_url", columnDefinition = "TEXT")
+    private String bundleUrl;
 
     /** Theme chosen for this owner+project app (nullable => fallback to default) */
     @Column(name = "theme_id")
@@ -145,7 +148,8 @@ public class AdminUserProject {
   
     public String getIpaUrl() { return ipaUrl; }          // NEW
     public void setIpaUrl(String ipaUrl) { this.ipaUrl = ipaUrl; } // NEW
-
+    public String getBundleUrl() { return bundleUrl; }
+    public void setBundleUrl(String bundleUrl) { this.bundleUrl = bundleUrl; }
 
     
 
