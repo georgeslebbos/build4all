@@ -78,6 +78,7 @@ public class CiBuildService {
         final String safeCbToken = nz(callbackToken);
 
         // Build payload WITHOUT using Map.of (Map.of throws if any value is null).
+     // in CiBuildService.dispatchOwnerAndroidBuild(...)
         Map<String, Object> clientPayload = new HashMap<>();
         clientPayload.put("OWNER_ID", ownerId);
         clientPayload.put("PROJECT_ID", projectId);
@@ -85,15 +86,23 @@ public class CiBuildService {
         clientPayload.put("SLUG", safeSlug);
         clientPayload.put("APP_NAME", safeName);
         clientPayload.put("APP_LOGO_URL", safeLogo);
-        if (themeId != null) {
-            clientPayload.put("THEME_ID", themeId);
-        }
+        if (themeId != null) clientPayload.put("THEME_ID", themeId);
+
+        // ✅ ADD THESE (your workflow expects them when triggered by repository_dispatch)
+        clientPayload.put("API_BASE_URL", "http://192.168.1.6:8080"); // or read from config
+        clientPayload.put("WS_PATH", "/api/ws");                       // from config
+        clientPayload.put("OWNER_ATTACH_MODE", "header");              // from config
+        clientPayload.put("APP_ROLE", "both");                         // from config
+
+        // callback info
         clientPayload.put("CI_CALLBACK_TOKEN", safeCbToken);
         clientPayload.put("BACKEND_CI_BASE", safeCbBase);
 
+        // envelope
         Map<String, Object> payload = new HashMap<>();
-        payload.put("event_type", "owner_app_build");
+        payload.put("event_type", "owner_app_build");   // matches your YAML
         payload.put("client_payload", clientPayload);
+
 
         try {
             ResponseEntity<Void> resp = web.post()

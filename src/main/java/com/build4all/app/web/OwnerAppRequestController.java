@@ -7,10 +7,14 @@ import com.build4all.app.service.AppRequestService;
 import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.dto.OwnerProjectView;
 import com.build4all.admin.repository.AdminUserProjectRepository;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/owner")
@@ -28,7 +32,8 @@ public class OwnerAppRequestController {
         this.aupRepo = aupRepo;
     }
 
-    @PostMapping("/app-requests")
+    // JSON (legacy)
+    @PostMapping(value = "/app-requests", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> create(@RequestParam Long ownerId,
                                     @RequestBody CreateAppRequestDto dto) {
         try {
@@ -49,26 +54,35 @@ public class OwnerAppRequestController {
             body.put("slug", nz(r.getSlug()));
             return ResponseEntity.ok(body);
         } catch (Exception ex) {
-            Map<String, Object> err = new HashMap<>();
-            err.put("error", "Internal error");
-            err.put("details", ex.getClass().getSimpleName());
-            return ResponseEntity.internalServerError().body(err);
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "error", "Internal error",
+                    "details", ex.getClass().getSimpleName()
+            ));
         }
     }
 
-    @PostMapping("/app-requests/auto")
-    public ResponseEntity<?> createAndAutoApprove(@RequestParam Long ownerId,
-                                                  @RequestBody CreateAppRequestDto dto) {
+    // Multipart (auto + upload)
+    @PostMapping(value = "/app-requests/auto", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> createAndAutoApprove(
+            @RequestParam Long ownerId,
+            @RequestParam Long projectId,
+            @RequestParam String appName,
+            @RequestParam(required = false) String slug,
+            @RequestParam(required = false) Long themeId,
+            @RequestParam(required = false) String notes,
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            @RequestParam(value = "logo", required = false) MultipartFile logo
+    ) {
         try {
+            MultipartFile logoFile = (file != null) ? file : logo;
+
             AdminUserProject link = service.createAndAutoApprove(
-                    ownerId, dto.projectId(), dto.appName(), dto.slug(),
-                    dto.logoUrl(), dto.themeId(), dto.notes());
+                    ownerId, projectId, appName, slug, logoFile, themeId, notes);
 
             Map<String, Object> body = new HashMap<>();
             body.put("message", "APK build started");
-            // ✅ use the values you already have
             body.put("adminId", ownerId);
-            body.put("projectId", dto.projectId());
+            body.put("projectId", projectId);
             body.put("slug", nz(link.getSlug()));
             body.put("appName", nz(link.getAppName()));
             body.put("status", nz(link.getStatus()));
@@ -76,33 +90,29 @@ public class OwnerAppRequestController {
             body.put("themeId", link.getThemeId());
             body.put("validFrom", link.getValidFrom());
             body.put("endTo", link.getEndTo());
-            body.put("apkUrl", nz(link.getApkUrl()));
+            body.put("logoUrl", nz(link.getLogoUrl()));
+            body.put("apkUrl", nz(link.getApkUrl())); // will be filled by CI callback
             return ResponseEntity.ok(body);
 
-
         } catch (IllegalArgumentException | IllegalStateException ex) {
-            Map<String, Object> err = new HashMap<>();
-            err.put("error", "Bad request");
-            err.put("details", ex.getMessage());
-            return ResponseEntity.badRequest().body(err);
-
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         } catch (Exception ex) {
-            Map<String, Object> err = new HashMap<>();
-            err.put("error", "Internal error");
-            err.put("details", ex.getClass().getSimpleName());
-            return ResponseEntity.internalServerError().body(err);
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "error", "Internal error",
+                    "details", ex.getClass().getSimpleName()
+            ));
         }
     }
 
-    @GetMapping("/app-requests")
+    @GetMapping(value = "/app-requests", produces = MediaType.APPLICATION_JSON_VALUE)
     public List<AppRequest> myRequests(@RequestParam Long ownerId) {
         return appRequestRepo.findByOwnerIdOrderByCreatedAtDesc(ownerId);
     }
 
-    @GetMapping("/my-apps")
+    @GetMapping(value = "/my-apps", produces = MediaType.APPLICATION_JSON_VALUE)
     public List<OwnerProjectView> myApps(@RequestParam Long ownerId) {
         return aupRepo.findOwnerProjectsSlim(ownerId);
     }
 
-    private static String nz(String s) { return s == null ? "" : s; }
+    private static String nz(String s) { return (s == null) ? "" : s; }
 }

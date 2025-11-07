@@ -17,7 +17,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths; // IMPORTANT: java.nio.file.Paths
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -49,7 +52,7 @@ public class AppRequestService {
         this.ciBuildService = ciBuildService;
     }
 
-    /** Create request without auto-approval (kept for compatibility). */
+    /** Legacy JSON create (kept). */
     public AppRequest createRequest(Long ownerId, Long projectId,
                                     String appName, String slug,
                                     String logoUrl, Long themeId, String notes) {
@@ -57,35 +60,50 @@ public class AppRequestService {
         r.setOwnerId(ownerId);
         r.setProjectId(projectId);
         r.setAppName(appName);
-        r.setSlug(slugifyOrKeep(slug, appName));
+        r.setSlug(slugifyOrFallback(slug, appName));
         r.setLogoUrl(logoUrl);
         r.setThemeId(themeId);
         r.setNotes(notes);
-        // status defaults to PENDING
         return appRequestRepo.save(r);
     }
 
-    /** Create AND auto-approve. */
+    /**
+     * Create AND auto-approve (multipart logo supported).
+     * - Enforces unique slug per (owner, project)
+     * - Saves logo to /uploads/owner/{owner}/{project}/{slug}/<uuid>_<stamp>.<ext>
+     * - Triggers CI with all inputs (owner/project/link/slug/name/theme/logo)
+     */
     @Transactional
     public AdminUserProject createAndAutoApprove(Long ownerId, Long projectId,
                                                  String appName, String slug,
-                                                 String logoUrl, Long themeId, String notes) {
+                                                 MultipartFile logoFile,
+                                                 Long themeId, String notes) throws IOException {
+        // unique slug
+        String base = (slug != null && !slug.isBlank()) ? slugify(slug) : slugify(appName);
+        String uniqueSlug = ensureUniqueSlug(ownerId, projectId, base);
 
+        // optional logo
+        String logoUrl = null;
+        if (logoFile != null && !logoFile.isEmpty()) {
+            logoUrl = saveOwnerAppLogoToUploads(ownerId, projectId, uniqueSlug, logoFile);
+        }
+
+        // persist APPROVED request
         AppRequest r = new AppRequest();
         r.setOwnerId(ownerId);
         r.setProjectId(projectId);
         r.setAppName(appName);
-        r.setSlug(slugifyOrKeep(slug, appName));
+        r.setSlug(uniqueSlug);
         r.setLogoUrl(logoUrl);
         r.setThemeId(themeId);
         r.setNotes(notes);
         r.setStatus("APPROVED");
         r = appRequestRepo.save(r);
 
+        // provision + CI
         return provisionAndTrigger(r);
     }
 
-    /** Approve a PENDING request then run provisioning/CI logic. */
     @Transactional
     public AdminUserProject approve(Long requestId) {
         AppRequest req = appRequestRepo.findById(requestId)
@@ -109,7 +127,8 @@ public class AppRequestService {
         appRequestRepo.save(req);
     }
 
-    /** Called by CI callback controller to persist the APK URL (app-scoped). */
+    // ---------- Artifact setters (APK/AAB/IPA) ----------
+
     @Transactional
     public AdminUserProject setApkUrl(Long adminId, Long projectId, String slug, String apkUrl) {
         AdminUserProject link = aupRepo
@@ -119,7 +138,6 @@ public class AppRequestService {
         return aupRepo.save(link);
     }
 
-    /** NEW: persist by row id (AdminUserProject.id). */
     @Transactional
     public void setApkUrlByLinkId(Long linkId, String apkUrl) {
         AdminUserProject link = aupRepo.findById(linkId)
@@ -128,7 +146,6 @@ public class AppRequestService {
         aupRepo.save(link);
     }
 
-    /** NEW: persist by (ownerId, projectId, slug). */
     @Transactional
     public void setApkUrlByLinkId(Long ownerId, Long linkId, String relUrl) {
         AdminUserProject row = aupRepo.findById(linkId)
@@ -137,21 +154,9 @@ public class AppRequestService {
             throw new SecurityException("Forbidden: link does not belong to this owner");
         }
         row.setApkUrl(normalizeRel(relUrl));
-    }
-    
-    private static String normalizeRel(String rel) {
-        if (rel == null || rel.isBlank()) {
-            throw new IllegalArgumentException("Empty apk path");
-        }
-        String s = rel.replace('\\', '/').trim();
-        if (!s.startsWith("/")) s = "/" + s;
-        if (!s.startsWith("/uploads/")) {
-            throw new IllegalArgumentException("APK path must be under /uploads/");
-        }
-        return s;
+        aupRepo.save(row);
     }
 
-    /** Persist relative IPA path by link id, with owner validation. */
     @Transactional
     public void setIpaUrlByLinkId(Long ownerId, Long linkId, String relUrl) {
         AdminUserProject row = aupRepo.findById(linkId)
@@ -160,31 +165,49 @@ public class AppRequestService {
             throw new SecurityException("Forbidden: link does not belong to this owner");
         }
         row.setIpaUrl(normalizeRel(relUrl));
+        aupRepo.save(row);
     }
 
-    /** Persist relative IPA path by (owner + project + slug). */
     @Transactional
     public void setIpaUrlByOwnerProjectSlug(Long ownerId, Long projectId, String slug, String relUrl) {
         AdminUserProject row = aupRepo
                 .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slugify(slug))
                 .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
         row.setIpaUrl(normalizeRel(relUrl));
+        aupRepo.save(row);
     }
 
-    /** Persist relative APK path by (owner + project + slug). */
     @Transactional
     public void setApkUrlByOwnerProjectSlug(Long ownerId, Long projectId, String slug, String relUrl) {
         AdminUserProject row = aupRepo
                 .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slugify(slug))
                 .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
         row.setApkUrl(normalizeRel(relUrl));
+        aupRepo.save(row);
     }
-   
-    // ---------- internal helpers ----------
 
-    /**
-     * Provision a DISTINCT app row per (owner, project, slug) and trigger CI.
-     */
+    @Transactional
+    public void setBundleUrlByLinkId(Long ownerId, Long linkId, String relUrl) {
+        AdminUserProject row = aupRepo.findById(linkId)
+                .orElseThrow(() -> new IllegalArgumentException("App link not found"));
+        if (row.getAdmin() == null || !ownerId.equals(row.getAdmin().getAdminId())) {
+            throw new SecurityException("Forbidden: link does not belong to this owner");
+        }
+        row.setBundleUrl(normalizeRel(relUrl));
+        aupRepo.save(row);
+    }
+
+    @Transactional
+    public void setBundleUrlByOwnerProjectSlug(Long ownerId, Long projectId, String slug, String relUrl) {
+        AdminUserProject row = aupRepo
+                .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slugify(slug))
+                .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
+        row.setBundleUrl(normalizeRel(relUrl));
+        aupRepo.save(row);
+    }
+
+    // ---------- internal ----------
+
     private AdminUserProject provisionAndTrigger(AppRequest req) {
         AdminUser owner = adminRepo.findById(req.getOwnerId())
                 .orElseThrow(() -> new IllegalArgumentException("Owner(admin) not found"));
@@ -219,11 +242,10 @@ public class AppRequestService {
             link.setLicenseId("LIC-" + owner.getAdminId() + "-" + project.getId() + "-" + now + "-" + uniqueSlug);
         }
 
-        // Clear any old APK URL so UI won't show stale value.
+        // clear stale artifact
         link.setApkUrl(null);
         link = aupRepo.save(link);
 
-        // Build OPL (never null).
         String opl = owner.getAdminId() + "-" + project.getId();
 
         boolean ok = ciBuildService.dispatchOwnerAndroidBuild(
@@ -236,9 +258,7 @@ public class AppRequestService {
                 req.getLogoUrl()
         );
 
-        if (!ok) {
-            log.warn("CI dispatch did NOT return 2xx (apkUrl will remain null until a successful run).");
-        }
+        if (!ok) log.warn("CI dispatch failed or skipped; apkUrl remains null until a successful run.");
         return link;
     }
 
@@ -250,12 +270,37 @@ public class AppRequestService {
         return themeRepo.findByIsActiveTrue().map(Theme::getId).orElse(null);
     }
 
-    private static String slugifyOrKeep(String maybeSlug, String fallbackName) {
+    /** Save under uploads/, return '/uploads/...' URL */
+    private String saveOwnerAppLogoToUploads(Long ownerId, Long projectId, String slug, MultipartFile file)
+            throws IOException {
+        String cleanSlug = slugify(slug);
+        Path dir = Paths.get("uploads/owner", String.valueOf(ownerId), String.valueOf(projectId), cleanSlug);
+        if (!Files.exists(dir)) Files.createDirectories(dir);
+
+        String original = (file.getOriginalFilename() == null || file.getOriginalFilename().isBlank())
+                ? "logo.png" : file.getOriginalFilename();
+        String ext = original.lastIndexOf('.') >= 0 ? original.substring(original.lastIndexOf('.')) : ".png";
+        String stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String safe = UUID.randomUUID() + "_" + stamp + ext;
+
+        Files.copy(file.getInputStream(), dir.resolve(safe), StandardCopyOption.REPLACE_EXISTING);
+
+        return "/uploads/owner/" + ownerId + "/" + projectId + "/" + cleanSlug + "/" + safe;
+    }
+
+    private static String normalizeRel(String rel) {
+        if (rel == null || rel.isBlank()) throw new IllegalArgumentException("Empty path");
+        String s = rel.replace('\\', '/').trim();
+        if (!s.startsWith("/")) s = "/" + s;
+        if (!s.startsWith("/uploads/")) throw new IllegalArgumentException("Path must be under /uploads/");
+        return s;
+    }
+
+    private static String slugifyOrFallback(String maybeSlug, String fallbackName) {
         if (maybeSlug != null && !maybeSlug.isBlank()) return slugify(maybeSlug);
         return slugify(fallbackName);
     }
 
-    /** Ensure slug uniqueness per (owner, project) by appending -2, -3, ... */
     private String ensureUniqueSlug(Long ownerId, Long projectId, String baseSlug) {
         if (baseSlug == null || baseSlug.isBlank()) baseSlug = "app";
         String candidate = baseSlug;
@@ -263,73 +308,15 @@ public class AppRequestService {
         while (aupRepo.existsByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, candidate)) {
             candidate = baseSlug + "-" + i;
             i++;
-            if (i > 500) { // safety
-                throw new IllegalStateException("Could not generate a unique slug");
-            }
+            if (i > 500) throw new IllegalStateException("Could not generate a unique slug");
         }
         return candidate;
     }
 
-    public AdminUserProject createAndAutoApproveWithLogoFile(
-            Long ownerId, Long projectId,
-            String appName, String slug,
-            MultipartFile logoFile,
-            Long themeId, String notes
-    ) throws IOException {
-
-        String logoUrl = null;
-        if (logoFile != null && !logoFile.isEmpty()) {
-            logoUrl = saveOwnerAppLogoToUploads(ownerId, projectId, slug, logoFile);
-        }
-
-        return createAndAutoApprove(ownerId, projectId, appName, slug, logoUrl, themeId, notes);
-    }
-
-    /** Save under uploads/, return "/uploads/..." URL */
-    private String saveOwnerAppLogoToUploads(Long ownerId, Long projectId, String slug, MultipartFile file) throws IOException {
-        Path dir = Paths.get("uploads/owner", String.valueOf(ownerId), String.valueOf(projectId), slugify1(slug));
-        if (!Files.exists(dir)) Files.createDirectories(dir);
-
-        String original = file.getOriginalFilename() == null ? "logo.png" : file.getOriginalFilename();
-        String ext = original.lastIndexOf('.') >= 0 ? original.substring(original.lastIndexOf('.')) : ".png";
-        String stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
-        String safe = UUID.randomUUID() + "_" + stamp + ext;
-
-        Files.copy(file.getInputStream(), dir.resolve(safe), StandardCopyOption.REPLACE_EXISTING);
-
-        return "/uploads/owner/" + ownerId + "/" + projectId + "/" + slugify(slug) + "/" + safe;
-    }
-
-    private static String slugify1(String s) {
-        if (s == null) return "app";
-        return s.trim().toLowerCase().replaceAll("[^a-z0-9]+","-").replaceAll("(^-|-$)","");
-    }
-
     private static String slugify(String s) {
-        if (s == null) return null;
+        if (s == null) return "app";
         return s.trim().toLowerCase()
                 .replaceAll("[^a-z0-9]+", "-")
                 .replaceAll("(^-|-$)", "");
-    }
-    
-    @Transactional
-    public void setBundleUrlByLinkId(Long ownerId, Long linkId, String relUrl) {
-        AdminUserProject row = aupRepo.findById(linkId)
-                .orElseThrow(() -> new IllegalArgumentException("App link not found"));
-        if (row.getAdmin() == null || !ownerId.equals(row.getAdmin().getAdminId())) {
-            throw new SecurityException("Forbidden: link does not belong to this owner");
-        }
-        row.setBundleUrl(normalizeRel(relUrl)); // <-- add bundleUrl column in entity if not present
-        aupRepo.save(row);
-    }
-
-    /** NEW: persist relative AAB path by (owner + project + slug). */
-    @Transactional
-    public void setBundleUrlByOwnerProjectSlug(Long ownerId, Long projectId, String slug, String relUrl) {
-        AdminUserProject row = aupRepo
-                .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slugify(slug))
-                .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
-        row.setBundleUrl(normalizeRel(relUrl));
-        aupRepo.save(row);
     }
 }
