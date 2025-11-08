@@ -17,10 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths; // IMPORTANT: java.nio.file.Paths
-import java.nio.file.StandardCopyOption;
+import java.nio.file.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -78,17 +75,16 @@ public class AppRequestService {
                                                  String appName, String slug,
                                                  MultipartFile logoFile,
                                                  Long themeId, String notes) throws IOException {
-        // unique slug
         String base = (slug != null && !slug.isBlank()) ? slugify(slug) : slugify(appName);
         String uniqueSlug = ensureUniqueSlug(ownerId, projectId, base);
 
-        // optional logo
         String logoUrl = null;
+        byte[] logoBytes = null;
         if (logoFile != null && !logoFile.isEmpty()) {
             logoUrl = saveOwnerAppLogoToUploads(ownerId, projectId, uniqueSlug, logoFile);
+            logoBytes = logoFile.getBytes(); // pass to CiBuildService to upload to repo
         }
 
-        // persist APPROVED request
         AppRequest r = new AppRequest();
         r.setOwnerId(ownerId);
         r.setProjectId(projectId);
@@ -100,8 +96,7 @@ public class AppRequestService {
         r.setStatus("APPROVED");
         r = appRequestRepo.save(r);
 
-        // provision + CI
-        return provisionAndTrigger(r);
+        return provisionAndTrigger(r, logoBytes);
     }
 
     @Transactional
@@ -113,7 +108,8 @@ public class AppRequestService {
         }
         req.setStatus("APPROVED");
         appRequestRepo.save(req);
-        return provisionAndTrigger(req);
+        // no logo bytes here; only relative url (if any)
+        return provisionAndTrigger(req, null);
     }
 
     @Transactional
@@ -208,7 +204,7 @@ public class AppRequestService {
 
     // ---------- internal ----------
 
-    private AdminUserProject provisionAndTrigger(AppRequest req) {
+    private AdminUserProject provisionAndTrigger(AppRequest req, byte[] logoBytesOpt) {
         AdminUser owner = adminRepo.findById(req.getOwnerId())
                 .orElseThrow(() -> new IllegalArgumentException("Owner(admin) not found"));
         Project project = projectRepo.findById(req.getProjectId())
@@ -242,20 +238,23 @@ public class AppRequestService {
             link.setLicenseId("LIC-" + owner.getAdminId() + "-" + project.getId() + "-" + now + "-" + uniqueSlug);
         }
 
-        // clear stale artifact
+        // clear stale artifacts before new build
         link.setApkUrl(null);
+        link.setIpaUrl(null);
+        link.setBundleUrl(null);
         link = aupRepo.save(link);
 
-        String opl = owner.getAdminId() + "-" + project.getId();
+        String ownerProjectLinkId = String.valueOf(link.getId()); // REAL PK
 
         boolean ok = ciBuildService.dispatchOwnerAndroidBuild(
                 owner.getAdminId(),
                 project.getId(),
-                opl,
+                ownerProjectLinkId,
                 uniqueSlug,
                 req.getAppName(),
                 chosenThemeId,
-                req.getLogoUrl()
+                req.getLogoUrl(),   // may be relative; service will upload logoBytesOpt to repo
+                logoBytesOpt
         );
 
         if (!ok) log.warn("CI dispatch failed or skipped; apkUrl remains null until a successful run.");

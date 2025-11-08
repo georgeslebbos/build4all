@@ -20,10 +20,9 @@ public class CiCallbackController {
         this.service = service;
     }
 
-    // ✅ include slug to update the correct app row
     @PutMapping("/owner-projects/{ownerId}/{projectId}/apps/{slug}/apk-url")
     public ResponseEntity<?> setApkFromCi(
-            @RequestHeader(value="X-Auth-Token", required=false) String t,
+            @RequestHeader(value = "X-Auth-Token", required = false) String t,
             @PathVariable Long ownerId,
             @PathVariable Long projectId,
             @PathVariable String slug,
@@ -39,11 +38,11 @@ public class CiCallbackController {
 
         var link = service.setApkUrl(ownerId, projectId, slug, apkUrl);
         return ResponseEntity.ok(Map.of(
-            "message", "APK URL saved",
-            "ownerId", ownerId,
-            "projectId", projectId,
-            "slug", slug,
-            "apkUrl", link.getApkUrl()
+                "message", "APK URL saved",
+                "ownerId", ownerId,
+                "projectId", projectId,
+                "slug", slug,
+                "apkUrl", link.getApkUrl()
         ));
     }
 }

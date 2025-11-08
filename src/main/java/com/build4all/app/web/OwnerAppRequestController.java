@@ -2,11 +2,11 @@ package com.build4all.app.web;
 
 import com.build4all.app.domain.AppRequest;
 import com.build4all.app.dto.CreateAppRequestDto;
-import com.build4all.app.repository.AppRequestRepository;
 import com.build4all.app.service.AppRequestService;
-import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.dto.OwnerProjectView;
 import com.build4all.admin.repository.AdminUserProjectRepository;
+import com.build4all.app.repository.AppRequestRepository;
+import com.build4all.admin.domain.AdminUserProject;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -32,7 +32,7 @@ public class OwnerAppRequestController {
         this.aupRepo = aupRepo;
     }
 
-    // JSON (legacy)
+    // legacy JSON create (kept)
     @PostMapping(value = "/app-requests", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> create(@RequestParam Long ownerId,
                                     @RequestBody CreateAppRequestDto dto) {
@@ -61,7 +61,7 @@ public class OwnerAppRequestController {
         }
     }
 
-    // Multipart (auto + upload)
+    // AUTO flow (multipart): creates + approves + triggers CI
     @PostMapping(value = "/app-requests/auto", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> createAndAutoApprove(
             @RequestParam Long ownerId,
@@ -91,7 +91,12 @@ public class OwnerAppRequestController {
             body.put("validFrom", link.getValidFrom());
             body.put("endTo", link.getEndTo());
             body.put("logoUrl", nz(link.getLogoUrl()));
-            body.put("apkUrl", nz(link.getApkUrl())); // will be filled by CI callback
+            body.put("apkUrl", nz(link.getApkUrl())); // will be filled later by CI (release URL) if you add callback
+
+            String manifestUrlGuess = "https://raw.githubusercontent.com/fatimahh0/HobbySphereFlutter/main/builds/"
+                    + "LATEST_WILL_BE_WRITTEN_BY_ACTION" + ".json";
+            body.put("manifestUrlHint", manifestUrlGuess);
+
             return ResponseEntity.ok(body);
 
         } catch (IllegalArgumentException | IllegalStateException ex) {
