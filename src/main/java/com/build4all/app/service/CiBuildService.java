@@ -50,7 +50,7 @@ public class CiBuildService {
     @Value("${mobile.appRole:both}")
     private String mobileAppRole;
 
-
+//
     public CiBuildService(WebClient.Builder builder) {
         this.web = builder
                 .defaultHeader(HttpHeaders.ACCEPT, "application/vnd.github+json")
