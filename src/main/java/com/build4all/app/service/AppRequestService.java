@@ -128,19 +128,24 @@ public class AppRequestService {
     @Transactional
     public AdminUserProject setApkUrl(Long adminId, Long projectId, String slug, String apkUrl) {
         AdminUserProject link = aupRepo
-                .findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slug)
+                .findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slugify(slug))
                 .orElseThrow(() -> new IllegalArgumentException("OwnerProject app not found"));
         link.setApkUrl(apkUrl);
+        log.info("Saved apkUrl via owner/project/slug: ownerId={}, projectId={}, slug={}, url={}", adminId, projectId, slug, apkUrl);
         return aupRepo.save(link);
     }
 
+    /** Direct by PK (used by CI callback). */
     @Transactional
     public void setApkUrlByLinkId(Long linkId, String apkUrl) {
         AdminUserProject link = aupRepo.findById(linkId)
                 .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
         link.setApkUrl(apkUrl);
         aupRepo.save(link);
+        log.info("Saved apkUrl (no-owner-check) linkId={} -> {}", linkId, apkUrl);
     }
+
+    // --- Owner-checked variants for relative paths under /uploads (kept) ---
 
     @Transactional
     public void setApkUrlByLinkId(Long ownerId, Long linkId, String relUrl) {
@@ -151,6 +156,7 @@ public class AppRequestService {
         }
         row.setApkUrl(normalizeRel(relUrl));
         aupRepo.save(row);
+        log.info("Saved apkUrl (owner-checked) ownerId={} linkId={} -> {}", ownerId, linkId, relUrl);
     }
 
     @Transactional
@@ -257,7 +263,12 @@ public class AppRequestService {
                 logoBytesOpt
         );
 
-        if (!ok) log.warn("CI dispatch failed or skipped; apkUrl remains null until a successful run.");
+        if (!ok) {
+            log.warn("CI dispatch failed or skipped; apkUrl remains null until a successful run.");
+        } else {
+            log.info("CI dispatch OK (ownerId={}, projectId={}, linkId={}, slug={})",
+                    owner.getAdminId(), project.getId(), link.getId(), uniqueSlug);
+        }
         return link;
     }
 

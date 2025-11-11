@@ -38,17 +38,18 @@ public class CiBuildService {
     private String repoBranch;
 
     // Mobile runtime defaults (nested into RUNTIME to keep ≤10 top-level props)
-    @Value("${MOBILE_API_BASE_URL:http://192.168.1.7:8080}")
+    @Value("${mobile.apiBaseUrl:http://192.168.1.7:8080}")
     private String mobileApiBaseUrl;
 
-    @Value("${MOBILE_WS_PATH:/api/ws}")
+    @Value("${mobile.wsPath:/api/ws}")
     private String mobileWsPath;
 
-    @Value("${MOBILE_OWNER_ATTACH_MODE:header}")
+    @Value("${mobile.ownerAttachMode:header}")
     private String mobileOwnerAttachMode;
 
-    @Value("${MOBILE_APP_ROLE:both}")
+    @Value("${mobile.appRole:both}")
     private String mobileAppRole;
+
 
     public CiBuildService(WebClient.Builder builder) {
         this.web = builder

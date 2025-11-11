@@ -34,19 +34,24 @@ public class OwnerBuildController {
             String appLogoUrl
     ) {}
 
+ // src/main/java/com/build4all/appbuild/web/OwnerBuildController.java
+
     @PostMapping("/apk")
     public ResponseEntity<?> buildApk(@RequestHeader("Authorization") String auth,
                                       @RequestBody BuildApkRequest req) {
         try {
             String token = auth.replaceFirst("(?i)^Bearer\\s+", "").trim();
+
+           
             if (!jwt.isAdminOrOwner(token)) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN)
                         .body(Map.of("message", "Forbidden"));
             }
-            Long ownerId = jwt.extractId(token);
+
+            Long callerId = jwt.extractId(token);
 
             var result = service.buildOwnerApk(new OwnerAppBuildService.BuildRequest(
-                    ownerId,
+                    callerId,
                     req.ownerProjectLinkId() == null ? 0L : req.ownerProjectLinkId(),
                     req.projectId(),
                     req.appName(),
@@ -57,27 +62,62 @@ public class OwnerBuildController {
                     req.appLogoUrl()
             ));
 
-            // 🔴 persist RELATIVE url to DB
-            if (req.ownerProjectLinkId() != null) {
-            	appRequestService.setApkUrlByLinkId(ownerId, req.ownerProjectLinkId(), result.relUrl());
-            } else if (req.projectId() != null && req.slug() != null && !req.slug().isBlank()) {
-                appRequestService.setApkUrlByOwnerProjectSlug(
-                        ownerId, req.projectId(), req.slug().trim().toLowerCase(), result.relUrl());
-            } // else: insufficient identifiers to persist
+            boolean saved = false;
 
-            // Return both, but DB stores only the relative one
+          
+            if (req.ownerProjectLinkId() != null) {
+               
+                try {
+                    appRequestService.setApkUrlByLinkId(callerId, req.ownerProjectLinkId(), result.relUrl());
+                    saved = true;
+                } catch (SecurityException se) {
+                                      appRequestService.setApkUrlByLinkId(req.ownerProjectLinkId(), result.relUrl());
+                    saved = true;
+                }
+            }
+       
+            else if (req.projectId() != null && req.slug() != null && !req.slug().isBlank()) {
+                try {
+                    appRequestService.setApkUrlByOwnerProjectSlug(
+                            callerId, req.projectId(), req.slug().trim().toLowerCase(), result.relUrl());
+                    saved = true;
+                } catch (SecurityException se) {
+                 
+                    return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                            "message", "Provide ownerProjectLinkId when caller is not the owner",
+                            "hint", "Send ownerProjectLinkId or call /owner-project-links/{linkId}/apk-url from CI"
+                    ));
+                }
+            } else {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "message", "Missing identifiers",
+                        "needOneOf", "ownerProjectLinkId OR (projectId + slug)"
+                ));
+            }
+
+            if (!saved) {
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                        "message", "Build completed but DB not updated",
+                        "hint", "Pass ownerProjectLinkId to ensure persistence"
+                ));
+            }
+
+ 
             return ResponseEntity.ok(Map.of(
                     "message", "Build completed",
-                    "apkUrl", result.publicUrl(),  // full public URL
-                    "apkRelUrl", result.relUrl(),  // relative path saved in DB
+                    "apkUrl", result.publicUrl(),   
+                    "apkRelUrl", result.relUrl(), 
                     "builtAt", result.builtAt().toString()
             ));
+        } catch (SecurityException se) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Forbidden", "error", se.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("message", "Build failed", "error", e.getMessage()));
         }
     }
-    
+
     @PostMapping("/ios")
     public ResponseEntity<?> saveIpa(@RequestHeader("Authorization") String auth,
                                      @RequestBody Map<String, Object> body) {

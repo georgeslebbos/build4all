@@ -7,6 +7,7 @@ import com.build4all.admin.dto.OwnerProjectView;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.app.repository.AppRequestRepository;
 import com.build4all.admin.domain.AdminUserProject;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -24,6 +25,13 @@ public class OwnerAppRequestController {
     private final AppRequestRepository appRequestRepo;
     private final AdminUserProjectRepository aupRepo;
 
+    // Optional: expose callback data in the response for GitHub Action wiring
+    @Value("${ci.callbackUrl:}")
+    private String callbackBase;
+
+    @Value("${ci.callbackToken:}")
+    private String callbackToken;
+
     public OwnerAppRequestController(AppRequestService service,
                                      AppRequestRepository appRequestRepo,
                                      AdminUserProjectRepository aupRepo) {
@@ -32,20 +40,25 @@ public class OwnerAppRequestController {
         this.aupRepo = aupRepo;
     }
 
-    // legacy JSON create (kept)
-    @PostMapping(value = "/app-requests", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    // ----- Legacy JSON create (kept) -----
+    @PostMapping(
+        value = "/app-requests",
+        consumes = MediaType.APPLICATION_JSON_VALUE,
+        produces = MediaType.APPLICATION_JSON_VALUE
+    )
     public ResponseEntity<?> create(@RequestParam Long ownerId,
                                     @RequestBody CreateAppRequestDto dto) {
         try {
             AppRequest r = service.createRequest(
-                    ownerId,
-                    dto.projectId(),
-                    dto.appName(),
-                    dto.slug(),
-                    dto.logoUrl(),
-                    dto.themeId(),
-                    dto.notes()
+                ownerId,
+                dto.projectId(),
+                dto.appName(),
+                dto.slug(),
+                dto.logoUrl(),
+                dto.themeId(),
+                dto.notes()
             );
+
             Map<String, Object> body = new HashMap<>();
             body.put("message", "Request created");
             body.put("requestId", r.getId());
@@ -55,14 +68,18 @@ public class OwnerAppRequestController {
             return ResponseEntity.ok(body);
         } catch (Exception ex) {
             return ResponseEntity.internalServerError().body(Map.of(
-                    "error", "Internal error",
-                    "details", ex.getClass().getSimpleName()
+                "error", "Internal error",
+                "details", ex.getClass().getSimpleName()
             ));
         }
     }
 
-    // AUTO flow (multipart): creates + approves + triggers CI
-    @PostMapping(value = "/app-requests/auto", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    // ----- AUTO flow (multipart): creates + approves + triggers CI -----
+    @PostMapping(
+        value = "/app-requests/auto",
+        consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+        produces = MediaType.APPLICATION_JSON_VALUE
+    )
     public ResponseEntity<?> createAndAutoApprove(
             @RequestParam Long ownerId,
             @RequestParam Long projectId,
@@ -77,12 +94,14 @@ public class OwnerAppRequestController {
             MultipartFile logoFile = (file != null) ? file : logo;
 
             AdminUserProject link = service.createAndAutoApprove(
-                    ownerId, projectId, appName, slug, logoFile, themeId, notes);
+                ownerId, projectId, appName, slug, logoFile, themeId, notes
+            );
 
             Map<String, Object> body = new HashMap<>();
             body.put("message", "APK build started");
             body.put("adminId", ownerId);
             body.put("projectId", projectId);
+            body.put("ownerProjectLinkId", link.getId());              // NEW: expose row PK for CI callback
             body.put("slug", nz(link.getSlug()));
             body.put("appName", nz(link.getAppName()));
             body.put("status", nz(link.getStatus()));
@@ -91,11 +110,17 @@ public class OwnerAppRequestController {
             body.put("validFrom", link.getValidFrom());
             body.put("endTo", link.getEndTo());
             body.put("logoUrl", nz(link.getLogoUrl()));
-            body.put("apkUrl", nz(link.getApkUrl())); // will be filled later by CI (release URL) if you add callback
+            body.put("apkUrl", nz(link.getApkUrl())); // will be filled later by CI
 
-            String manifestUrlGuess = "https://raw.githubusercontent.com/fatimahh0/HobbySphereFlutter/main/builds/"
-                    + "LATEST_WILL_BE_WRITTEN_BY_ACTION" + ".json";
+            // Correct hint for the manifest that the Action should write
+            String manifestUrlGuess =
+                "https://raw.githubusercontent.com/fatimahh0/HobbySphereFlutter/main/builds/"
+                + ownerId + "/" + projectId + "/" + link.getSlug() + "/latest.json";
             body.put("manifestUrlHint", manifestUrlGuess);
+
+            // Optional but useful for wiring the GitHub Action callback
+            body.put("callbackBase", nz(callbackBase));   // e.g. http://192.168.1.6:8080/api/ci
+            body.put("callbackToken", nz(callbackToken)); // shared secret for X-Auth-Token
 
             return ResponseEntity.ok(body);
 
@@ -103,8 +128,8 @@ public class OwnerAppRequestController {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         } catch (Exception ex) {
             return ResponseEntity.internalServerError().body(Map.of(
-                    "error", "Internal error",
-                    "details", ex.getClass().getSimpleName()
+                "error", "Internal error",
+                "details", ex.getClass().getSimpleName()
             ));
         }
     }

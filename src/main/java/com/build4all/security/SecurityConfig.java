@@ -36,18 +36,14 @@ public class SecurityConfig implements WebMvcConfigurer {
         registry
             .addResourceHandler("/uploads/**")
             .addResourceLocations(uploadPath);
-        
     }
-    
-    // If you don't need web security now, you can keep only this bean.
+
     @Bean
     public PasswordEncoder passwordEncoder() {
-      return new BCryptPasswordEncoder();
+        return new BCryptPasswordEncoder();
     }
 
-   
-
-    // ✅ Mini filtre JWT intégré
+    /** Minimal JWT filter (kept as-is) */
     @Bean
     public OncePerRequestFilter jwtAuthFilter() {
         return new OncePerRequestFilter() {
@@ -67,53 +63,47 @@ public class SecurityConfig implements WebMvcConfigurer {
                                 new UsernamePasswordAuthenticationToken(email, null, List.of());
                         authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                         SecurityContextHolder.getContext().setAuthentication(authentication);
-                    } catch (Exception ignored) {
-                    }
+                    } catch (Exception ignored) { }
                 }
                 filterChain.doFilter(request, response);
             }
         };
     }
 
-    // ✅ La bonne et unique méthode filterChain
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
-            .cors(cors ->{})
+            .cors(cors -> {})
             .authorizeHttpRequests(auth -> auth
-            	    .requestMatchers(
-            	        "/api/auth/**",
-            	        "/uploads/**",
-            	        "/api/**",
-            	        "/ws-chat/**", // ✅ NEW: EXPLICITLY ALLOW WS ENDPOINT
-            	        "/api/ci/**" ,
-            	        "/api/public/**",
-            	        "/**"
-            	        
-            	     ).permitAll()
-            	    .requestMatchers("/activities/**/book").hasRole("USER")
-            	    .anyRequest().authenticated()
-            	)
-
+                // Public/CI endpoints (permit)
+                .requestMatchers(
+                    "/api/auth/**",
+                    "/api/public/**",
+                    "/api/ci/**",     // <-- CI callback endpoint
+                    "/uploads/**",
+                    "/ws-chat/**"
+                ).permitAll()
+                // Everything else requires auth
+                .anyRequest().authenticated()
+            )
             .addFilterBefore(jwtAuthFilter(), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
-    
- // ✅ CORS configuration bean
+
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        //config.setAllowedOrigins(List.of("http://localhost:3000", 
-        //                                 "http://localhost:5500", 
-        //                                 "http://127.0.0.1:3000"));
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        // Allow any origin pattern (CI runner → backend is server-to-server)
+        config.addAllowedOriginPattern("*");
+        config.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/", config);
+        // IMPORTANT: apply to all paths
+        source.registerCorsConfiguration("/**", config);
         return source;
     }
 }
