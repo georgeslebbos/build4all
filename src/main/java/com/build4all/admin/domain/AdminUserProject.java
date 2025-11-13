@@ -159,4 +159,6 @@ public class AdminUserProject {
     @Transient public boolean isSuspended() { return "SUSPENDED".equalsIgnoreCase(status); }
     @Transient public boolean isExpired() { return "EXPIRED".equalsIgnoreCase(status); }
     @Transient public boolean isDeleted() { return "DELETED".equalsIgnoreCase(status); }
+
+	
 }

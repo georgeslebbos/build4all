@@ -329,4 +329,47 @@ public class AppRequestService {
                 .replaceAll("[^a-z0-9]+", "-")
                 .replaceAll("(^-|-$)", "");
     }
+    
+    @Transactional
+    public AdminUserProject prepareRebuildByLink(Long ownerId, Long linkId) {
+        AdminUserProject link = aupRepo.findByIdAndAdmin_AdminId(linkId, ownerId)
+        	    .orElseThrow(() -> new IllegalArgumentException("Link not found for this owner"));
+
+        link.setStatus("IN_PRODUCTION");
+        link.setApkUrl(null); 
+        return aupRepo.save(link);
+    }
+    
+    @Transactional(readOnly = true)
+    public String enqueueBuild(Long ownerId, Long projectId, AdminUserProject link) {
+        // Sanity: fallbacks from link
+        final Long themeId = link.getThemeId();
+        final String slug    = (link.getSlug() == null) ? "app" : link.getSlug().trim().toLowerCase();
+        final String appName = (link.getAppName() == null) ? "My App" : link.getAppName().trim();
+        final String logoUrl = link.getLogoUrl(); // may be relative; CiBuildService should handle it
+
+        boolean ok = ciBuildService.dispatchOwnerAndroidBuild(
+                ownerId,
+                projectId,
+                String.valueOf(link.getId()), // ownerProjectLinkId
+                slug,
+                appName,
+                themeId,
+                logoUrl,
+                null // no fresh bytes on rebuild; use existing URL in the CI service
+        );
+
+        if (!ok) {
+            log.warn("CI dispatch failed/was skipped (ownerId={}, projectId={}, linkId={}, slug={})",
+                    ownerId, projectId, link.getId(), slug);
+        } else {
+            log.info("CI dispatch OK (ownerId={}, projectId={}, linkId={}, slug={})",
+                    ownerId, projectId, link.getId(), slug);
+        }
+
+        // Return a simple client-visible token (not required by CI, just for UX)
+        return "job-" + link.getId() + "-" + System.currentTimeMillis();
+    }
+
+
 }

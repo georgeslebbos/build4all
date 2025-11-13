@@ -143,6 +143,41 @@ public class OwnerAppRequestController {
     public List<OwnerProjectView> myApps(@RequestParam Long ownerId) {
         return aupRepo.findOwnerProjectsSlim(ownerId);
     }
+    
+    @PostMapping(
+    	    value = "/links/{linkId}/rebuild",
+    	    produces = MediaType.APPLICATION_JSON_VALUE
+    	)
+    	public ResponseEntity<?> rebuildByLink(
+    	        @PathVariable Long linkId,
+    	        @RequestParam Long ownerId
+    	) {
+    	    try {
+    	        AdminUserProject link = service.prepareRebuildByLink(ownerId, linkId);
+    	        String jobId = service.enqueueBuild(link.getAdminId(), link.getProjectId(), link);
+
+    	        Map<String, Object> body = new HashMap<>();
+    	        body.put("status", "QUEUED");
+    	        body.put("message", "APK rebuild queued.");
+    	        body.put("ownerProjectLinkId", link.getId());
+    	        body.put("projectId", link.getProjectId());
+    	        body.put("slug", nz(link.getSlug()));
+    	        body.put("apkUrl", nz(link.getApkUrl()));
+    	        body.put("jobId", jobId);
+    	        body.put("callbackBase", nz(callbackBase));
+    	        body.put("callbackToken", nz(callbackToken));
+    	        return ResponseEntity.accepted().body(body);
+
+    	    } catch (IllegalArgumentException | IllegalStateException ex) {
+    	        return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+    	    } catch (Exception ex) {
+    	        return ResponseEntity.internalServerError().body(Map.of(
+    	            "error", "Internal error",
+    	            "details", ex.getClass().getSimpleName()
+    	        ));
+    	    }
+    	}
+
 
     private static String nz(String s) { return (s == null) ? "" : s; }
 }

@@ -13,22 +13,20 @@ import java.util.List;
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 @Entity
 @Table(
-    name = "businesses",
-    // Keep legacy table-wide uniqueness rules relaxed so we can allow duplicates across apps.
-    // Enforce scoping via composite unique constraints below:
-    uniqueConstraints = {
-        @UniqueConstraint(name = "uk_biz_app_email", columnNames = {"owner_project_link_id", "email"}),
-        @UniqueConstraint(name = "uk_biz_app_phone", columnNames = {"owner_project_link_id", "phone_number"}),
-        @UniqueConstraint(name = "uk_biz_app_name", columnNames = {"owner_project_link_id", "business_name"})
-    },
-    indexes = {
-        @Index(name = "idx_biz_app", columnList = "owner_project_link_id"),
-        @Index(name = "idx_biz_email", columnList = "email"),
-        @Index(name = "idx_biz_phone", columnList = "phone_number"),
-        @Index(name = "idx_biz_status", columnList = "status"),
-        @Index(name = "idx_biz_public", columnList = "is_public_profile")
-    }
-)
+		  name = "businesses",
+		  uniqueConstraints = {
+		      @UniqueConstraint(name = "uk_biz_app_email", columnNames = {"aup_id", "email"}),
+		      @UniqueConstraint(name = "uk_biz_app_phone", columnNames = {"aup_id", "phone_number"}),
+		      @UniqueConstraint(name = "uk_biz_app_name", columnNames = {"aup_id", "business_name"})
+		  },
+		  indexes = {
+		      @Index(name = "idx_biz_app", columnList = "aup_id"),
+		      @Index(name = "idx_biz_email", columnList = "email"),
+		      @Index(name = "idx_biz_phone", columnList = "phone_number"),
+		      @Index(name = "idx_biz_status", columnList = "status"),
+		      @Index(name = "idx_biz_public", columnList = "is_public_profile")
+		  }
+		)
 public class Businesses {
 
     @Id
