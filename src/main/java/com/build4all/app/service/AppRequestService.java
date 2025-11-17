@@ -158,6 +158,17 @@ public class AppRequestService {
         aupRepo.save(row);
         log.info("Saved apkUrl (owner-checked) ownerId={} linkId={} -> {}", ownerId, linkId, relUrl);
     }
+    
+    /** Direct by PK for AAB/bundle (used by CI callback). */
+    @Transactional
+    public void setBundleUrlByLinkId(Long linkId, String bundleUrl) {
+        AdminUserProject link = aupRepo.findById(linkId)
+                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
+        link.setBundleUrl(bundleUrl);
+        aupRepo.save(link);
+        log.info("Saved bundleUrl (no-owner-check) linkId={} -> {}", linkId, bundleUrl);
+    }
+
 
     @Transactional
     public void setIpaUrlByLinkId(Long ownerId, Long linkId, String relUrl) {

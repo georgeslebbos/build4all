@@ -100,4 +100,36 @@ public class CiCallbackController {
         }
         return ok;
     }
+    
+    /** Save AAB URL (bundle) by AdminUserProject primary key (for CI AAB workflow). */
+    @PutMapping(
+        value = "/owner-project-links/{linkId}/aab-url",
+        consumes = MediaType.APPLICATION_JSON_VALUE,
+        produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public ResponseEntity<?> setAabFromCiByLinkId(
+            @RequestHeader(value = "X-Auth-Token", required = false) String t,
+            @PathVariable Long linkId,
+            @RequestBody Map<String, String> body) {
+
+        if (!isAuthorized(t)) {
+            log.warn("CI callback unauthorized (AAB, linkId path): linkId={}", linkId);
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
+        }
+
+        String aabUrl = body.get("aabUrl");
+        if (aabUrl == null || aabUrl.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "aabUrl required"));
+        }
+
+        service.setBundleUrlByLinkId(linkId, aabUrl);
+        log.info("CI saved aabUrl via linkId={} url={}", linkId, aabUrl);
+
+        return ResponseEntity.ok(Map.of(
+                "message", "AAB URL saved",
+                "linkId", linkId,
+                "aabUrl", aabUrl
+        ));
+    }
+
 }
