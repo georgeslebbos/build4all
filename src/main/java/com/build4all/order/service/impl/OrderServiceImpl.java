@@ -118,6 +118,8 @@ public class OrderServiceImpl implements OrderService {
         if (quantity <= 0) throw new IllegalArgumentException("participants must be > 0");
         if (stripePaymentId == null || stripePaymentId.isBlank())
             throw new IllegalArgumentException("stripePaymentId is required");
+        
+        boolean DEV_SKIP_STRIPE_CHECK = true;
 
         try {
             var pi = com.stripe.model.PaymentIntent.retrieve(stripePaymentId);
