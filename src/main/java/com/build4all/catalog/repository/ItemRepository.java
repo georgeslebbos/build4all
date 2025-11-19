@@ -63,7 +63,7 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
 
     @Query(value = """
             SELECT i.item_name
-            FROM item_bookings b
+            FROM order_items b
             JOIN items i ON b.item_id = i.item_id
             WHERE i.business_id = :businessId
             GROUP BY i.item_name
@@ -87,13 +87,13 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
     List<AdminItemDTO> findAllItemsWithBusinessInfo();
 
     @Query("""
-           SELECT i, COUNT(ib.id) AS bookingCount
+           SELECT i, COUNT(ib.id) AS orderCount
            FROM com.build4all.order.domain.OrderItem ib
            JOIN ib.item i
            WHERE i.business.status.name = 'ACTIVE'
              AND i.business.isPublicProfile = true
            GROUP BY i
-           ORDER BY bookingCount DESC
+           ORDER BY orderCount DESC
            """)
     List<Object[]> findPopularItems();
 }

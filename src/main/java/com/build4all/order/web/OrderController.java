@@ -228,7 +228,7 @@ public class OrderController {
     public ResponseEntity<?> cancel(@RequestHeader("Authorization") String auth,
                                     @PathVariable Long orderItemId) {
         Long actorId = jwt.extractId(strip(auth));
-        orderService.cancelBooking(orderItemId, actorId);
+        orderService.cancelorder(orderItemId, actorId);
         return ResponseEntity.ok().build();
     }
 
@@ -244,7 +244,7 @@ public class OrderController {
     public ResponseEntity<?> delete(@RequestHeader("Authorization") String auth,
                                     @PathVariable Long orderItemId) {
         Long actorId = jwt.extractId(strip(auth));
-        orderService.deleteBooking(orderItemId, actorId);
+        orderService.deleteorder(orderItemId, actorId);
         return ResponseEntity.noContent().build();
     }
 
@@ -332,7 +332,7 @@ public class OrderController {
     public ResponseEntity<?> rejectOrder(@RequestHeader("Authorization") String auth,
                                          @PathVariable Long orderItemId) {
         Long businessId = jwt.extractBusinessId(strip(auth));
-        orderService.rejectBooking(orderItemId, businessId);
+        orderService.rejectorder(orderItemId, businessId);
         return ResponseEntity.ok().build();
     }
 
@@ -340,7 +340,7 @@ public class OrderController {
     public ResponseEntity<?> unrejectOrder(@RequestHeader("Authorization") String auth,
                                            @PathVariable Long orderItemId) {
         Long businessId = jwt.extractBusinessId(strip(auth));
-        orderService.unrejectBooking(orderItemId, businessId);
+        orderService.unrejectorder(orderItemId, businessId);
         return ResponseEntity.ok().build();
     }
 }

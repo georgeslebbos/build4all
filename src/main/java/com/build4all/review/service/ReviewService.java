@@ -53,14 +53,14 @@ public class ReviewService {
         Item item = itemRepository.findByIdWithBusiness(dto.getItemId())
                 .orElseThrow(() -> new RuntimeException("Item not found"));
 
-        boolean hasCompletedBooking = OrderItemRepository
+        boolean hasCompletedorder = OrderItemRepository
                 .existsByItemIdAndUserIdAndOrderStatusName(item.getId(), user.getId(), "Completed");
        
         boolean alreadyReviewed = reviewRepository
                 .existsByItemIdAndCustomerId(item.getId(), user.getId());
 
-        if (!hasCompletedBooking) {
-            throw new RuntimeException("You can only review this item after completing a booking.");
+        if (!hasCompletedorder) {
+            throw new RuntimeException("You can only review this item after completing a order.");
         }
         if (alreadyReviewed) {
             throw new RuntimeException("You already reviewed this item.");

@@ -11,10 +11,10 @@ public class NotificationTypeEntity {
     private Long id;
 
     @Column(nullable = false, unique = true)
-    private String code; // e.g. "BOOKING_CREATED"
+    private String code; // e.g. ""
 
     @Column(nullable = false)
-    private String description; // e.g. "Booking Created"
+    private String description; // e.g. ""
 
     public NotificationTypeEntity(String code)
     {

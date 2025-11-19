@@ -176,7 +176,7 @@ public class OrderServiceImpl implements OrderService {
        =============================== */
 
     @Override
-    public OrderItem createCashBookingByBusiness(Long itemId, Long businessUserId,
+    public OrderItem createCashorderByBusiness(Long itemId, Long businessUserId,
                                                  int participants, boolean wasPaid, Long currencyId) {
 
         if (itemId == null) throw new IllegalArgumentException("itemId is required");
@@ -237,12 +237,12 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public List<OrderItem> getMyBookings(Long userId) {
+    public List<OrderItem> getMyorders(Long userId) {
         return orderItemRepo.findByUser_IdOrderByCreatedAtDesc(userId);
     }
 
     @Override
-    public List<OrderItem> getMyBookingsByStatus(Long userId, String status) {
+    public List<OrderItem> getMyordersByStatus(Long userId, String status) {
         final String wanted = status == null ? "" : status.toUpperCase(Locale.ROOT);
 
         return orderItemRepo.findByUser_IdOrderByCreatedAtDesc(userId).stream()
@@ -259,7 +259,7 @@ public class OrderServiceImpl implements OrderService {
        =============================== */
 
     @Override
-    public void cancelBooking(Long orderItemId, Long actorId) {
+    public void cancelorder(Long orderItemId, Long actorId) {
         var oi = requireUserOwned(orderItemId, actorId);
         var header = oi.getOrder();
         String curr = currentStatusCode(header);
@@ -285,7 +285,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public void deleteBooking(Long orderItemId, Long actorId) {
+    public void deleteorder(Long orderItemId, Long actorId) {
         orderItemRepo.findByIdAndUser(orderItemId, actorId)
                 .or(() -> orderItemRepo.findById(orderItemId))
                 .orElseThrow(() -> new IllegalArgumentException("Order item not found or not yours"));
@@ -358,7 +358,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public List<OrderItem> getBookingsByBusiness(Long businessId) {
+    public List<OrderItem> getordersByBusiness(Long businessId) {
         return orderItemRepo.findRichByBusinessId(businessId);
     }
 
@@ -381,12 +381,12 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public void deleteBookingsByItemId(Long itemId) {
+    public void deleteordersByItemId(Long itemId) {
         orderItemRepo.deleteByItem_Id(itemId);
     }
 
     @Override
-    public void rejectBooking(Long orderItemId, Long businessId) {
+    public void rejectorder(Long orderItemId, Long businessId) {
         var oi = requireBusinessOwned(orderItemId, businessId);
         String curr = currentStatusCode(oi.getOrder());
 
@@ -399,7 +399,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public void unrejectBooking(Long orderItemId, Long businessId) {
+    public void unrejectorder(Long orderItemId, Long businessId) {
         var oi = requireBusinessOwned(orderItemId, businessId);
         String curr = currentStatusCode(oi.getOrder());
 

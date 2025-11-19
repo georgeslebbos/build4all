@@ -30,20 +30,20 @@ import java.util.*;
 public class ActivityController {
 
     private final ActivityService activityService;
-    private final OrderService bookingService;
+    private final OrderService orderService;
     private final UserService userService;
     private final BusinessUserService businessUserService;
     private final StripeService stripeService;
     private final JwtUtil jwtUtil;
 
     public ActivityController(ActivityService activityService,
-                              OrderService bookingService,
+                              OrderService orderService,
                               UserService userService,
                               BusinessUserService businessUserService,
                               StripeService stripeService,
                               JwtUtil jwtUtil) {
         this.activityService = activityService;
-        this.bookingService = bookingService;
+        this.orderService = orderService;
         this.userService = userService;
         this.businessUserService = businessUserService;
         this.stripeService = stripeService;
@@ -179,7 +179,7 @@ public class ActivityController {
         Activity a = activityService.findById(id);
         if (a == null) return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "Item not found"));
 
-        bookingService.deleteBookingsByItemId(id);
+        orderService.deleteordersByItemId(id);
         activityService.deleteActivity(id);
         return ResponseEntity.noContent().build();
     }
@@ -377,7 +377,7 @@ public class ActivityController {
             int requested = Integer.parseInt(participantsStr.replaceAll("[^\\d]", ""));
             Users user = getScopedUserFromToken(authHeader, ownerProjectLinkId);
 
-            if (bookingService.hasUserAlreadyBooked(itemId, user.getId()))
+            if (orderService.hasUserAlreadyBooked(itemId, user.getId()))
                 return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("available", false, "error", "You already booked this item."));
 
             boolean ok = activityService.isAvailable(itemId, requested);
@@ -390,10 +390,10 @@ public class ActivityController {
         }
     }
 
-    /* ---------------- confirm booking (owner-linked user) ---------------- */
+    /* ---------------- confirm order (owner-linked user) ---------------- */
 
-    @PostMapping("/confirm-booking")
-    public ResponseEntity<?> confirmBooking(@RequestHeader("Authorization") String auth,
+    @PostMapping("/confirm-order")
+    public ResponseEntity<?> confirmorder(@RequestHeader("Authorization") String auth,
                                             @RequestParam Long ownerProjectLinkId,
                                             @RequestBody Map<String, Object> data) {
         try {
@@ -408,14 +408,14 @@ public class ActivityController {
                 currencyId = Long.parseLong(cid.toString());
             }
 
-            OrderItem booking = bookingService.createBookItem(user.getId(), itemId, participants, stripePaymentId, currencyId);
-            return ResponseEntity.ok(Map.of("message", "Booking confirmed", "bookingId", booking.getId()));
+            OrderItem order = orderService.createBookItem(user.getId(), itemId, participants, stripePaymentId, currencyId);
+            return ResponseEntity.ok(Map.of("message", "order confirmed", "orderId", order.getId()));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
         }
     }
 
-    /* ---------------- cash booking (business scope) ---------------- */
+    /* ---------------- cash order (business scope) ---------------- */
 
     @PostMapping("/book-cash")
     public ResponseEntity<?> bookCash(@RequestHeader("Authorization") String auth,
@@ -427,10 +427,10 @@ public class ActivityController {
                 return ResponseEntity.status(403).body("Unauthorized: Client does not belong to your business");
             }
 
-            OrderItem booking = activityService.createCashBookingByBusiness(
+            OrderItem order = activityService.createCashorderByBusiness(
                     dto.getItemId(), dto.getBusinessUserId(), dto.getParticipants(), dto.isWasPaid()
             );
-            return ResponseEntity.ok(booking);
+            return ResponseEntity.ok(order);
 
         } catch (UnsupportedOperationException uoe) {
             return ResponseEntity.status(501).body(Map.of("error", "Not implemented: " + uoe.getMessage()));

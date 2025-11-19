@@ -37,7 +37,7 @@ public class AdminStatsService {
         Map<String, Long> stats = new HashMap<>();
         stats.put("users", usersRepository.countByCreatedAtAfter(fromDate));
         stats.put("items", itemsRepository.countByCreatedAtAfter(fromDate)); 
-        stats.put("bookings", OrderItemRepository.countByOrderDatetimeAfter(fromDate));
+        stats.put("orders", OrderItemRepository.countByOrderDatetimeAfter(fromDate));
 
         if (reviewRepository != null) {
             stats.put("feedback", reviewRepository.countByCreatedAtAfter(fromDate));
@@ -73,7 +73,7 @@ public class AdminStatsService {
         for (Object[] row : result) {
             Map<String, Object> map = new HashMap<>();
             map.put("name", row[0]);
-            map.put("bookings", row[1]);
+            map.put("orders", row[1]);
             map.put("views", row[2]);
             popularItems.add(map);
         }

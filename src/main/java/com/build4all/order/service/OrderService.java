@@ -9,28 +9,28 @@ public interface OrderService {
     OrderItem createBookItem(Long userId, Long itemId, int participants,
                              String stripePaymentId, Long currencyId);
 
-    OrderItem createCashBookingByBusiness(Long itemId, Long businessUserId,
+    OrderItem createCashorderByBusiness(Long itemId, Long businessUserId,
                                           int participants, boolean wasPaid, Long currencyId);
 
     boolean hasUserAlreadyBooked(Long itemId, Long userId);
 
-    List<OrderItem> getMyBookings(Long userId);
-    List<OrderItem> getMyBookingsByStatus(Long userId, String status);
+    List<OrderItem> getMyorders(Long userId);
+    List<OrderItem> getMyordersByStatus(Long userId, String status);
 
-    void cancelBooking(Long orderItemId, Long actorId);
+    void cancelorder(Long orderItemId, Long actorId);
     void resetToPending(Long orderItemId, Long actorId);
-    void deleteBooking(Long orderItemId, Long actorId);
+    void deleteorder(Long orderItemId, Long actorId);
 
     void refundIfEligible(Long orderItemId, Long actorId);
     void requestCancel(Long orderItemId, Long userId);
     void approveCancel(Long orderItemId, Long businessId);
     void rejectCancel(Long orderItemId, Long businessId);
     void markRefunded(Long orderItemId, Long businessId);
-    void rejectBooking(Long orderItemId, Long businessId);
-    void unrejectBooking(Long orderItemId, Long businessId);
+    void rejectorder(Long orderItemId, Long businessId);
+    void unrejectorder(Long orderItemId, Long businessId);
 
-    List<OrderItem> getBookingsByBusiness(Long businessId);
+    List<OrderItem> getordersByBusiness(Long businessId);
     void markPaid(Long orderItemId, Long businessId);
 
-    void deleteBookingsByItemId(Long itemId);
+    void deleteordersByItemId(Long itemId);
 }

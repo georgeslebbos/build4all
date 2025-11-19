@@ -182,11 +182,11 @@ public class ActivityService {
     }
 
     /**
-     * Cash booking creation is not implemented here to avoid a hard dependency on an ItemBookingService.
+     * Cash order creation is not implemented here to avoid a hard dependency on an ItemorderService.
      * The controller already catches UnsupportedOperationException and returns 501.
      */
-    public OrderItem createCashBookingByBusiness(Long itemId, Long businessUserId, int participants, boolean wasPaid) {
-        throw new UnsupportedOperationException("Cash booking flow is not implemented in ActivityService");
+    public OrderItem createCashorderByBusiness(Long itemId, Long businessUserId, int participants, boolean wasPaid) {
+        throw new UnsupportedOperationException("Cash order flow is not implemented in ActivityService");
     }
 
     // ---- storage helper

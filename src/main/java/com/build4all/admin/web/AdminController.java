@@ -63,7 +63,7 @@ public class AdminController {
     }
 
     @GetMapping("/stats")
-    @Operation(summary = "Get system stats", description = "Returns total users, activities, bookings, and feedback for the selected period")
+    @Operation(summary = "Get system stats", description = "Returns total users, activities, orders, and feedback for the selected period")
     @ApiResponses(value = {
     	    @ApiResponse(responseCode = "200", description = "Successful"),
     	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
@@ -399,7 +399,7 @@ public class AdminController {
         ));
     }
     
-    @Operation(summary = "Delete a business and all related data", description = "Only SUPER_ADMIN can delete a business account along with all related activities, bookings, reviews, and admin links.")
+    @Operation(summary = "Delete a business and all related data", description = "Only SUPER_ADMIN can delete a business account along with all related activities, orders, reviews, and admin links.")
     @ApiResponses(value = {
     	    @ApiResponse(responseCode = "200", description = "Successful"),
     	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
@@ -415,7 +415,7 @@ public class AdminController {
         if (!isSuperAdmin(token)) return ResponseEntity.status(401).body("Unauthorized");
 
         try {
-            businessService.delete(businessId); // ✅ this handles everything: activities, bookings, reviews, links
+            businessService.delete(businessId); // ✅ this handles everything: activities, orders, reviews, links
             return ResponseEntity.ok("Business and all related data deleted successfully.");
         } catch (RuntimeException e) {
             return ResponseEntity.status(404).body("Business not found.");

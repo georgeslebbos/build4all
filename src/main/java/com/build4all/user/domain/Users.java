@@ -167,8 +167,8 @@ public class Users {
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 
-    public List<OrderItem> getItemBookings() { return orderItems; }
-    public void setItemBookings(List<OrderItem> orderItems) { this.orderItems = orderItems; }
+    public List<OrderItem> getItemorders() { return orderItems; }
+    public void setItemorders(List<OrderItem> orderItems) { this.orderItems = orderItems; }
 
     public List<Friendship> getSentFriendRequests() { return sentFriendRequests; }
     public void setSentFriendRequests(List<Friendship> sentFriendRequests) { this.sentFriendRequests = sentFriendRequests; }

@@ -9,12 +9,12 @@ import org.springframework.context.annotation.Configuration;
 import java.util.List;
 
 @Configuration
-public class BookingStatusSeeder {
+public class OrderStatusSeeder {
 
     @Bean
-    public CommandLineRunner seedBookingStatuses(OrderStatusRepository repo) {
+    public CommandLineRunner seedorderStatuses(OrderStatusRepository repo) {
         return args -> {
-            System.out.println("✅ BookingStatus seeder running...");
+            System.out.println("✅ orderStatus seeder running...");
 
             List<String> names = List.of(
                     "PENDING", "APPROVED", "REJECTED",
@@ -24,7 +24,7 @@ public class BookingStatusSeeder {
             for (String n : names) {
                 if (repo.findByNameIgnoreCase(n).isEmpty()) {
                     repo.save(new OrderStatus(n));
-                    System.out.println("   • inserted BookingStatus: " + n);
+                    System.out.println("   • inserted orderStatus: " + n);
                 }
             }
         };

@@ -29,36 +29,36 @@ public class BusinessAnalyticsService {
 
         String topItem = itemRepo.findTopItemNameByBusinessId(businessId);
         if (topItem == null) {
-            topItem = "No bookings yet";
+            topItem = "No orders yet";
         }
 
-        double bookingGrowth = calculateBookingGrowth(businessId);
+        double orderGrowth = calculateorderGrowth(businessId);
         String peakHours = findPeakHours(businessId);
         double retention = calculateCustomerRetention(businessId);
 
         return new BusinessAnalytics(
                 totalRevenue,
                 topItem,
-                bookingGrowth,
+                orderGrowth,
                 peakHours,
                 retention,
                 LocalDate.now()
         );
     }
 
-    private double calculateBookingGrowth(Long businessId) {
+    private double calculateorderGrowth(Long businessId) {
         LocalDate now = LocalDate.now();
         int currentMonth = now.getMonthValue();
         int previousMonth = currentMonth == 1 ? 12 : currentMonth - 1;
         int year = now.getYear();
         int previousYear = currentMonth == 1 ? year - 1 : year;
 
-        long currentBookings = orderItemRepositoryRepo.countOrdersByMonthAndYear(businessId, currentMonth, year);
-        long previousBookings = orderItemRepositoryRepo.countOrdersByMonthAndYear(businessId, previousMonth, previousYear);
+        long currentorders = orderItemRepositoryRepo.countOrdersByMonthAndYear(businessId, currentMonth, year);
+        long previousorders = orderItemRepositoryRepo.countOrdersByMonthAndYear(businessId, previousMonth, previousYear);
 
-        if (previousBookings == 0) return currentBookings > 0 ? 100.0 : 0.0;
+        if (previousorders == 0) return currentorders > 0 ? 100.0 : 0.0;
 
-        return ((double)(currentBookings - previousBookings) / previousBookings) * 100.0;
+        return ((double)(currentorders - previousorders) / previousorders) * 100.0;
     }
 
     private String findPeakHours(Long businessId) {

@@ -6,16 +6,16 @@ import java.time.LocalDate;
 public class BusinessAnalytics {
     private double totalRevenue;
     private String topItem;
-    private double bookingGrowth;
+    private double orderGrowth;
     private String peakHours;
     private double customerRetention;
     private LocalDate analyticsDate;
 
-    public BusinessAnalytics(double totalRevenue, String topItem, double bookingGrowth,
+    public BusinessAnalytics(double totalRevenue, String topItem, double orderGrowth,
                              String peakHours, double customerRetention, LocalDate analyticsDate) {
         this.totalRevenue = totalRevenue;
         this.topItem = topItem;
-        this.bookingGrowth = bookingGrowth;
+        this.orderGrowth = orderGrowth;
         this.peakHours = peakHours;
         this.customerRetention = customerRetention;
         this.analyticsDate = analyticsDate;
@@ -24,7 +24,7 @@ public class BusinessAnalytics {
     // Getters and setters...
     public double getTotalRevenue() { return totalRevenue; }
     public String getTopItem() { return topItem; }
-    public double getBookingGrowth() { return bookingGrowth; }
+    public double getorderGrowth() { return orderGrowth; }
     public String getPeakHours() { return peakHours; }
     public double getCustomerRetention() { return customerRetention; }
     public LocalDate getAnalyticsDate() { return analyticsDate; }
