@@ -1,8 +1,8 @@
-package com.build4all.booking.web;
+package com.build4all.order.web;
 
-import com.build4all.booking.domain.ItemBooking;
-import com.build4all.booking.repository.ItemBookingsRepository;
-import com.build4all.booking.service.ItemBookingService;
+import com.build4all.order.domain.OrderItem;
+import com.build4all.order.repository.OrderItemRepository;
+import com.build4all.order.service.OrderService;
 import com.build4all.security.JwtUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import org.springframework.http.HttpStatus;
@@ -16,19 +16,19 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/bookings")
-public class BookingController {
+@RequestMapping("/api/orders")
+public class OrderController {
 
-    private final ItemBookingService bookingService;
+    private final OrderService orderService;
     private final JwtUtil jwt;
-    private final ItemBookingsRepository itemBookingsRepo;
+    private final OrderItemRepository orderItemRepo;
 
-    public BookingController(ItemBookingService bookingService,
-                             JwtUtil jwt,
-                             ItemBookingsRepository itemBookingsRepo) {
-        this.bookingService = bookingService;
+    public OrderController(OrderService orderService,
+                           JwtUtil jwt,
+                           OrderItemRepository orderItemRepo) {
+        this.orderService = orderService;
         this.jwt = jwt;
-        this.itemBookingsRepo = itemBookingsRepo;
+        this.orderItemRepo = orderItemRepo;
     }
 
     private String strip(String auth) {
@@ -38,7 +38,6 @@ public class BookingController {
 
     /* ---------------------------- helpers (safe getters + shaping) ---------------------------- */
 
-    /** Try a list of no-arg getters; return first non-null result, else null. Never throws. */
     private Object tryGet(Object target, String... candidates) {
         if (target == null) return null;
         Class<?> c = target.getClass();
@@ -63,7 +62,6 @@ public class BookingController {
         };
     }
 
-    /** Turn the flat projection map into the nested shape Flutter expects. */
     private Map<String, Object> toUserCardShape(Map<String, Object> row) {
         Map<String, Object> out = new HashMap<>(row);
 
@@ -75,26 +73,23 @@ public class BookingController {
         item.put("imageUrl", out.remove("imageUrl"));
         out.put("item", item);
 
-        // booking{status}
-        Map<String, Object> booking = new HashMap<>();
-        booking.put("status", out.get("bookingStatus"));
-        out.put("booking", booking);
+        // order{status}
+        Map<String, Object> order = new HashMap<>();
+        order.put("status", out.get("orderStatus"));
+        out.put("order", order);
 
-        // normalize for UI filters
-        Object bs = out.get("bookingStatus");
-        out.put("bookingStatus", titleCaseStatus(bs == null ? null : bs.toString()));
+        Object os = out.get("orderStatus");
+        out.put("orderStatus", titleCaseStatus(os == null ? null : os.toString()));
 
         return out;
     }
 
-    /** Build rich map for business list without compile-time coupling to entity getter names. */
-    private Map<String, Object> toBusinessBookingShape(ItemBooking ib) {
-        var b = ib.getBooking();
-        var i = ib.getItem();
-        var u = ib.getUser();
-        var cur = ib.getCurrency();
+    private Map<String, Object> toBusinessOrderShape(OrderItem oi) {
+        var o = oi.getOrder();
+        var i = oi.getItem();
+        var u = oi.getUser();
+        var cur = oi.getCurrency();
 
-        // item{} via safe getters
         Map<String, Object> item = new HashMap<>();
         item.put("id", i != null ? tryGet(i, "getId") : null);
         item.put("itemName", i != null ? tryGet(i, "getName", "getItemName", "getTitle") : null);
@@ -102,12 +97,11 @@ public class BookingController {
         item.put("startDatetime", i != null ? tryGet(i, "getStartDatetime", "getStartDateTime", "getStartAt", "getStart") : null);
         item.put("imageUrl", i != null ? tryGet(i, "getImageUrl", "getImage", "getImagePath") : null);
 
-        // currency{} (prefer header, else line)
         Map<String, Object> currency = null;
-        Object bc = (b != null) ? tryGet(b, "getCurrency") : null;
-        if (bc != null) {
-            Object code = tryGet(bc, "getCode");
-            Object symbol = tryGet(bc, "getSymbol");
+        Object oc = (o != null) ? tryGet(o, "getCurrency") : null;
+        if (oc != null) {
+            Object code = tryGet(oc, "getCode");
+            Object symbol = tryGet(oc, "getSymbol");
             if (code != null || symbol != null) {
                 currency = new HashMap<>();
                 currency.put("code", code);
@@ -119,7 +113,6 @@ public class BookingController {
             currency.put("symbol", tryGet(cur, "getSymbol"));
         }
 
-        // user{}
         Map<String, Object> user = null;
         if (u != null) {
             user = new HashMap<>();
@@ -130,38 +123,42 @@ public class BookingController {
             user.put("profilePictureUrl", tryGet(u, "getProfilePictureUrl", "getAvatarUrl", "getPhotoUrl"));
         }
 
-        // totals: prefer booking.totalPrice, else line price * qty
         double totalPrice = 0.0;
-        Object bTot = (b != null) ? tryGet(b, "getTotalPrice") : null;
-        if (bTot instanceof BigDecimal bd) {
+        Object oTot = (o != null) ? tryGet(o, "getTotalPrice") : null;
+        if (oTot instanceof BigDecimal bd) {
             totalPrice = bd.doubleValue();
-        } else if (ib.getPrice() != null) {
-            totalPrice = ib.getPrice().multiply(BigDecimal.valueOf(ib.getQuantity())).doubleValue();
+        } else if (oi.getPrice() != null) {
+            totalPrice = oi.getPrice().multiply(BigDecimal.valueOf(oi.getQuantity())).doubleValue();
         }
 
-        String bookingStatus = titleCaseStatus((b != null) ? String.valueOf(tryGet(b, "getStatus")) : null);
-        boolean wasPaid = (b != null && "COMPLETED".equalsIgnoreCase(String.valueOf(tryGet(b, "getStatus"))));
+        Object rawStatus = (o != null) ? tryGet(o, "getStatus") : null;
+        String statusName = null;
+        if (rawStatus != null) {
+            Object name = tryGet(rawStatus, "getName");
+            statusName = name == null ? null : name.toString();
+        }
 
-        // paymentMethod may not exist -> try alternatives, else null
-        Object paymentMethod = (b != null) ? tryGet(b, "getPaymentMethod", "getMethod", "getPaymentType") : null;
+        String orderStatus = titleCaseStatus(statusName);
+        boolean wasPaid = "COMPLETED".equalsIgnoreCase(statusName);
+
+        Object paymentMethod = (o != null) ? tryGet(o, "getPaymentMethod", "getMethod", "getPaymentType") : null;
 
         Map<String, Object> out = new HashMap<>();
-        out.put("id", ib.getId());
-        out.put("bookingStatus", bookingStatus);
+        out.put("id", oi.getId());
+        out.put("orderStatus", orderStatus);
         out.put("wasPaid", wasPaid);
-        out.put("numberOfParticipants", ib.getQuantity());
+        out.put("numberOfParticipants", oi.getQuantity());
         out.put("totalPrice", totalPrice);
         out.put("paymentMethod", paymentMethod);
-        out.put("bookingDatetime", (b != null) ? tryGet(b, "getBookingDate", "getCreatedAt") : ib.getCreatedAt());
+        out.put("orderDatetime", (o != null) ? tryGet(o, "getOrderDate", "getCreatedAt") : oi.getCreatedAt());
         out.put("currency", currency);
         out.put("item", item);
         out.put("user", user);
         return out;
     }
 
-    /** Small tile map for insights. */
-    private Map<String, Object> toInsightShape(ItemBooking ib) {
-        var u = ib.getUser();
+    private Map<String, Object> toInsightShape(OrderItem oi) {
+        var u = oi.getUser();
         String clientName = null;
         if (u != null) {
             Object uname = tryGet(u, "getUsername");
@@ -174,15 +171,18 @@ public class BookingController {
                 clientName = full.isBlank() ? null : full;
             }
         }
-        String itemName = (ib.getItem() != null)
-                ? String.valueOf(tryGet(ib.getItem(), "getName", "getItemName", "getTitle"))
+        String itemName = (oi.getItem() != null)
+                ? String.valueOf(tryGet(oi.getItem(), "getName", "getItemName", "getTitle"))
                 : null;
-        boolean wasPaid = (ib.getBooking() != null)
-                && "COMPLETED".equalsIgnoreCase(String.valueOf(tryGet(ib.getBooking(), "getStatus")));
+
+        var o = oi.getOrder();
+        Object rawStatus = (o != null) ? tryGet(o, "getStatus") : null;
+        String statusName = rawStatus != null ? String.valueOf(tryGet(rawStatus, "getName")) : null;
+        boolean wasPaid = "COMPLETED".equalsIgnoreCase(statusName);
 
         Map<String, Object> out = new HashMap<>();
-        out.put("id", ib.getId());
-        out.put("businessUserId", null); // no per-line businessUser in your model
+        out.put("id", oi.getId());
+        out.put("businessUserId", null);
         out.put("clientName", clientName);
         out.put("itemName", itemName);
         out.put("wasPaid", wasPaid);
@@ -191,125 +191,125 @@ public class BookingController {
 
     /* --------------------------------- user tickets --------------------------------- */
 
-    @GetMapping("/mybookings")
-    @Operation(summary = "List all my bookings (card model)")
-    public ResponseEntity<?> myBookings(@RequestHeader("Authorization") String auth) {
+    @GetMapping("/myorders")
+    @Operation(summary = "List all my orders (card model)")
+    public ResponseEntity<?> myOrders(@RequestHeader("Authorization") String auth) {
         Long userId = jwt.extractId(strip(auth));
-        var rows = itemBookingsRepo.findUserBookingCards(userId); // flat projection
+        var rows = orderItemRepo.findUserOrderCards(userId);
         var shaped = rows.stream().map(this::toUserCardShape).toList();
         return ResponseEntity.ok(shaped);
     }
 
-    @GetMapping("/mybookings/pending")
+    @GetMapping("/myorders/pending")
     public ResponseEntity<?> myPending(@RequestHeader("Authorization") String auth) {
         Long userId = jwt.extractId(strip(auth));
-        var rows = itemBookingsRepo.findUserBookingCardsByStatuses(
+        var rows = orderItemRepo.findUserOrderCardsByStatuses(
                 userId, List.of("PENDING", "CANCEL_REQUESTED"));
         return ResponseEntity.ok(rows.stream().map(this::toUserCardShape).toList());
     }
 
-    @GetMapping("/mybookings/completed")
+    @GetMapping("/myorders/completed")
     public ResponseEntity<?> myCompleted(@RequestHeader("Authorization") String auth) {
         Long userId = jwt.extractId(strip(auth));
-        var rows = itemBookingsRepo.findUserBookingCardsByStatuses(userId, List.of("COMPLETED"));
+        var rows = orderItemRepo.findUserOrderCardsByStatuses(userId, List.of("COMPLETED"));
         return ResponseEntity.ok(rows.stream().map(this::toUserCardShape).toList());
     }
 
-    @GetMapping("/mybookings/canceled")
+    @GetMapping("/myorders/canceled")
     public ResponseEntity<?> myCanceled(@RequestHeader("Authorization") String auth) {
         Long userId = jwt.extractId(strip(auth));
-        var rows = itemBookingsRepo.findUserBookingCardsByStatuses(userId, List.of("CANCELED"));
+        var rows = orderItemRepo.findUserOrderCardsByStatuses(userId, List.of("CANCELED"));
         return ResponseEntity.ok(rows.stream().map(this::toUserCardShape).toList());
     }
 
     /* ----------------------------------- actions ------------------------------------ */
 
-    @PutMapping("/cancel/{bookingId}")
+    @PutMapping("/cancel/{orderItemId}")
     public ResponseEntity<?> cancel(@RequestHeader("Authorization") String auth,
-                                    @PathVariable Long bookingId) {
+                                    @PathVariable Long orderItemId) {
         Long actorId = jwt.extractId(strip(auth));
-        bookingService.cancelBooking(bookingId, actorId);
+        orderService.cancelBooking(orderItemId, actorId);
         return ResponseEntity.ok().build();
     }
 
-    @PutMapping("/pending/{bookingId}")
+    @PutMapping("/pending/{orderItemId}")
     public ResponseEntity<?> resetToPending(@RequestHeader("Authorization") String auth,
-                                            @PathVariable Long bookingId) {
+                                            @PathVariable Long orderItemId) {
         Long actorId = jwt.extractId(strip(auth));
-        bookingService.resetToPending(bookingId, actorId);
+        orderService.resetToPending(orderItemId, actorId);
         return ResponseEntity.ok().build();
     }
 
-    @DeleteMapping("/delete/{bookingId}")
+    @DeleteMapping("/delete/{orderItemId}")
     public ResponseEntity<?> delete(@RequestHeader("Authorization") String auth,
-                                    @PathVariable Long bookingId) {
+                                    @PathVariable Long orderItemId) {
         Long actorId = jwt.extractId(strip(auth));
-        bookingService.deleteBooking(bookingId, actorId);
+        orderService.deleteBooking(orderItemId, actorId);
         return ResponseEntity.noContent().build();
     }
 
-    @PutMapping("/refund/{bookingId}")
+    @PutMapping("/refund/{orderItemId}")
     public ResponseEntity<?> refund(@RequestHeader("Authorization") String auth,
-                                    @PathVariable Long bookingId) {
+                                    @PathVariable Long orderItemId) {
         Long actorId = jwt.extractId(strip(auth));
-        bookingService.refundIfEligible(bookingId, actorId);
+        orderService.refundIfEligible(orderItemId, actorId);
         return ResponseEntity.ok().build();
     }
 
-    @PutMapping("/cancel/request/{bookingId}")
+    @PutMapping("/cancel/request/{orderItemId}")
     public ResponseEntity<?> requestCancel(@RequestHeader("Authorization") String auth,
-                                           @PathVariable Long bookingId) {
+                                           @PathVariable Long orderItemId) {
         Long userId = jwt.extractId(strip(auth));
-        bookingService.requestCancel(bookingId, userId);
+        orderService.requestCancel(orderItemId, userId);
         return ResponseEntity.ok().build();
     }
 
-    @PutMapping("/cancel/approve/{bookingId}")
+    @PutMapping("/cancel/approve/{orderItemId}")
     public ResponseEntity<?> approveCancel(@RequestHeader("Authorization") String auth,
-                                           @PathVariable Long bookingId) {
+                                           @PathVariable Long orderItemId) {
         Long businessId = jwt.extractBusinessId(strip(auth));
-        bookingService.approveCancel(bookingId, businessId);
+        orderService.approveCancel(orderItemId, businessId);
         return ResponseEntity.ok().build();
     }
 
-    @PutMapping("/cancel/reject/{bookingId}")
+    @PutMapping("/cancel/reject/{orderItemId}")
     public ResponseEntity<?> rejectCancel(@RequestHeader("Authorization") String auth,
-                                          @PathVariable Long bookingId) {
+                                          @PathVariable Long orderItemId) {
         Long businessId = jwt.extractBusinessId(strip(auth));
-        bookingService.rejectCancel(bookingId, businessId);
+        orderService.rejectCancel(orderItemId, businessId);
         return ResponseEntity.ok().build();
     }
 
-    @PutMapping("/cancel/mark-refunded/{bookingId}")
+    @PutMapping("/cancel/mark-refunded/{orderItemId}")
     public ResponseEntity<?> markRefunded(@RequestHeader("Authorization") String auth,
-                                          @PathVariable Long bookingId) {
+                                          @PathVariable Long orderItemId) {
         Long businessId = jwt.extractBusinessId(strip(auth));
-        bookingService.markRefunded(bookingId, businessId);
+        orderService.markRefunded(orderItemId, businessId);
         return ResponseEntity.ok().build();
     }
 
-    @PutMapping("/mark-paid/{bookingId}")
+    @PutMapping("/mark-paid/{orderItemId}")
     public ResponseEntity<?> markPaid(@RequestHeader("Authorization") String auth,
-                                      @PathVariable Long bookingId) {
+                                      @PathVariable Long orderItemId) {
         Long businessId = jwt.extractBusinessId(strip(auth));
-        bookingService.markPaid(bookingId, businessId);
+        orderService.markPaid(orderItemId, businessId);
         return ResponseEntity.ok().build();
     }
 
     /* ------------------------------- business views --------------------------------- */
 
-    @GetMapping("/mybusinessbookings")
-    public ResponseEntity<?> myBusinessBookings(@RequestHeader("Authorization") String auth) {
+    @GetMapping("/mybusinessorders")
+    public ResponseEntity<?> myBusinessOrders(@RequestHeader("Authorization") String auth) {
         Long businessId = jwt.extractBusinessId(strip(auth));
-        var list = itemBookingsRepo.findRichByBusinessId(businessId)
-                .stream().map(this::toBusinessBookingShape).toList();
+        var list = orderItemRepo.findRichByBusinessId(businessId)
+                .stream().map(this::toBusinessOrderShape).toList();
         return ResponseEntity.ok(list);
     }
 
-    @GetMapping("/insights/bookings")
+    @GetMapping("/insights/orders")
     public ResponseEntity<?> insights(@RequestHeader("Authorization") String auth) {
         Long businessId = jwt.extractBusinessId(strip(auth));
-        var list = itemBookingsRepo.findRichByBusinessId(businessId)
+        var list = orderItemRepo.findRichByBusinessId(businessId)
                 .stream().map(this::toInsightShape).toList();
         return ResponseEntity.ok(list);
     }
@@ -327,23 +327,20 @@ public class BookingController {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("error", ex.getMessage()));
     }
-    
-    
-    @PutMapping("/booking/reject/{bookingId}")
-    public ResponseEntity<?> rejectBooking(@RequestHeader("Authorization") String auth,
-                                           @PathVariable Long bookingId) {
+
+    @PutMapping("/order/reject/{orderItemId}")
+    public ResponseEntity<?> rejectOrder(@RequestHeader("Authorization") String auth,
+                                         @PathVariable Long orderItemId) {
         Long businessId = jwt.extractBusinessId(strip(auth));
-        bookingService.rejectBooking(bookingId, businessId);
+        orderService.rejectBooking(orderItemId, businessId);
         return ResponseEntity.ok().build();
     }
 
-    @PutMapping("/booking/unreject/{bookingId}")
-    public ResponseEntity<?> unrejectBooking(@RequestHeader("Authorization") String auth,
-                                             @PathVariable Long bookingId) {
+    @PutMapping("/order/unreject/{orderItemId}")
+    public ResponseEntity<?> unrejectOrder(@RequestHeader("Authorization") String auth,
+                                           @PathVariable Long orderItemId) {
         Long businessId = jwt.extractBusinessId(strip(auth));
-        bookingService.unrejectBooking(bookingId, businessId);
+        orderService.unrejectBooking(orderItemId, businessId);
         return ResponseEntity.ok().build();
     }
-
-
 }

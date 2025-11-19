@@ -1,24 +1,25 @@
-package com.build4all.booking.domain;
+package com.build4all.order.domain;
 
 import jakarta.persistence.*;
 
 @Entity
-@Table(name = "booking_status")
-public class BookingStatus {
+@Table(name = "order_status")
+public class OrderStatus {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(unique = true, nullable = false, length = 32)
-    private String name; // e.g. "PENDING", "APPROVED", "REJECTED"
+    private String name; // e.g. "PENDING", "COMPLETED", "CANCELED", ...
 
-    // --- Constructors
-    public BookingStatus() {}
-    public BookingStatus(String name) { this.name = name; }
+    public OrderStatus() {}
 
-    public BookingStatus(Long id, String name)
-    {
+    public OrderStatus(String name) {
+        this.name = name;
+    }
+
+    public OrderStatus(Long id, String name) {
         this.id = id;
         this.name = name;
     }

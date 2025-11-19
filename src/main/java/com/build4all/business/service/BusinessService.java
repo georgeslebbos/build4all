@@ -4,7 +4,7 @@ import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.admin.repository.AdminUsersRepository;
-import com.build4all.booking.repository.ItemBookingsRepository;
+import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.business.domain.*;
 import com.build4all.business.dto.LowRatedBusinessDTO;
 import com.build4all.business.repository.*;
@@ -34,7 +34,7 @@ public class BusinessService {
     @Autowired private BusinessesRepository businessRepository;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private ItemRepository itemRepository;
-    @Autowired private ItemBookingsRepository itemBookingRepository;
+    @Autowired private OrderItemRepository OrderItemRepository;
     @Autowired private ReviewRepository reviewRepository;
     @Autowired private AdminUsersRepository adminUsersRepository;
     @Autowired private PendingBusinessRepository pendingBusinessRepository;
@@ -158,7 +158,7 @@ public class BusinessService {
         List<Item> items = itemRepository.findByBusinessId(businessId);
         for (Item item : items) {
             Long itemId = item.getId();
-            itemBookingRepository.deleteByItem_Id(itemId);
+            OrderItemRepository.deleteByItem_Id(itemId);
             reviewRepository.deleteByItem_Id(itemId);
             itemRepository.deleteById(itemId);
         }

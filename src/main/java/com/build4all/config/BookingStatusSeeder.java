@@ -1,7 +1,7 @@
 package com.build4all.config;
 
-import com.build4all.booking.domain.BookingStatus;
-import com.build4all.booking.repository.BookingStatusRepository; // keep if your repo is named *State*
+import com.build4all.order.domain.OrderStatus;
+import com.build4all.order.repository.OrderStatusRepository; // keep if your repo is named *State*
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,7 +12,7 @@ import java.util.List;
 public class BookingStatusSeeder {
 
     @Bean
-    public CommandLineRunner seedBookingStatuses(BookingStatusRepository repo) {
+    public CommandLineRunner seedBookingStatuses(OrderStatusRepository repo) {
         return args -> {
             System.out.println("✅ BookingStatus seeder running...");
 
@@ -23,7 +23,7 @@ public class BookingStatusSeeder {
 
             for (String n : names) {
                 if (repo.findByNameIgnoreCase(n).isEmpty()) {
-                    repo.save(new BookingStatus(n));
+                    repo.save(new OrderStatus(n));
                     System.out.println("   • inserted BookingStatus: " + n);
                 }
             }

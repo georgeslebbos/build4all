@@ -1,6 +1,6 @@
-package com.build4all.booking.dto;
+package com.build4all.order.dto;
 
-public class BookingDTO {
+public class OrderDTO {
     private Long id;
     private String itemName;
     private String userEmail;
@@ -8,7 +8,8 @@ public class BookingDTO {
     private double totalPrice;
     private String currencySymbol;
 
-    public BookingDTO(Long id, String itemName, String userEmail, int participants, double totalPrice, String currencySymbol) {
+    public OrderDTO(Long id, String itemName, String userEmail,
+                    int participants, double totalPrice, String currencySymbol) {
         this.id = id;
         this.itemName = itemName;
         this.userEmail = userEmail;
@@ -26,7 +27,7 @@ public class BookingDTO {
 
     @Override
     public String toString() {
-        return "BookingDTO{" +
+        return "OrderDTO{" +
                 "id=" + id +
                 ", itemName='" + itemName + '\'' +
                 ", userEmail='" + userEmail + '\'' +

@@ -1,11 +1,12 @@
 package com.build4all.features.activity.service;
 
+import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.business.domain.Businesses;
-import com.build4all.booking.domain.ItemBooking;
+import com.build4all.order.domain.OrderItem;
 import com.build4all.catalog.domain.ItemType;
 import com.build4all.features.activity.domain.Activity;
 import com.build4all.business.repository.BusinessesRepository;
-import com.build4all.booking.repository.ItemBookingsRepository;
+import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.catalog.repository.ItemTypeRepository;
 import com.build4all.features.activity.repository.ActivitiesRepository;
 import jakarta.transaction.Transactional;
@@ -28,18 +29,18 @@ public class ActivityService {
     private final ActivitiesRepository activityRepository;
     private final ItemTypeRepository itemTypeRepository;
     private final BusinessesRepository businessesRepository;
-    private final ItemBookingsRepository bookingsRepository;
+    private final OrderItemRepository OrderItemRepository;
 
     private final Path uploadRoot = Paths.get("uploads");
 
     public ActivityService(ActivitiesRepository activityRepository,
                            ItemTypeRepository itemTypeRepository,
                            BusinessesRepository businessesRepository,
-                           ItemBookingsRepository bookingsRepository) {
+                           OrderItemRepository OrderItemRepository) {
         this.activityRepository = activityRepository;
         this.itemTypeRepository = itemTypeRepository;
         this.businessesRepository = businessesRepository;
-        this.bookingsRepository = bookingsRepository;
+        this.OrderItemRepository = OrderItemRepository;
         try {
             if (!Files.exists(uploadRoot)) Files.createDirectories(uploadRoot);
         } catch (IOException ignored) {}
@@ -61,8 +62,14 @@ public class ActivityService {
 
         ItemType type = itemTypeRepository.findById(itemTypeId)
                 .orElseThrow(() -> new IllegalArgumentException("Invalid itemTypeId"));
+
         Businesses business = businessesRepository.findById(businessId)
                 .orElseThrow(() -> new IllegalArgumentException("Invalid businessId"));
+
+        // ⭐ IMPORTANT — GET AUP (owner project)
+        AdminUserProject aup = business.getOwnerProjectLink();
+        if (aup == null)
+            throw new IllegalStateException("Business not linked to any Owner Project");
 
         Activity a = new Activity();
         a.setItemName(name);
@@ -71,6 +78,9 @@ public class ActivityService {
         a.setPrice(price);
         a.setStatus(StringUtils.hasText(status) ? status : "Upcoming");
         a.setBusiness(business);
+
+        // ⭐ SET OWNER PROJECT
+        a.setOwnerProject(aup);
 
         // activity-specific
         a.setLocation(location);
@@ -160,7 +170,8 @@ public class ActivityService {
                 .orElseThrow(() -> new IllegalArgumentException("Item not found"));
 
         List<String> active = Arrays.asList("Pending", "Completed", "Paid", "Confirmed");
-        int alreadyBooked = bookingsRepository.sumQuantityByItemIdAndBookingStatuses(itemId, active);
+        int alreadyBooked = OrderItemRepository.sumQuantityByItemIdAndStatusNames(itemId, active);
+
         int capacityLeft  = Math.max(0, a.getMaxParticipants() - alreadyBooked);
 
         return requestedParticipants <= capacityLeft;
@@ -174,7 +185,7 @@ public class ActivityService {
      * Cash booking creation is not implemented here to avoid a hard dependency on an ItemBookingService.
      * The controller already catches UnsupportedOperationException and returns 501.
      */
-    public ItemBooking createCashBookingByBusiness(Long itemId, Long businessUserId, int participants, boolean wasPaid) {
+    public OrderItem createCashBookingByBusiness(Long itemId, Long businessUserId, int participants, boolean wasPaid) {
         throw new UnsupportedOperationException("Cash booking flow is not implemented in ActivityService");
     }
 

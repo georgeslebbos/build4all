@@ -1,7 +1,7 @@
 package com.build4all.user.domain;
 
 import com.build4all.admin.domain.AdminUserProject;
-import com.build4all.booking.domain.ItemBooking;
+import com.build4all.order.domain.OrderItem;
 import com.build4all.notifications.domain.Notifications;
 import com.build4all.review.domain.Review;
 import com.build4all.social.domain.*;
@@ -68,7 +68,7 @@ public class Users {
     /* ---------- relations (unchanged) ---------- */
     @JsonIgnore
     @OneToMany(mappedBy = "user", cascade = CascadeType.REMOVE, orphanRemoval = true)
-    private List<ItemBooking> itemBookings;
+    private List<OrderItem> orderItems;
 
     @JsonIgnore
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
@@ -167,8 +167,8 @@ public class Users {
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 
-    public List<ItemBooking> getItemBookings() { return itemBookings; }
-    public void setItemBookings(List<ItemBooking> itemBookings) { this.itemBookings = itemBookings; }
+    public List<OrderItem> getItemBookings() { return orderItems; }
+    public void setItemBookings(List<OrderItem> orderItems) { this.orderItems = orderItems; }
 
     public List<Friendship> getSentFriendRequests() { return sentFriendRequests; }
     public void setSentFriendRequests(List<Friendship> sentFriendRequests) { this.sentFriendRequests = sentFriendRequests; }

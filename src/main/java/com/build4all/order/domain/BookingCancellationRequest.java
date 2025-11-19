@@ -1,4 +1,4 @@
-package com.build4all.booking.domain;
+package com.build4all.order.domain;
 
 import com.build4all.business.domain.BusinessUser;
 import com.build4all.user.domain.Users;
@@ -28,7 +28,7 @@ public class BookingCancellationRequest {
   // Per-line (ItemBooking) cancellation:
   @ManyToOne(optional = false, fetch = FetchType.LAZY)
   @JoinColumn(name = "booking_id", nullable = false)
-  private ItemBooking booking;
+  private OrderItem booking;
 
   @ManyToOne(optional = false, fetch = FetchType.LAZY)
   @JoinColumn(name = "requested_by_user_id", nullable = false)
@@ -46,7 +46,7 @@ public class BookingCancellationRequest {
 
   @ManyToOne(optional = false, fetch = FetchType.LAZY)
   @JoinColumn(name = "state_id", nullable = false)
-  private BookingStatus state;
+  private OrderStatus state;
 
   @Column(name = "created_at", nullable = false, updatable = false)
   private LocalDateTime createdAt;
@@ -66,8 +66,8 @@ public class BookingCancellationRequest {
   public Long getId() { return id; }
   public void setId(Long id) { this.id = id; }
 
-  public ItemBooking getBooking() { return booking; }
-  public void setBooking(ItemBooking booking) { this.booking = booking; }
+  public OrderItem getBooking() { return booking; }
+  public void setBooking(OrderItem booking) { this.booking = booking; }
 
   public Users getRequestedBy() { return requestedBy; }
   public void setRequestedBy(Users requestedBy) { this.requestedBy = requestedBy; }
@@ -81,8 +81,8 @@ public class BookingCancellationRequest {
   public BusinessUser getDecidedBy() { return decidedBy; }
   public void setDecidedBy(BusinessUser decidedBy) { this.decidedBy = decidedBy; }
 
-  public BookingStatus getState() { return state; }
-  public void setState(BookingStatus state) { this.state = state; }
+  public OrderStatus getState() { return state; }
+  public void setState(OrderStatus state) { this.state = state; }
 
   public LocalDateTime getCreatedAt() { return createdAt; }
   public LocalDateTime getDecidedAt() { return decidedAt; }

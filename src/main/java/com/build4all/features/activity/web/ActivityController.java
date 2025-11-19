@@ -3,12 +3,12 @@ package com.build4all.features.activity.web;
 import com.build4all.features.activity.dto.ActivityDetailsDTO;
 import com.build4all.business.domain.BusinessUser;
 import com.build4all.business.domain.Businesses;
-import com.build4all.booking.domain.ItemBooking;
+import com.build4all.order.domain.OrderItem;
 import com.build4all.user.domain.Users;
 import com.build4all.features.activity.domain.Activity;
 import com.build4all.security.JwtUtil;
 import com.build4all.business.service.BusinessUserService;
-import com.build4all.booking.service.ItemBookingService;
+import com.build4all.order.service.OrderService;
 import com.build4all.payment.service.StripeService;
 import com.build4all.user.service.UserService;
 import com.build4all.features.activity.service.ActivityService;
@@ -30,14 +30,14 @@ import java.util.*;
 public class ActivityController {
 
     private final ActivityService activityService;
-    private final ItemBookingService bookingService;
+    private final OrderService bookingService;
     private final UserService userService;
     private final BusinessUserService businessUserService;
     private final StripeService stripeService;
     private final JwtUtil jwtUtil;
 
     public ActivityController(ActivityService activityService,
-                              ItemBookingService bookingService,
+                              OrderService bookingService,
                               UserService userService,
                               BusinessUserService businessUserService,
                               StripeService stripeService,
@@ -408,7 +408,7 @@ public class ActivityController {
                 currencyId = Long.parseLong(cid.toString());
             }
 
-            ItemBooking booking = bookingService.createBookItem(user.getId(), itemId, participants, stripePaymentId, currencyId);
+            OrderItem booking = bookingService.createBookItem(user.getId(), itemId, participants, stripePaymentId, currencyId);
             return ResponseEntity.ok(Map.of("message", "Booking confirmed", "bookingId", booking.getId()));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
@@ -427,7 +427,7 @@ public class ActivityController {
                 return ResponseEntity.status(403).body("Unauthorized: Client does not belong to your business");
             }
 
-            ItemBooking booking = activityService.createCashBookingByBusiness(
+            OrderItem booking = activityService.createCashBookingByBusiness(
                     dto.getItemId(), dto.getBusinessUserId(), dto.getParticipants(), dto.isWasPaid()
             );
             return ResponseEntity.ok(booking);

@@ -2,7 +2,7 @@ package com.build4all.admin.service;
 
 import com.build4all.user.repository.UsersRepository;
 import com.build4all.catalog.repository.ItemRepository;
-import com.build4all.booking.repository.ItemBookingsRepository;
+import com.build4all.order.repository.OrderItemRepository;
 
 import com.build4all.review.repository.ReviewRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,7 +21,7 @@ public class AdminStatsService {
     @Autowired
     private ItemRepository itemsRepository;
     @Autowired
-    private ItemBookingsRepository bookingsRepository;
+    private OrderItemRepository OrderItemRepository;
 
 
     @Autowired(required = false)
@@ -37,7 +37,7 @@ public class AdminStatsService {
         Map<String, Long> stats = new HashMap<>();
         stats.put("users", usersRepository.countByCreatedAtAfter(fromDate));
         stats.put("items", itemsRepository.countByCreatedAtAfter(fromDate)); 
-        stats.put("bookings", bookingsRepository.countByBookingDatetimeAfter(fromDate));
+        stats.put("bookings", OrderItemRepository.countByOrderDatetimeAfter(fromDate));
 
         if (reviewRepository != null) {
             stats.put("feedback", reviewRepository.countByCreatedAtAfter(fromDate));

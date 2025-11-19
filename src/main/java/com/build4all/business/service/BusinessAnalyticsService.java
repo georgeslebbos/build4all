@@ -1,7 +1,7 @@
 package com.build4all.business.service;
 
 import com.build4all.business.dto.BusinessAnalytics;
-import com.build4all.booking.repository.ItemBookingsRepository;
+import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.catalog.repository.ItemRepository;
 import com.build4all.user.repository.UsersRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,7 +15,7 @@ import java.util.List;
 public class BusinessAnalyticsService {
 
     @Autowired
-    private ItemBookingsRepository bookingRepo;
+    private OrderItemRepository orderItemRepositoryRepo;
 
     @Autowired
     private ItemRepository itemRepo;
@@ -24,7 +24,7 @@ public class BusinessAnalyticsService {
     private UsersRepository customerRepo;
 
     public BusinessAnalytics getAnalyticsForBusiness(Long businessId) {
-        BigDecimal revenue = bookingRepo.sumRevenueByBusinessId(businessId);
+        BigDecimal revenue = orderItemRepositoryRepo.sumRevenueByBusinessId(businessId);
         double totalRevenue = revenue != null ? revenue.doubleValue() : 0.0;
 
         String topItem = itemRepo.findTopItemNameByBusinessId(businessId);
@@ -53,8 +53,8 @@ public class BusinessAnalyticsService {
         int year = now.getYear();
         int previousYear = currentMonth == 1 ? year - 1 : year;
 
-        long currentBookings = bookingRepo.countBookingsByMonthAndYear(businessId, currentMonth, year);
-        long previousBookings = bookingRepo.countBookingsByMonthAndYear(businessId, previousMonth, previousYear);
+        long currentBookings = orderItemRepositoryRepo.countOrdersByMonthAndYear(businessId, currentMonth, year);
+        long previousBookings = orderItemRepositoryRepo.countOrdersByMonthAndYear(businessId, previousMonth, previousYear);
 
         if (previousBookings == 0) return currentBookings > 0 ? 100.0 : 0.0;
 
@@ -62,7 +62,7 @@ public class BusinessAnalyticsService {
     }
 
     private String findPeakHours(Long businessId) {
-        List<Object[]> result = bookingRepo.findPeakBookingHours(businessId);
+        List<Object[]> result = orderItemRepositoryRepo.findPeakOrderHours(businessId);
         if (result == null || result.isEmpty()) return "No data";
 
         Number hourValue = (Number) result.get(0)[0];
@@ -72,10 +72,10 @@ public class BusinessAnalyticsService {
     }
 
     private double calculateCustomerRetention(Long businessId) {
-        Long total = bookingRepo.countDistinctCustomers(businessId);
+        Long total = orderItemRepositoryRepo.countDistinctCustomers(businessId);
         if (total == 0) return 0.0;
 
-        Long returning = bookingRepo.countReturningCustomers(businessId);
+        Long returning = orderItemRepositoryRepo.countReturningCustomers(businessId);
         return (returning / (double) total) * 100.0;
     }
 }

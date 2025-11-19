@@ -6,7 +6,7 @@ import com.build4all.review.domain.Review;
 import com.build4all.review.repository.ReviewRepository;
 import com.build4all.user.domain.Users;
 import com.build4all.user.repository.UsersRepository;
-import com.build4all.booking.repository.ItemBookingsRepository;
+import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.catalog.domain.Item;
 import com.build4all.catalog.repository.ItemRepository;
 import com.build4all.review.dto.ReviewDTO;
@@ -24,7 +24,7 @@ public class ReviewService {
     @Autowired private ReviewRepository reviewRepository;
     @Autowired private ItemRepository itemRepository;
     @Autowired private UsersRepository userRepository;
-    @Autowired private ItemBookingsRepository itemBookingsRepository;
+    @Autowired private OrderItemRepository OrderItemRepository;
     @Autowired private NotificationsService notificationsService;
     @Autowired private AdminUsersRepository adminUsersRepository;
     @Autowired private JwtUtil jwtUtil;
@@ -53,9 +53,9 @@ public class ReviewService {
         Item item = itemRepository.findByIdWithBusiness(dto.getItemId())
                 .orElseThrow(() -> new RuntimeException("Item not found"));
 
-        boolean hasCompletedBooking = itemBookingsRepository
-                .existsByItemIdAndUserIdAndBookingStatus(item.getId(), user.getId(), "Completed");
-
+        boolean hasCompletedBooking = OrderItemRepository
+                .existsByItemIdAndUserIdAndOrderStatusName(item.getId(), user.getId(), "Completed");
+       
         boolean alreadyReviewed = reviewRepository
                 .existsByItemIdAndCustomerId(item.getId(), user.getId());
 
@@ -93,7 +93,7 @@ public class ReviewService {
         if (user == null) user = userRepository.findByPhoneNumber(identifier);
         if (user == null) throw new RuntimeException("User not found");
 
-        return itemBookingsRepository.existsByItemIdAndUserIdAndBookingStatus(itemId, user.getId(), "Completed");
+        return OrderItemRepository.existsByItemIdAndUserIdAndOrderStatusName(itemId, user.getId(), "Completed");
     }
 
     public List<Long> getCompletedItemIdsForUser(String token) {
@@ -101,7 +101,7 @@ public class ReviewService {
         String email = jwtUtil.extractUsername(jwt);
         Users user = userRepository.findByEmail(email);
         if (user == null) throw new RuntimeException("User not found");
-        return itemBookingsRepository.findCompletedItemIdsByUser(user.getId());
+        return OrderItemRepository.findCompletedItemIdsByUser(user.getId());
     }
 
     public boolean shouldShowReviewModal(Long itemId, String token) {
@@ -111,8 +111,8 @@ public class ReviewService {
         if (user == null) user = userRepository.findByPhoneNumber(identifier);
         if (user == null) throw new RuntimeException("User not found");
 
-        boolean completed = itemBookingsRepository
-                .existsByItemIdAndUserIdAndBookingStatus(itemId, user.getId(), "Completed");
+        boolean completed = OrderItemRepository
+                .existsByItemIdAndUserIdAndOrderStatusName(itemId, user.getId(), "Completed");
         boolean alreadyReviewed = reviewRepository.existsByItemIdAndCustomerId(itemId, user.getId());
 
         return completed && !alreadyReviewed;
@@ -125,7 +125,7 @@ public class ReviewService {
         if (user == null) user = userRepository.findByPhoneNumber(identifier);
         if (user == null) throw new RuntimeException("User not found");
 
-        List<Long> completedItemIds = itemBookingsRepository.findCompletedItemIdsByUser(user.getId());
+        List<Long> completedItemIds = OrderItemRepository.findCompletedItemIdsByUser(user.getId());
         for (Long itemId : completedItemIds) {
             boolean alreadyReviewed = reviewRepository.existsByItemIdAndCustomerId(itemId, user.getId());
             if (!alreadyReviewed) return itemId;

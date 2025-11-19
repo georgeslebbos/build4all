@@ -88,7 +88,7 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
 
     @Query("""
            SELECT i, COUNT(ib.id) AS bookingCount
-           FROM com.build4all.booking.domain.ItemBooking ib
+           FROM com.build4all.order.domain.OrderItem ib
            JOIN ib.item i
            WHERE i.business.status.name = 'ACTIVE'
              AND i.business.isPublicProfile = true

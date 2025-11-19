@@ -9,7 +9,7 @@ import com.build4all.admin.repository.AdminUsersRepository;
 import com.build4all.role.repository.RoleRepository;
 import com.build4all.user.domain.Users;
 import com.build4all.user.repository.UsersRepository;
-import com.build4all.booking.repository.ItemBookingsRepository;
+import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.user.dto.UserSummaryDTO;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,7 +32,7 @@ public class AdminUserService {
     // REMOVED: AdminUserBusinessRepository
 
     @Autowired
-    private ItemBookingsRepository itemBookingsRepository;
+    private OrderItemRepository OrderItemRepository;
 
     @Autowired
     private ReviewRepository reviewRepository;
@@ -152,7 +152,7 @@ public class AdminUserService {
     @Transactional
     public void deleteUserAndDependencies(Long userId) {
         reviewRepository.deleteByCustomer_Id(userId);
-        itemBookingsRepository.deleteByUser_Id(userId);
+        OrderItemRepository.deleteByUser_Id(userId);
         usersRepository.deleteById(userId);
     }
 

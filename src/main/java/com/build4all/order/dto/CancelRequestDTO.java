@@ -1,4 +1,4 @@
-package com.build4all.booking.dto;
+package com.build4all.order.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
