@@ -10,7 +10,6 @@ import java.time.LocalDateTime;
 @Table(
     name = "admin_user_projects",
     uniqueConstraints = {
-        // ✅ allow multiple apps per (owner, project) distinguished by slug
         @UniqueConstraint(name = "uk_aup_owner_project_slug", columnNames = {"admin_id", "project_id", "slug"})
     },
     indexes = {
@@ -48,29 +47,31 @@ public class AdminUserProject {
     @Column(name = "status", length = 16)
     private String status = "ACTIVE"; // ACTIVE | SUSPENDED | EXPIRED | DELETED
 
-    @Column(name = "slug", length = 128)  // unique per owner+project
+    @Column(name = "slug", length = 128)
     private String slug;
 
-    @Column(name = "app_name", length = 128) // display name; can be duplicated
+    @Column(name = "app_name", length = 128)
     private String appName;
-    
 
     @Column(name = "logo_url", columnDefinition = "TEXT")
     private String logoUrl;
 
-  
     @Column(name = "apk_url", columnDefinition = "TEXT")
     private String apkUrl;
-    
-    @Column(name = "ipa_url", columnDefinition = "TEXT") // NEW
+
+    @Column(name = "ipa_url", columnDefinition = "TEXT")
     private String ipaUrl;
-    
+
     @Column(name = "bundle_url", columnDefinition = "TEXT")
     private String bundleUrl;
 
-    /** Theme chosen for this owner+project app (nullable => fallback to default) */
+    /** Theme chosen for this app (nullable => fallback) */
     @Column(name = "theme_id")
     private Long themeId;
+
+    /** Full JSON palette used for this app (build-time theme) */
+    @Column(name = "theme_json", columnDefinition = "TEXT")
+    private String themeJson;
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
@@ -111,47 +112,67 @@ public class AdminUserProject {
     }
 
     @PrePersist
-    protected void onCreate() { this.createdAt = LocalDateTime.now(); this.updatedAt = this.createdAt; }
+    protected void onCreate() {
+        this.createdAt = LocalDateTime.now();
+        this.updatedAt = this.createdAt;
+    }
 
     @PreUpdate
-    protected void onUpdate() { this.updatedAt = LocalDateTime.now(); }
+    protected void onUpdate() {
+        this.updatedAt = LocalDateTime.now();
+    }
 
     // getters/setters
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+
     public AdminUser getAdmin() { return admin; }
     public void setAdmin(AdminUser admin) { this.admin = admin; }
+
     public Project getProject() { return project; }
     public void setProject(Project project) { this.project = project; }
+
     public String getLicenseId() { return licenseId; }
     public void setLicenseId(String licenseId) { this.licenseId = licenseId; }
+
     public LocalDate getValidFrom() { return validFrom; }
     public void setValidFrom(LocalDate validFrom) { this.validFrom = validFrom; }
+
     public LocalDate getEndTo() { return endTo; }
     public void setEndTo(LocalDate endTo) { this.endTo = endTo; }
+
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+
     public String getSlug() { return slug; }
     public void setSlug(String slug) { this.slug = slug; }
+
     public String getAppName() { return appName; }
     public void setAppName(String appName) { this.appName = appName; }
+
     public String getApkUrl() { return apkUrl; }
     public void setApkUrl(String apkUrl) { this.apkUrl = apkUrl; }
-    public Long getThemeId() { return themeId; }
-    public void setThemeId(Long themeId) { this.themeId = themeId; }
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt;}
-    public String getLogoUrl() { return logoUrl; }
-    public void setLogoUrl(String logoUrl) { this.logoUrl = logoUrl; }
-  
-    public String getIpaUrl() { return ipaUrl; }          // NEW
-    public void setIpaUrl(String ipaUrl) { this.ipaUrl = ipaUrl; } // NEW
+
+    public String getIpaUrl() { return ipaUrl; }
+    public void setIpaUrl(String ipaUrl) { this.ipaUrl = ipaUrl; }
+
     public String getBundleUrl() { return bundleUrl; }
     public void setBundleUrl(String bundleUrl) { this.bundleUrl = bundleUrl; }
 
-    
+    public Long getThemeId() { return themeId; }
+    public void setThemeId(Long themeId) { this.themeId = themeId; }
+
+    public String getThemeJson() { return themeJson; }
+    public void setThemeJson(String themeJson) { this.themeJson = themeJson; }
+
+    public String getLogoUrl() { return logoUrl; }
+    public void setLogoUrl(String logoUrl) { this.logoUrl = logoUrl; }
+
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+
+    public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 
     @Transient public Long getAdminId() { return admin != null ? admin.getAdminId() : null; }
     @Transient public Long getProjectId() { return project != null ? project.getId() : null; }
@@ -159,6 +180,4 @@ public class AdminUserProject {
     @Transient public boolean isSuspended() { return "SUSPENDED".equalsIgnoreCase(status); }
     @Transient public boolean isExpired() { return "EXPIRED".equalsIgnoreCase(status); }
     @Transient public boolean isDeleted() { return "DELETED".equalsIgnoreCase(status); }
-
-	
 }

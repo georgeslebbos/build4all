@@ -1,4 +1,3 @@
-// src/main/java/com/build4all/app/domain/AppRequest.java
 package com.build4all.app.domain;
 
 import jakarta.persistence.*;
@@ -31,6 +30,10 @@ public class AppRequest {
     @Column(name = "theme_id")
     private Long themeId; // nullable => fallback للـ default
 
+    /** Full JSON palette coming from Flutter form */
+    @Column(name = "theme_json", columnDefinition = "TEXT")
+    private String themeJson;
+
     @Column(name = "notes")
     private String notes;
 
@@ -47,19 +50,30 @@ public class AppRequest {
     public Long getId() { return id; }
     public Long getOwnerId() { return ownerId; }
     public void setOwnerId(Long ownerId) { this.ownerId = ownerId; }
+
     public Long getProjectId() { return projectId; }
     public void setProjectId(Long projectId) { this.projectId = projectId; }
+
     public String getAppName() { return appName; }
     public void setAppName(String appName) { this.appName = appName; }
+
     public String getSlug() { return slug; }
     public void setSlug(String slug) { this.slug = slug; }
+
     public String getLogoUrl() { return logoUrl; }
     public void setLogoUrl(String logoUrl) { this.logoUrl = logoUrl; }
+
     public Long getThemeId() { return themeId; }
     public void setThemeId(Long themeId) { this.themeId = themeId; }
+
+    public String getThemeJson() { return themeJson; }
+    public void setThemeJson(String themeJson) { this.themeJson = themeJson; }
+
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
+
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+
     public LocalDateTime getCreatedAt() { return createdAt; }
 }

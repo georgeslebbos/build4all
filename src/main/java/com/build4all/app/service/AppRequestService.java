@@ -52,7 +52,9 @@ public class AppRequestService {
     /** Legacy JSON create (kept). */
     public AppRequest createRequest(Long ownerId, Long projectId,
                                     String appName, String slug,
-                                    String logoUrl, Long themeId, String notes) {
+                                    String logoUrl, Long themeId,
+                                    String themeJson,
+                                    String notes) {
         AppRequest r = new AppRequest();
         r.setOwnerId(ownerId);
         r.setProjectId(projectId);
@@ -60,6 +62,7 @@ public class AppRequestService {
         r.setSlug(slugifyOrFallback(slug, appName));
         r.setLogoUrl(logoUrl);
         r.setThemeId(themeId);
+        r.setThemeJson(themeJson);
         r.setNotes(notes);
         return appRequestRepo.save(r);
     }
@@ -68,13 +71,14 @@ public class AppRequestService {
      * Create AND auto-approve (multipart logo supported).
      * - Enforces unique slug per (owner, project)
      * - Saves logo to /uploads/owner/{owner}/{project}/{slug}/<uuid>_<stamp>.<ext>
-     * - Triggers CI with all inputs (owner/project/link/slug/name/theme/logo)
+     * - Triggers CI with all inputs (owner/project/link/slug/name/theme/logo/themeJson)
      */
     @Transactional
     public AdminUserProject createAndAutoApprove(Long ownerId, Long projectId,
                                                  String appName, String slug,
                                                  MultipartFile logoFile,
-                                                 Long themeId, String notes) throws IOException {
+                                                 Long themeId, String notes,
+                                                 String themeJson) throws IOException {
         String base = (slug != null && !slug.isBlank()) ? slugify(slug) : slugify(appName);
         String uniqueSlug = ensureUniqueSlug(ownerId, projectId, base);
 
@@ -82,7 +86,7 @@ public class AppRequestService {
         byte[] logoBytes = null;
         if (logoFile != null && !logoFile.isEmpty()) {
             logoUrl = saveOwnerAppLogoToUploads(ownerId, projectId, uniqueSlug, logoFile);
-            logoBytes = logoFile.getBytes(); // pass to CiBuildService to upload to repo
+            logoBytes = logoFile.getBytes();
         }
 
         AppRequest r = new AppRequest();
@@ -94,6 +98,7 @@ public class AppRequestService {
         r.setThemeId(themeId);
         r.setNotes(notes);
         r.setStatus("APPROVED");
+        r.setThemeJson(themeJson);
         r = appRequestRepo.save(r);
 
         return provisionAndTrigger(r, logoBytes);
@@ -158,7 +163,7 @@ public class AppRequestService {
         aupRepo.save(row);
         log.info("Saved apkUrl (owner-checked) ownerId={} linkId={} -> {}", ownerId, linkId, relUrl);
     }
-    
+
     /** Direct by PK for AAB/bundle (used by CI callback). */
     @Transactional
     public void setBundleUrlByLinkId(Long linkId, String bundleUrl) {
@@ -168,7 +173,6 @@ public class AppRequestService {
         aupRepo.save(link);
         log.info("Saved bundleUrl (no-owner-check) linkId={} -> {}", linkId, bundleUrl);
     }
-
 
     @Transactional
     public void setIpaUrlByLinkId(Long ownerId, Long linkId, String relUrl) {
@@ -250,6 +254,7 @@ public class AppRequestService {
         link.setValidFrom(now);
         link.setEndTo(end);
         link.setThemeId(chosenThemeId);
+        link.setThemeJson(req.getThemeJson()); // ✅ copy JSON to link
 
         if (link.getLicenseId() == null || link.getLicenseId().isBlank()) {
             link.setLicenseId("LIC-" + owner.getAdminId() + "-" + project.getId() + "-" + now + "-" + uniqueSlug);
@@ -270,7 +275,8 @@ public class AppRequestService {
                 uniqueSlug,
                 req.getAppName(),
                 chosenThemeId,
-                req.getLogoUrl(),   // may be relative; service will upload logoBytesOpt to repo
+                req.getLogoUrl(),    // may be relative; service will upload logoBytesOpt to repo
+                req.getThemeJson(),  // ✅ pass palette JSON to CI
                 logoBytesOpt
         );
 
@@ -340,24 +346,25 @@ public class AppRequestService {
                 .replaceAll("[^a-z0-9]+", "-")
                 .replaceAll("(^-|-$)", "");
     }
-    
+
     @Transactional
     public AdminUserProject prepareRebuildByLink(Long ownerId, Long linkId) {
         AdminUserProject link = aupRepo.findByIdAndAdmin_AdminId(linkId, ownerId)
-        	    .orElseThrow(() -> new IllegalArgumentException("Link not found for this owner"));
+                .orElseThrow(() -> new IllegalArgumentException("Link not found for this owner"));
 
         link.setStatus("IN_PRODUCTION");
-        link.setApkUrl(null); 
+        link.setApkUrl(null);
         return aupRepo.save(link);
     }
-    
+
     @Transactional(readOnly = true)
     public String enqueueBuild(Long ownerId, Long projectId, AdminUserProject link) {
         // Sanity: fallbacks from link
         final Long themeId = link.getThemeId();
         final String slug    = (link.getSlug() == null) ? "app" : link.getSlug().trim().toLowerCase();
         final String appName = (link.getAppName() == null) ? "My App" : link.getAppName().trim();
-        final String logoUrl = link.getLogoUrl(); // may be relative; CiBuildService should handle it
+        final String logoUrl = link.getLogoUrl();
+        final String themeJson = link.getThemeJson();
 
         boolean ok = ciBuildService.dispatchOwnerAndroidBuild(
                 ownerId,
@@ -367,6 +374,7 @@ public class AppRequestService {
                 appName,
                 themeId,
                 logoUrl,
+                themeJson,
                 null // no fresh bytes on rebuild; use existing URL in the CI service
         );
 
@@ -381,6 +389,4 @@ public class AppRequestService {
         // Return a simple client-visible token (not required by CI, just for UX)
         return "job-" + link.getId() + "-" + System.currentTimeMillis();
     }
-
-
 }

@@ -61,6 +61,9 @@ public class CiConfigController {
         m.put("appLogoUrl", n(link.getLogoUrl()));
         m.put("themeId", link.getThemeId());
 
+        // 🔹 NEW: expose themeJson so CI / frontend can consume it if needed
+        m.put("themeJson", n(link.getThemeJson()));
+
         // runtime values consumed by the Flutter app at build-time
         m.put("apiBaseUrl", n(apiBaseUrl));
         m.put("wsPath", n(wsPath));

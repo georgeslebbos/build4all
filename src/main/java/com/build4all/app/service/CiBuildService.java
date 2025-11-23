@@ -12,6 +12,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.Base64;
 
 @Service
 public class CiBuildService {
@@ -50,7 +51,6 @@ public class CiBuildService {
     @Value("${mobile.appRole:both}")
     private String mobileAppRole;
 
-//
     public CiBuildService(WebClient.Builder builder) {
         this.web = builder
                 .defaultHeader(HttpHeaders.ACCEPT, "application/vnd.github+json")
@@ -122,7 +122,7 @@ public class CiBuildService {
 
     /**
      * Dispatch the workflow with ≤10 top-level properties.
-     * We pass a small APP_LOGO_URL (public) and nest runtime values under RUNTIME.
+     * We pass a small APP_LOGO_URL (public), theme JSON, and nest runtime values under RUNTIME.
      */
     public boolean dispatchOwnerAndroidBuild(
             long ownerId,
@@ -132,6 +132,7 @@ public class CiBuildService {
             String appName,
             Long themeId,
             String appLogoUrl,
+            String themeJson,
             byte[] logoBytesOpt
     ) {
         if (!isConfigured()) {
@@ -161,6 +162,7 @@ public class CiBuildService {
         if (themeId != null) clientPayload.put("THEME_ID", themeId);
         clientPayload.put("RUNTIME", runtime);               // 1 property
         clientPayload.put("APP_LOGO_URL", nz(resolvedLogoUrl));
+        clientPayload.put("APP_THEME_JSON", nz(themeJson));  // ✅ palette JSON for workflow
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("event_type", "owner_app_build");

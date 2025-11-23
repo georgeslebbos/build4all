@@ -1,4 +1,3 @@
-// src/main/java/com/build4all/app/dto/CreateAppRequestDto.java
 package com.build4all.app.dto;
 
 public record CreateAppRequestDto(
@@ -7,5 +6,6 @@ public record CreateAppRequestDto(
     String slug,
     String logoUrl,
     Long themeId,
+    String themeJson,
     String notes
 ) {}
