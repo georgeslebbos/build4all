@@ -97,12 +97,14 @@ public class OwnerAppRequestController {
             @RequestParam(required = false) String secondaryColor,
             @RequestParam(required = false) String backgroundColor,
             @RequestParam(required = false) String onBackgroundColor,
-            @RequestParam(required = false) String errorColor
+            @RequestParam(required = false) String errorColor,
+            
+            @RequestParam(required = false) Long currencyId
     ) {
         try {
             MultipartFile logoFile = (file != null) ? file : logo;
 
-            // 👇 هون بنبني JSON مرّة وحدة وبنضمن الـ keys
+         
             String themeJson = ThemeJsonBuilder.buildThemeJson(
                     primaryColor,
                     secondaryColor,
@@ -119,7 +121,8 @@ public class OwnerAppRequestController {
                     logoFile,
                     themeId,
                     notes,
-                    themeJson
+                    themeJson,
+                    currencyId
             );
 
             Map<String, Object> body = new HashMap<>();
@@ -137,6 +140,7 @@ public class OwnerAppRequestController {
             body.put("logoUrl", nz(link.getLogoUrl()));
             body.put("apkUrl", nz(link.getApkUrl()));
             body.put("themeJson", themeJson);
+            body.put("currencyId",currencyId);
 
             String manifestUrlGuess =
                     "https://raw.githubusercontent.com/fatimahh0/HobbySphereFlutter/main/builds/"

@@ -2,6 +2,8 @@ package com.build4all.app.service;
 
 import com.build4all.app.domain.AppRequest;
 import com.build4all.app.repository.AppRequestRepository;
+import com.build4all.catalog.domain.Currency;
+import com.build4all.catalog.repository.CurrencyRepository;
 import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.repository.AdminUserProjectRepository;
@@ -34,19 +36,22 @@ public class AppRequestService {
     private final ProjectRepository projectRepo;
     private final ThemeRepository themeRepo;
     private final CiBuildService ciBuildService;
+    private final CurrencyRepository currencyRepo;
 
     public AppRequestService(AppRequestRepository appRequestRepo,
                              AdminUserProjectRepository aupRepo,
                              AdminUsersRepository adminRepo,
                              ProjectRepository projectRepo,
                              ThemeRepository themeRepo,
-                             CiBuildService ciBuildService) {
+                             CiBuildService ciBuildService,
+                             CurrencyRepository currencyRepo) {
         this.appRequestRepo = appRequestRepo;
         this.aupRepo = aupRepo;
         this.adminRepo = adminRepo;
         this.projectRepo = projectRepo;
         this.themeRepo = themeRepo;
         this.ciBuildService = ciBuildService;
+        this.currencyRepo = currencyRepo;
     }
 
     /** Legacy JSON create (kept). */
@@ -71,14 +76,15 @@ public class AppRequestService {
      * Create AND auto-approve (multipart logo supported).
      * - Enforces unique slug per (owner, project)
      * - Saves logo to /uploads/owner/{owner}/{project}/{slug}/<uuid>_<stamp>.<ext>
-     * - Triggers CI with all inputs (owner/project/link/slug/name/theme/logo/themeJson)
+     * - Triggers CI with all inputs (owner/project/link/slug/name/theme/logo/themeJson/currency)
      */
     @Transactional
     public AdminUserProject createAndAutoApprove(Long ownerId, Long projectId,
                                                  String appName, String slug,
                                                  MultipartFile logoFile,
                                                  Long themeId, String notes,
-                                                 String themeJson) throws IOException {
+                                                 String themeJson,
+                                                 Long currencyId) throws IOException {
         String base = (slug != null && !slug.isBlank()) ? slugify(slug) : slugify(appName);
         String uniqueSlug = ensureUniqueSlug(ownerId, projectId, base);
 
@@ -99,6 +105,7 @@ public class AppRequestService {
         r.setNotes(notes);
         r.setStatus("APPROVED");
         r.setThemeJson(themeJson);
+        r.setCurrencyId(currencyId);   // 🪙 store per-app currency
         r = appRequestRepo.save(r);
 
         return provisionAndTrigger(r, logoBytes);
@@ -113,6 +120,7 @@ public class AppRequestService {
         }
         req.setStatus("APPROVED");
         appRequestRepo.save(req);
+
         // no logo bytes here; only relative url (if any)
         return provisionAndTrigger(req, null);
     }
@@ -254,7 +262,15 @@ public class AppRequestService {
         link.setValidFrom(now);
         link.setEndTo(end);
         link.setThemeId(chosenThemeId);
-        link.setThemeJson(req.getThemeJson()); // ✅ copy JSON to link
+        link.setThemeJson(req.getThemeJson());
+
+        // 🪙 NEW: set currency per app if provided on request
+        Long currencyId = req.getCurrencyId();
+        if (currencyId != null) {
+            Currency c = currencyRepo.findById(currencyId)
+                    .orElseThrow(() -> new IllegalArgumentException("Currency not found: " + currencyId));
+            link.setCurrency(c);
+        }
 
         if (link.getLicenseId() == null || link.getLicenseId().isBlank()) {
             link.setLicenseId("LIC-" + owner.getAdminId() + "-" + project.getId() + "-" + now + "-" + uniqueSlug);
@@ -267,6 +283,7 @@ public class AppRequestService {
         link = aupRepo.save(link);
 
         String ownerProjectLinkId = String.valueOf(link.getId()); // REAL PK
+        Long currencyIdForBuild = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
 
         boolean ok = ciBuildService.dispatchOwnerAndroidBuild(
                 owner.getAdminId(),
@@ -276,8 +293,9 @@ public class AppRequestService {
                 req.getAppName(),
                 chosenThemeId,
                 req.getLogoUrl(),    // may be relative; service will upload logoBytesOpt to repo
-                req.getThemeJson(),  // ✅ pass palette JSON to CI
-                logoBytesOpt
+                req.getThemeJson(),  // palette JSON to CI
+                logoBytesOpt,
+                currencyIdForBuild   // 🪙 send to CI
         );
 
         if (!ok) {
@@ -359,12 +377,12 @@ public class AppRequestService {
 
     @Transactional(readOnly = true)
     public String enqueueBuild(Long ownerId, Long projectId, AdminUserProject link) {
-        // Sanity: fallbacks from link
         final Long themeId = link.getThemeId();
-        final String slug    = (link.getSlug() == null) ? "app" : link.getSlug().trim().toLowerCase();
+        final String slug = (link.getSlug() == null) ? "app" : link.getSlug().trim().toLowerCase();
         final String appName = (link.getAppName() == null) ? "My App" : link.getAppName().trim();
         final String logoUrl = link.getLogoUrl();
         final String themeJson = link.getThemeJson();
+        final Long currencyId = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
 
         boolean ok = ciBuildService.dispatchOwnerAndroidBuild(
                 ownerId,
@@ -375,7 +393,8 @@ public class AppRequestService {
                 themeId,
                 logoUrl,
                 themeJson,
-                null // no fresh bytes on rebuild; use existing URL in the CI service
+                null,        // no fresh bytes on rebuild; use existing URL in the CI service
+                currencyId   // 🪙 keep same currency on rebuild
         );
 
         if (!ok) {
@@ -386,7 +405,6 @@ public class AppRequestService {
                     ownerId, projectId, link.getId(), slug);
         }
 
-        // Return a simple client-visible token (not required by CI, just for UX)
         return "job-" + link.getId() + "-" + System.currentTimeMillis();
     }
 }

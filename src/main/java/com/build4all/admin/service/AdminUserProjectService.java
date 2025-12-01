@@ -6,6 +6,8 @@ import com.build4all.admin.dto.AdminAppAssignmentRequest;
 import com.build4all.admin.dto.AdminAppAssignmentResponse;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.admin.repository.AdminUsersRepository;
+import com.build4all.catalog.domain.Currency;
+import com.build4all.catalog.repository.CurrencyRepository;
 import com.build4all.project.domain.Project;
 import com.build4all.project.repository.ProjectRepository;
 import org.springframework.stereotype.Service;
@@ -29,36 +31,39 @@ public class AdminUserProjectService {
     private final AdminUsersRepository adminRepo;
     private final ProjectRepository projectRepo;
     private final AdminUserProjectRepository linkRepo;
+    private final CurrencyRepository currencyRepository;
 
     public AdminUserProjectService(AdminUsersRepository adminRepo,
                                    ProjectRepository projectRepo,
-                                   AdminUserProjectRepository linkRepo) {
+                                   AdminUserProjectRepository linkRepo,
+                                   CurrencyRepository currencyRepository) {
         this.adminRepo = adminRepo;
         this.projectRepo = projectRepo;
         this.linkRepo = linkRepo;
+        this.currencyRepository = currencyRepository;
     }
 
     /** List all apps (rows) for an owner (adminId). */
     @Transactional(readOnly = true)
     public List<AdminAppAssignmentResponse> list(Long adminId) {
         return linkRepo.findByAdmin_AdminId(adminId).stream()
-        		// AdminUserProjectService.list(...)
-        		.map(l -> new AdminAppAssignmentResponse(
-        		    l.getProject().getId(),
-        		    l.getProject().getProjectName(),
-        		    nz(l.getAppName()),
-        		    nz(l.getSlug()),
-        		    nz(l.getStatus()),
-        		    nz(l.getLicenseId()),
-        		    l.getValidFrom(),
-        		    l.getEndTo(),
-        		    l.getThemeId(),
-        		    nz(l.getApkUrl()),
-        		    nz(l.getIpaUrl()),
-        		    nz(l.getBundleUrl()), // <— NEW
-        		    nz(l.getLogoUrl())
-        		))
-
+            .map(l -> new AdminAppAssignmentResponse(
+                l.getProject().getId(),
+                l.getProject().getProjectName(),
+                nz(l.getAppName()),
+                nz(l.getSlug()),
+                nz(l.getStatus()),
+                nz(l.getLicenseId()),
+                l.getValidFrom(),
+                l.getEndTo(),
+                l.getThemeId(),
+                nz(l.getApkUrl()),
+                nz(l.getIpaUrl()),
+                nz(l.getBundleUrl()),
+                nz(l.getLogoUrl()),
+                l.getCurrency() != null ? l.getCurrency().getCode() : null,
+                l.getCurrency() != null ? l.getCurrency().getSymbol() : null
+            ))
             .toList();
     }
 
@@ -117,16 +122,23 @@ public class AdminUserProjectService {
             link.setThemeId(req.getThemeId());
         }
 
+        // 👇 NEW – set currency per app
+        if (req.getCurrencyCode() != null && !req.getCurrencyCode().isBlank()) {
+            Currency currency = currencyRepository.findByCodeIgnoreCase(req.getCurrencyCode())
+                .orElseThrow(() -> new IllegalArgumentException("Unknown currency code: " + req.getCurrencyCode()));
+            link.setCurrency(currency);
+        }
+
         if (link.getLicenseId() == null || link.getLicenseId().isBlank()) {
             link.setLicenseId("LIC-" + admin.getAdminId() + "-" + project.getId() + "-" + now + "-" + uniqueSlug);
         }
 
-        // Clear stale APK on (re)assignment (optional)
         link.setApkUrl(null);
-        link.setBundleUrl(null); 
+        link.setBundleUrl(null);
 
         linkRepo.save(link);
     }
+
 
     /** Upload & save logo, return its public URL. */
     @Transactional

@@ -17,11 +17,13 @@ public class AdminAppAssignmentResponse {
     private String ipaUrl;
     private String bundleUrl; // <— NEW
     private String logoUrl;
+    private String currencyCode;
+    private String currencySymbol;
 
     public AdminAppAssignmentResponse(
             Long projectId, String projectName, String appName, String slug, String status,
             String licenseId, LocalDate validFrom, LocalDate endTo, Long themeId,
-            String apkUrl, String ipaUrl, String bundleUrl, String logoUrl) {
+            String apkUrl, String ipaUrl, String bundleUrl, String logoUrl,String currencyCode, String currencySymbol) {
         this.projectId = projectId;
         this.projectName = projectName;
         this.appName = appName;
@@ -35,6 +37,8 @@ public class AdminAppAssignmentResponse {
         this.ipaUrl = ipaUrl;
         this.bundleUrl = bundleUrl;
         this.logoUrl = logoUrl;
+        this.currencyCode = currencyCode;
+        this.currencySymbol = currencySymbol;
     }
 
     // getters only (or add setters if you need)
@@ -51,4 +55,7 @@ public class AdminAppAssignmentResponse {
     public String getIpaUrl() { return ipaUrl; }
     public String getBundleUrl() { return bundleUrl; }
     public String getLogoUrl() { return logoUrl; }
+    
+    public String getCurrencyCode() { return currencyCode; }
+    public String getCurrencySymbol() { return currencySymbol; }
 }

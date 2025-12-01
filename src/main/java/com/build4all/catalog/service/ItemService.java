@@ -1,17 +1,17 @@
 package com.build4all.catalog.service;
 
-import com.build4all.catalog.domain.GenericItem;
-import com.build4all.catalog.dto.ItemPriceResponse;
-import com.build4all.settings.domain.AppSettings;
+import com.build4all.admin.domain.AdminUserProject;
+import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.business.domain.Businesses;
+import com.build4all.business.service.BusinessService;
 import com.build4all.catalog.domain.Currency;
+import com.build4all.catalog.domain.GenericItem;
 import com.build4all.catalog.domain.Item;
 import com.build4all.catalog.domain.ItemType;
-import com.build4all.settings.repository.AppSettingsRepository;
+import com.build4all.catalog.dto.ItemPriceResponse;
 import com.build4all.catalog.repository.CurrencyRepository;
-import com.build4all.catalog.repository.ItemTypeRepository;
 import com.build4all.catalog.repository.ItemRepository;
-import com.build4all.business.service.BusinessService;
+import com.build4all.catalog.repository.ItemTypeRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -32,21 +32,21 @@ public class ItemService {
     private final ItemTypeRepository itemTypeRepository;
     private final CurrencyRepository currencyRepository;
     private final BusinessService businessService;
-    private final AppSettingsRepository appSettingsRepository;
+    private final AdminUserProjectRepository adminUserProjectRepository; // 👈 instead of AppSettings
 
     public ItemService(ItemRepository itemsRepository,
                        ItemTypeRepository itemTypeRepository,
                        CurrencyRepository currencyRepository,
                        BusinessService businessService,
-                       AppSettingsRepository appSettingsRepository) {
+                       AdminUserProjectRepository adminUserProjectRepository) {
         this.itemsRepository = itemsRepository;
         this.itemTypeRepository = itemTypeRepository;
         this.currencyRepository = currencyRepository;
         this.businessService = businessService;
-        this.appSettingsRepository = appSettingsRepository;
+        this.adminUserProjectRepository = adminUserProjectRepository;
     }
 
-    // -------------------- Create / Update (Item has only base fields) --------------------
+    // -------------------- Create / Update --------------------
 
     public Item createItemWithImage(
             String itemName,
@@ -55,6 +55,7 @@ public class ItemService {
             BigDecimal price,
             String status,        // e.g. "Upcoming", "Active", etc.
             Long businessId,
+            Long ownerProjectId,  // 👈 NEW: which app this item belongs to
             MultipartFile image
     ) throws IOException {
 
@@ -66,15 +67,17 @@ public class ItemService {
         ItemType type = itemTypeRepository.findById(itemTypeId)
                 .orElseThrow(() -> new IllegalArgumentException("Invalid item type"));
 
-        // default currency fallback (keep as in your original code)
-        Currency currency = currencyRepository.findByCurrencyType("CAD")
-                .orElseThrow(() -> new RuntimeException("Default currency not found"));
+        AdminUserProject ownerProject = adminUserProjectRepository.findById(ownerProjectId)
+                .orElseThrow(() -> new IllegalArgumentException("Owner project (app) not found"));
 
-        // Because Item is abstract, you will persist a concrete subclass elsewhere.
-        // If you use Item directly via a concrete subclass, construct that subclass here instead.
-        // Assuming you have a concrete mapped subclass like sub item later.
-        // If not, make Item concrete (remove abstract) or use a factory outside.
-       // Item item = new com.build4all.entities.Product(); // <-- replace with your concrete subclass
+        // currency per APP (AdminUserProject)
+        Currency currency = ownerProject.getCurrency();
+        if (currency == null) {
+            // optional fallback if you want
+            currency = currencyRepository.findByCurrencyType("CAD")
+                    .orElseThrow(() -> new RuntimeException("Default currency not found"));
+        }
+
         Item item = new GenericItem();
         item.setItemName(itemName);
         item.setItemType(type);
@@ -83,8 +86,8 @@ public class ItemService {
         item.setStatus(status != null ? status : "Upcoming");
         item.setImageUrl(imageUrl);
         item.setBusiness(business);
-        item.setCurrency(currency);
-        // stock is required (not null) per your entity; keep default 0 if not set elsewhere
+        item.setOwnerProject(ownerProject); // 👈 link to app
+        item.setCurrency(currency);         // 👈 app currency copied to item
 
         return itemsRepository.save(item);
     }
@@ -149,7 +152,6 @@ public class ItemService {
 
     @Transactional(Transactional.TxType.SUPPORTS)
     public List<Item> findAllVisibleItemsForUsers() {
-        // Requires your repo method that filters by business ACTIVE + public profile
         return itemsRepository.findAllPublicActiveBusinessItems();
     }
 
@@ -170,7 +172,7 @@ public class ItemService {
         itemsRepository.deleteByBusinessId(businessId);
     }
 
-    // -------------------- Simple analytics / projections --------------------
+    // -------------------- Analytics / projections --------------------
 
     @Transactional(Transactional.TxType.SUPPORTS)
     public long countCreatedAfter(LocalDateTime date) {
@@ -182,18 +184,25 @@ public class ItemService {
         return itemsRepository.findTopItemNameByBusinessId(businessId);
     }
 
+    /**
+     * Prices for ONE APP (one AdminUserProject) with its currency symbol.
+     */
     @Transactional(Transactional.TxType.SUPPORTS)
-    public List<ItemPriceResponse> getItemsWithCurrencySymbol() {
-        Currency selectedCurrency = appSettingsRepository.findById(1L)
-                .map(AppSettings::getCurrency)
-                .orElseThrow(() -> new RuntimeException("Currency not set in app settings"));
+    public List<ItemPriceResponse> getItemsWithCurrencySymbol(Long ownerProjectId) {
+        AdminUserProject app = adminUserProjectRepository.findById(ownerProjectId)
+                .orElseThrow(() -> new IllegalArgumentException("Owner project (app) not found"));
 
-        return itemsRepository.findAll().stream()
+        Currency currency = app.getCurrency();
+        if (currency == null) {
+            throw new IllegalStateException("Currency not set for this app");
+        }
+
+        return itemsRepository.findByOwnerProjectId(ownerProjectId).stream()
                 .map(it -> new ItemPriceResponse(
                         it.getId(),
                         it.getItemName(),
-                        it.getPrice(),                    // price comes from Item
-                        selectedCurrency.getSymbol()
+                        it.getPrice(),
+                        currency.getSymbol()
                 ))
                 .toList();
     }

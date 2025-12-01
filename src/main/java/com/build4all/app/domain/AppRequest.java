@@ -26,6 +26,9 @@ public class AppRequest {
 
     @Column(name = "logo_url", columnDefinition = "TEXT")
     private String logoUrl;
+    
+    @Column(name = "currency_id")
+    private Long currencyId;
 
     @Column(name = "theme_id")
     private Long themeId; // nullable => fallback للـ default
@@ -74,6 +77,9 @@ public class AppRequest {
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    
+    public Long getCurrencyId() { return currencyId; }
+    public void setCurrencyId(Long currencyId) { this.currencyId = currencyId; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
 }

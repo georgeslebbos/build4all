@@ -1,5 +1,6 @@
 package com.build4all.admin.domain;
 
+import com.build4all.catalog.domain.Currency;
 import com.build4all.project.domain.Project;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
@@ -69,6 +70,10 @@ public class AdminUserProject {
     @Column(name = "theme_id")
     private Long themeId;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "currency_id", referencedColumnName = "currency_id")
+    private Currency currency;
+    
     /** Full JSON palette used for this app (build-time theme) */
     @Column(name = "theme_json", columnDefinition = "TEXT")
     private String themeJson;
@@ -173,6 +178,14 @@ public class AdminUserProject {
 
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    
+    public Currency getCurrency() {
+        return currency;
+    }
+
+    public void setCurrency(Currency currency) {
+        this.currency = currency;
+    }
 
     @Transient public Long getAdminId() { return admin != null ? admin.getAdminId() : null; }
     @Transient public Long getProjectId() { return project != null ? project.getId() : null; }
@@ -180,4 +193,6 @@ public class AdminUserProject {
     @Transient public boolean isSuspended() { return "SUSPENDED".equalsIgnoreCase(status); }
     @Transient public boolean isExpired() { return "EXPIRED".equalsIgnoreCase(status); }
     @Transient public boolean isDeleted() { return "DELETED".equalsIgnoreCase(status); }
+    
+    
 }

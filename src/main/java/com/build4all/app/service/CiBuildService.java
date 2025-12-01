@@ -133,7 +133,8 @@ public class CiBuildService {
             Long themeId,
             String appLogoUrl,
             String themeJson,
-            byte[] logoBytesOpt
+            byte[] logoBytesOpt,
+            Long currencyId
     ) {
         if (!isConfigured()) {
             log.warn("CI DISPATCH SKIPPED: ci.webhook.url/token not configured.");
@@ -160,9 +161,10 @@ public class CiBuildService {
         clientPayload.put("SLUG", nz(slug));
         clientPayload.put("APP_NAME", nz(appName));
         if (themeId != null) clientPayload.put("THEME_ID", themeId);
+        if (currencyId != null) clientPayload.put("CURRENCY_ID", currencyId);   // 🪙 new
         clientPayload.put("RUNTIME", runtime);               // 1 property
         clientPayload.put("APP_LOGO_URL", nz(resolvedLogoUrl));
-        clientPayload.put("APP_THEME_JSON", nz(themeJson));  // ✅ palette JSON for workflow
+        clientPayload.put("THEME_JSON", nz(themeJson));      // match YAML env: THEME_JSON
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("event_type", "owner_app_build");
@@ -196,6 +198,7 @@ public class CiBuildService {
             return false;
         }
     }
+
 
     private static boolean notBlank(String s) { return s != null && !s.isBlank(); }
     private static String nz(String s) { return s == null ? "" : s; }

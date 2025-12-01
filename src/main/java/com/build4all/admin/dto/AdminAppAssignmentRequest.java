@@ -10,6 +10,10 @@ public class AdminAppAssignmentRequest {
     private LocalDate validFrom; // optional
     private LocalDate endTo;     // optional
     private Long themeId;        // optional
+    private String currencyCode;
+    
+    public String getCurrencyCode() { return currencyCode; }
+    public void setCurrencyCode(String currencyCode) { this.currencyCode = currencyCode; }
 
     public Long getProjectId() { return projectId; }
     public void setProjectId(Long projectId) { this.projectId = projectId; }

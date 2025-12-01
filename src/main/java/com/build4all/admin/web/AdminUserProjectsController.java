@@ -81,7 +81,6 @@ public class AdminUserProjectsController {
                                                                @PathVariable Long projectId,
                                                                @PathVariable String slug) {
         var l = service.get(adminId, projectId, slug);
-     // AdminUserProjectsController.artifact(...)
         return ResponseEntity.ok(new AdminAppAssignmentResponse(
             l.getProject().getId(),
             l.getProject().getProjectName(),
@@ -94,11 +93,13 @@ public class AdminUserProjectsController {
             l.getThemeId(),
             l.getApkUrl() == null ? "" : l.getApkUrl(),
             l.getIpaUrl() == null ? "" : l.getIpaUrl(),
-            l.getBundleUrl() == null ? "" : l.getBundleUrl(),  // <— NEW
-            l.getLogoUrl() == null ? "" : l.getLogoUrl()
+            l.getBundleUrl() == null ? "" : l.getBundleUrl(),
+            l.getLogoUrl() == null ? "" : l.getLogoUrl(),
+            l.getCurrency() != null ? l.getCurrency().getCode() : null,
+            l.getCurrency() != null ? l.getCurrency().getSymbol() : null
         ));
-
     }
+
 
     // ---------------------------
     // BACKWARD-COMPAT SHIMS (optional)

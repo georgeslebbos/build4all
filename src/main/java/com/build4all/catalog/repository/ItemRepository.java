@@ -96,4 +96,11 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
            ORDER BY orderCount DESC
            """)
     List<Object[]> findPopularItems();
+    
+    @Query("""
+    	       SELECT i
+    	       FROM Item i
+    	       WHERE i.ownerProject.id = :aupId
+    	       """)
+    	List<Item> findByOwnerProjectId(@Param("aupId") Long aupId);
 }
