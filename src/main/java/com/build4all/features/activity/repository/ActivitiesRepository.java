@@ -94,4 +94,19 @@ public interface ActivitiesRepository extends JpaRepository<Activity, Long> {
          AND b.isPublicProfile = true
     """)
     List<Activity> findAllActivitiesWithBusinessInfo();
+    @Query("""
+    	    select a
+    	    from Activity a
+    	    join fetch a.itemType it
+    	    join fetch a.business b
+    	    left join fetch b.status
+    	    where a.ownerProject.id = :aupId
+    	""")
+    	List<Activity> findByOwnerProject_Id(@Param("aupId") Long aupId);
+
+
+    List<Activity> findByOwnerProject_IdAndItemType_Id(Long aupId, Long typeId);
+
+    @Query("select a from Activity a join fetch a.itemType it join fetch a.business b where a.ownerProject.id = :aupId")
+    List<Activity> findAllByAupWithJoins(Long aupId);
 }

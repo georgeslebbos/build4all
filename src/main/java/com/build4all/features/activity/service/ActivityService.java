@@ -201,4 +201,17 @@ public class ActivityService {
         Files.copy(image.getInputStream(), dest, StandardCopyOption.REPLACE_EXISTING);
         return "/uploads/" + fileName;
     }
+    
+    public List<Activity> findByOwnerProject(Long aupId) {
+        return activityRepository.findByOwnerProject_Id(aupId);
+    }
+
+    public List<Activity> findByOwnerAndType(Long aupId, Long typeId) {
+        return activityRepository.findByOwnerProject_IdAndItemType_Id(aupId, typeId);
+    }
+
+    public List<Activity> findAllByOwner(Long aupId) {
+        return activityRepository.findAllByAupWithJoins(aupId);
+    }
+
 }

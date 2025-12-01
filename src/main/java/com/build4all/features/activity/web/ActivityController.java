@@ -245,13 +245,17 @@ public class ActivityController {
     }
 
     @GetMapping("/upcoming")
-    public ResponseEntity<?> getUpcoming() {
+    public ResponseEntity<?> getUpcoming(@RequestParam Long ownerProjectLinkId) {
         LocalDateTime now = LocalDateTime.now();
-        List<Activity> upcoming = activityService.findAll().stream()
-                .filter(a -> a.getEndDatetime() != null && a.getEndDatetime().isAfter(now))
+
+        List<Activity> upcoming = activityService.findByOwnerProject(ownerProjectLinkId).stream()
+                .filter(a -> a.getEndDatetime().isAfter(now))
+                .filter(a -> !"Terminated".equalsIgnoreCase(a.getStatus()))
                 .toList();
+
         return ResponseEntity.ok(upcoming.stream().map(this::toDto).toList());
     }
+
 
     @GetMapping("/terminated")
     public ResponseEntity<?> getTerminated(@RequestHeader("Authorization") String auth) {
@@ -310,29 +314,42 @@ public class ActivityController {
     }
 
     @GetMapping("/by-type/{typeId}")
-    public ResponseEntity<?> getByType(@PathVariable Long typeId) {
-        List<Activity> items = activityService.findByItemTypeId(typeId);
+    public ResponseEntity<?> getByType(
+            @PathVariable Long typeId,
+            @RequestParam Long ownerProjectLinkId) {
+
+        List<Activity> items = activityService.findByOwnerAndType(ownerProjectLinkId, typeId);
+
         LocalDateTime now = LocalDateTime.now();
         List<Activity> upcoming = items.stream()
-                .filter(a -> a.getEndDatetime() != null && a.getEndDatetime().isAfter(now))
+                .filter(a -> a.getEndDatetime().isAfter(now))
                 .filter(a -> !"Terminated".equalsIgnoreCase(a.getStatus()))
                 .toList();
-        if (upcoming.isEmpty())
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "No upcoming items found for this type"));
+
         return ResponseEntity.ok(upcoming.stream().map(this::toDto).toList());
     }
 
+
     @GetMapping("/guest/upcoming")
-    public ResponseEntity<?> guestUpcoming(@RequestParam(required = false) Long typeId) {
-        List<Activity> all = (typeId != null) ? activityService.findByItemTypeId(typeId) : activityService.findAll();
+    public ResponseEntity<?> guestUpcoming(
+            @RequestParam Long ownerProjectLinkId,
+            @RequestParam(required = false) Long typeId) {
+
+        List<Activity> all = (typeId != null)
+                ? activityService.findByOwnerAndType(ownerProjectLinkId, typeId)
+                : activityService.findByOwnerProject(ownerProjectLinkId);
+
         LocalDateTime now = LocalDateTime.now();
+
         List<Activity> upcoming = all.stream()
                 .filter(a -> a.getEndDatetime() != null && a.getEndDatetime().isAfter(now))
                 .filter(a -> !"Terminated".equalsIgnoreCase(a.getStatus()))
                 .filter(a -> a.getBusiness() != null && Boolean.TRUE.equals(a.getBusiness().getIsPublicProfile()))
                 .toList();
+
         return ResponseEntity.ok(upcoming.stream().map(this::toDto).toList());
     }
+
 
     /* ---------------- personalized feed (owner-linked user) ---------------- */
 

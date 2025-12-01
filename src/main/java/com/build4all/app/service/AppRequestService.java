@@ -333,7 +333,7 @@ public class AppRequestService {
         String candidate = baseSlug;
         int i = 2;
         while (aupRepo.existsByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, candidate)) {
-            candidate = baseSlug + "-" + i;
+            candidate = baseSlug + "_" + i;
             i++;
             if (i > 500) throw new IllegalStateException("Could not generate a unique slug");
         }
@@ -343,7 +343,7 @@ public class AppRequestService {
     private static String slugify(String s) {
         if (s == null) return "app";
         return s.trim().toLowerCase()
-                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("[^a-z0-9]+", "_")
                 .replaceAll("(^-|-$)", "");
     }
 
