@@ -17,8 +17,8 @@ public class OrderStatusSeeder {
             System.out.println("✅ orderStatus seeder running...");
 
             List<String> names = List.of(
-                    "PENDING", "APPROVED", "REJECTED",
-                    "CANCEL_REQUESTED", "CANCELED", "COMPLETED", "REFUNDED"
+                    "PENDING","PROCESSING","ON_HOLD", "APPROVED", "REJECTED",
+                    "CANCEL_REQUESTED", "CANCELED", "COMPLETED", "REFUNDED","FAILED"
             );
 
             for (String n : names) {
