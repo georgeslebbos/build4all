@@ -14,7 +14,7 @@ public class Theme {
     private Long id;
 
     /** Human-readable name for the theme (ex: "Dark Default", "Client A V1") */
-    @Column(name = "name", nullable = false, unique = true)
+    @Column(name = "name", nullable = true)
     private String name;
 
     /**
