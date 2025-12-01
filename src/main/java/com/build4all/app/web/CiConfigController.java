@@ -2,6 +2,8 @@ package com.build4all.app.web;
 
 import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.repository.AdminUserProjectRepository;
+import com.build4all.theme.domain.Theme;
+import com.build4all.theme.repository.ThemeRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -15,9 +17,12 @@ import java.util.Map;
 public class CiConfigController {
 
     private final AdminUserProjectRepository aupRepo;
+    private final ThemeRepository themeRepo;
 
-    public CiConfigController(AdminUserProjectRepository aupRepo) {
+    public CiConfigController(AdminUserProjectRepository aupRepo,
+                              ThemeRepository themeRepo) {
         this.aupRepo = aupRepo;
+        this.themeRepo = themeRepo;
     }
 
     // Static runtime values for the mobile app (pulled from application.properties)
@@ -52,6 +57,15 @@ public class CiConfigController {
             .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slug.toLowerCase())
             .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
 
+    
+        String themeJson = "";
+        Long themeId = link.getThemeId();
+        if (themeId != null) {
+            themeJson = themeRepo.findById(themeId)
+                    .map(Theme::getThemeJson)
+                    .orElse("");
+        }
+
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("ownerId", link.getAdmin().getAdminId());
         m.put("projectId", link.getProject().getId());
@@ -61,8 +75,8 @@ public class CiConfigController {
         m.put("appLogoUrl", n(link.getLogoUrl()));
         m.put("themeId", link.getThemeId());
 
-        // 🔹 NEW: expose themeJson so CI / frontend can consume it if needed
-        m.put("themeJson", n(link.getThemeJson()));
+      
+        m.put("themeJson", n(themeJson));
 
         // runtime values consumed by the Flutter app at build-time
         m.put("apiBaseUrl", n(apiBaseUrl));

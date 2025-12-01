@@ -76,7 +76,8 @@ public class AppRequestService {
      * Create AND auto-approve (multipart logo supported).
      * - Enforces unique slug per (owner, project)
      * - Saves logo to /uploads/owner/{owner}/{project}/{slug}/<uuid>_<stamp>.<ext>
-     * - Triggers CI with all inputs (owner/project/link/slug/name/theme/logo/themeJson/currency)
+     * - Creates a Theme (if no themeId passed) and ties it to the app
+     * - Triggers CI with THEME_JSON loaded from Theme table
      */
     @Transactional
     public AdminUserProject createAndAutoApprove(Long ownerId, Long projectId,
@@ -85,7 +86,10 @@ public class AppRequestService {
                                                  Long themeId, String notes,
                                                  String themeJson,
                                                  Long currencyId) throws IOException {
-        String base = (slug != null && !slug.isBlank()) ? slugify(slug) : slugify(appName);
+
+        String base = (slug != null && !slug.isBlank())
+                ? slugify(slug)
+                : slugify(appName);
         String uniqueSlug = ensureUniqueSlug(ownerId, projectId, base);
 
         String logoUrl = null;
@@ -95,17 +99,21 @@ public class AppRequestService {
             logoBytes = logoFile.getBytes();
         }
 
+        // ✅ RESOLVE THEME ID SAFELY (don’t trust raw themeId from client)
+        Long chosenThemeId = resolveThemeIdFromRaw(themeId);
+
+
         AppRequest r = new AppRequest();
         r.setOwnerId(ownerId);
         r.setProjectId(projectId);
         r.setAppName(appName);
         r.setSlug(uniqueSlug);
         r.setLogoUrl(logoUrl);
-        r.setThemeId(themeId);
+        r.setThemeId(chosenThemeId);   // ✅ always valid or null
         r.setNotes(notes);
         r.setStatus("APPROVED");
         r.setThemeJson(themeJson);
-        r.setCurrencyId(currencyId);   // 🪙 store per-app currency
+        r.setCurrencyId(currencyId);   // 🪙 currency per app
         r = appRequestRepo.save(r);
 
         return provisionAndTrigger(r, logoBytes);
@@ -119,6 +127,11 @@ public class AppRequestService {
             throw new IllegalStateException("Request already decided");
         }
         req.setStatus("APPROVED");
+        appRequestRepo.save(req);
+
+  
+        Long ensuredThemeId = resolveThemeId(req);
+        req.setThemeId(ensuredThemeId);
         appRequestRepo.save(req);
 
         // no logo bytes here; only relative url (if any)
@@ -239,7 +252,7 @@ public class AppRequestService {
         Project project = projectRepo.findById(req.getProjectId())
                 .orElseThrow(() -> new IllegalArgumentException("Project not found"));
 
-        Long chosenThemeId = resolveThemeId(req.getThemeId());
+        Long chosenThemeId = resolveThemeId(req);
         String desiredSlug = (req.getSlug() != null && !req.getSlug().isBlank())
                 ? req.getSlug().trim().toLowerCase()
                 : slugify(req.getAppName());
@@ -262,7 +275,6 @@ public class AppRequestService {
         link.setValidFrom(now);
         link.setEndTo(end);
         link.setThemeId(chosenThemeId);
-        link.setThemeJson(req.getThemeJson());
 
         // 🪙 NEW: set currency per app if provided on request
         Long currencyId = req.getCurrencyId();
@@ -285,6 +297,9 @@ public class AppRequestService {
         String ownerProjectLinkId = String.valueOf(link.getId()); // REAL PK
         Long currencyIdForBuild = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
 
+       
+        String themeJson = resolveThemeJson(chosenThemeId, req.getThemeJson());
+
         boolean ok = ciBuildService.dispatchOwnerAndroidBuild(
                 owner.getAdminId(),
                 project.getId(),
@@ -293,7 +308,7 @@ public class AppRequestService {
                 req.getAppName(),
                 chosenThemeId,
                 req.getLogoUrl(),    // may be relative; service will upload logoBytesOpt to repo
-                req.getThemeJson(),  // palette JSON to CI
+                themeJson,           // palette JSON to CI
                 logoBytesOpt,
                 currencyIdForBuild   // 🪙 send to CI
         );
@@ -307,13 +322,71 @@ public class AppRequestService {
         return link;
     }
 
-    private Long resolveThemeId(Long requested) {
+  
+    private Long resolveThemeId(AppRequest req) {
+        Long requested = req.getThemeId();
         if (requested != null) {
-            return themeRepo.findById(requested).map(Theme::getId)
+            return themeRepo.findById(requested)
+                    .map(Theme::getId)
                     .orElseGet(() -> themeRepo.findByIsActiveTrue().map(Theme::getId).orElse(null));
         }
-        return themeRepo.findByIsActiveTrue().map(Theme::getId).orElse(null);
+
+        String json = req.getThemeJson();
+        if (json != null && !json.isBlank()) {
+            Theme t = new Theme();
+            String themeName = (req.getAppName() != null && !req.getAppName().isBlank())
+                    ? req.getAppName().trim()
+                    : ("ReqTheme-" + req.getId());
+            t.setName(themeName);
+            t.setThemeJson(json);
+            t.setIsActive(false);
+            t = themeRepo.save(t);
+
+            req.setThemeId(t.getId());
+            appRequestRepo.save(req);
+
+            return t.getId();
+        }
+
+        // fallback: active theme
+        return themeRepo.findByIsActiveTrue()
+                .map(Theme::getId)
+                .orElse(null);
     }
+
+   
+    private String resolveThemeJson(Long themeId, String fallbackJson) {
+        if (themeId != null) {
+            return themeRepo.findById(themeId)
+                    .map(Theme::getThemeJson)
+                    .orElseGet(() -> (fallbackJson != null && !fallbackJson.isBlank()) ? fallbackJson : "{}");
+        }
+        if (fallbackJson != null && !fallbackJson.isBlank()) {
+            return fallbackJson;
+        }
+        return themeRepo.findByIsActiveTrue()
+                .map(Theme::getThemeJson)
+                .orElse("{}");
+    }
+    
+ // Use this when you only have a raw themeId from the client (Postman / form)
+    private Long resolveThemeIdFromRaw(Long requested) {
+        if (requested != null) {
+            // If that theme exists, use it; otherwise fall back to active theme (or null)
+            return themeRepo.findById(requested)
+                    .map(Theme::getId)
+                    .orElseGet(() ->
+                            themeRepo.findByIsActiveTrue()
+                                     .map(Theme::getId)
+                                     .orElse(null));
+        }
+
+        // No themeId provided -> just use the active theme (if any)
+        return themeRepo.findByIsActiveTrue()
+                .map(Theme::getId)
+                .orElse(null);
+    }
+
 
     /** Save under uploads/, return '/uploads/...' URL */
     private String saveOwnerAppLogoToUploads(Long ownerId, Long projectId, String slug, MultipartFile file)
@@ -381,8 +454,10 @@ public class AppRequestService {
         final String slug = (link.getSlug() == null) ? "app" : link.getSlug().trim().toLowerCase();
         final String appName = (link.getAppName() == null) ? "My App" : link.getAppName().trim();
         final String logoUrl = link.getLogoUrl();
-        final String themeJson = link.getThemeJson();
         final Long currencyId = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
+
+       
+        final String themeJson = resolveThemeJson(themeId, null);
 
         boolean ok = ciBuildService.dispatchOwnerAndroidBuild(
                 ownerId,

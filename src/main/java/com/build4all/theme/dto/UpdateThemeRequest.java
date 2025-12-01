@@ -1,13 +1,16 @@
-// src/main/java/com/build4all/theme/dto/CreateThemeRequest.java
+// src/main/java/com/build4all/theme/dto/UpdateThemeRequest.java
 package com.build4all.theme.dto;
 
 import java.util.Map;
 
-public class CreateThemeRequest {
+/**
+ * All fields optional. Only sent fields will be updated.
+ */
+public class UpdateThemeRequest {
 
-    private String name;                // required
+    private String name;                // optional
     private Boolean isActive;           // optional
-    private Map<String, Object> values; // the theme object sent from UI (key by key)
+    private Map<String, Object> values; // optional
 
     public String getName() {
         return name;

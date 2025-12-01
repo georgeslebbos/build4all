@@ -2,7 +2,7 @@ package com.build4all.app.web;
 
 import com.build4all.app.config.AppEnvProperties;
 import com.build4all.admin.repository.AdminUserProjectRepository;
-import com.build4all.theme.dto.ThemeMobileDTO;
+
 import com.build4all.theme.domain.Theme;
 import com.build4all.theme.service.ThemeService;
 import org.springframework.http.ResponseEntity;
@@ -35,19 +35,6 @@ public class PublicAppConfigController {
         );
     }
 
-    // ✅ app-scoped theme (recommended)
-    @GetMapping("/mobile-theme")
-    public ResponseEntity<?> themeForOwnerProject(@RequestParam Long ownerId,
-                                                  @RequestParam Long projectId,
-                                                  @RequestParam String slug) {
-        return aupRepo.findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slug)
-            .map(link -> {
-                Long themeId = link.getThemeId();
-                Optional<Theme> selectedOrActive = themeService.getSelectedOrActive(themeId);
-                return selectedOrActive
-                    .<ResponseEntity<?>>map(t -> ResponseEntity.ok(new ThemeMobileDTO(t)))
-                    .orElseGet(() -> ResponseEntity.notFound().build());
-            })
-            .orElseThrow();
-    }
+
+
 }
