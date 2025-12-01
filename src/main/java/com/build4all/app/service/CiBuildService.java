@@ -24,7 +24,7 @@ public class CiBuildService {
     @Value("${ci.webhook.url:}")
     private String webhookUrl;
 
-    /** GitHub PAT with "repo" + "workflow" scope. */
+    /** GitHub PAT with "repo" scope (and usually "workflow"). */
     @Value("${ci.webhook.token:}")
     private String webhookToken;
 
@@ -53,32 +53,13 @@ public class CiBuildService {
 
     public CiBuildService(WebClient.Builder builder) {
         this.web = builder
-                // GitHub **requires** a User-Agent header
-                .defaultHeader(HttpHeaders.USER_AGENT, "build4all-ci-client")
                 .defaultHeader(HttpHeaders.ACCEPT, "application/vnd.github+json")
                 .defaultHeader("X-GitHub-Api-Version", "2022-11-28")
                 .build();
     }
 
-    /**
-     * If ci.webhook.url is empty, derive it from repoOwner/repoName.
-     * This avoids silent misconfig when you forget to set it.
-     */
-    private String effectiveWebhookUrl() {
-        if (notBlank(webhookUrl)) {
-            return webhookUrl;
-        }
-        String derived = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/dispatches";
-        log.info("ci.webhook.url not set, using derived default={}", derived);
-        return derived;
-    }
-
     public boolean isConfigured() {
-        boolean ok = notBlank(webhookToken);
-        if (!ok) {
-            log.warn("CI DISPATCH SKIPPED: ci.webhook.token is missing/blank.");
-        }
-        return ok;
+        return notBlank(webhookUrl) && notBlank(webhookToken);
     }
 
     /**
@@ -109,8 +90,6 @@ public class CiBuildService {
         String contentsApi = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/contents/" + path;
 
         try {
-            log.info("Uploading logo via GitHub Contents API: {}", contentsApi);
-
             ClientResponse resp = web.put()
                     .uri(contentsApi)
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + webhookToken)
@@ -120,7 +99,7 @@ public class CiBuildService {
                     .block();
 
             if (resp == null) {
-                log.error("Contents API returned null response");
+                log.error("Contents API returned null");
                 return "";
             }
 
@@ -144,6 +123,7 @@ public class CiBuildService {
     /**
      * Dispatch the workflow with ≤10 top-level properties.
      * We pass a small APP_LOGO_URL (public), theme JSON, and nest runtime values under RUNTIME.
+     * @param currencyIdForBuild 
      */
     public boolean dispatchOwnerAndroidBuild(
             long ownerId,
@@ -155,13 +135,13 @@ public class CiBuildService {
             String appLogoUrl,
             String themeJson,
             byte[] logoBytesOpt,
-            Long currencyId
+            Long currencyIdForBuild
     ) {
         if (!isConfigured()) {
+            log.warn("CI DISPATCH SKIPPED: ci.webhook.url/token not configured.");
             return false;
         }
 
-        final String url = effectiveWebhookUrl();
         final String buildId = UUID.randomUUID().toString();
         final String opl = notBlank(ownerProjectLinkId) ? ownerProjectLinkId : (ownerId + "-" + projectId);
 
@@ -182,23 +162,17 @@ public class CiBuildService {
         clientPayload.put("SLUG", nz(slug));
         clientPayload.put("APP_NAME", nz(appName));
         if (themeId != null) clientPayload.put("THEME_ID", themeId);
-        if (currencyId != null) clientPayload.put("CURRENCY_ID", currencyId);
-        clientPayload.put("RUNTIME", runtime);           // 1 property
+        clientPayload.put("RUNTIME", runtime);               // 1 property
         clientPayload.put("APP_LOGO_URL", nz(resolvedLogoUrl));
-        clientPayload.put("THEME_JSON", nz(themeJson));  // match YAML env: THEME_JSON
+        clientPayload.put("APP_THEME_JSON", nz(themeJson));  // ✅ palette JSON for workflow
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("event_type", "owner_app_build");
         payload.put("client_payload", clientPayload);
 
-        log.info(
-                "Dispatching repository_dispatch -> url={} BUILD_ID={} ownerId={} projectId={} linkId={} slug={}",
-                url, buildId, ownerId, projectId, opl, slug
-        );
-
         try {
             ClientResponse resp = web.post()
-                    .uri(url)
+                    .uri(webhookUrl)
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + webhookToken)
                     .contentType(MediaType.APPLICATION_JSON)
                     .bodyValue(payload)
@@ -206,7 +180,7 @@ public class CiBuildService {
                     .block();
 
             if (resp == null) {
-                log.error("repository_dispatch -> null response from GitHub");
+                log.error("repository_dispatch -> null response");
                 return false;
             }
 
