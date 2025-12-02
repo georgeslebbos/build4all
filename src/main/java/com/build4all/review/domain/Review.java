@@ -48,7 +48,7 @@ public class Review {
     }
     
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "business_id", nullable = false)
+    @JoinColumn(name = "business_id", nullable = true)
     @OnDelete(action = OnDeleteAction.CASCADE)
     private Businesses business;
 
