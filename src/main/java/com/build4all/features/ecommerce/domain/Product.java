@@ -74,4 +74,29 @@ public class Product extends Item {
 
     public LocalDateTime getSaleEnd() { return saleEnd; }
     public void setSaleEnd(LocalDateTime saleEnd) { this.saleEnd = saleEnd; }
+
+    @Transient
+    public boolean isOnSaleNow() {
+        // Need a positive base price and sale price
+        if (getPrice() == null || getPrice().compareTo(BigDecimal.ZERO) <= 0) return false;
+        if (salePrice == null || salePrice.compareTo(BigDecimal.ZERO) <= 0) return false;
+
+        // Sale price must be lower than base price
+        if (salePrice.compareTo(getPrice()) >= 0) return false;
+
+        LocalDateTime now = LocalDateTime.now();
+
+        if (saleStart != null && now.isBefore(saleStart)) return false;
+        if (saleEnd != null && now.isAfter(saleEnd)) return false;
+
+        return true;
+    }
+
+    @Transient
+    public BigDecimal getEffectivePrice() {
+        if (isOnSaleNow()) {
+            return salePrice;
+        }
+        return getPrice();
+    }
 }

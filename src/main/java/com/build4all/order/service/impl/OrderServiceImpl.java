@@ -78,6 +78,18 @@ public class OrderServiceImpl implements OrderService {
         orderItemRepo.save(oi);
     }
 
+    private BigDecimal resolveUnitPrice(Item item) {
+        if (item == null) return BigDecimal.ZERO;
+
+        if (item instanceof com.build4all.features.ecommerce.domain.Product product) {
+            BigDecimal eff = product.getEffectivePrice();
+            return eff != null ? eff : BigDecimal.ZERO;
+        }
+
+        BigDecimal base = item.getPrice();
+        return base != null ? base : BigDecimal.ZERO;
+    }
+
     /* ===============================
        CAPACITY / OWNERSHIP HELPERS
        =============================== */
@@ -150,7 +162,7 @@ public class OrderServiceImpl implements OrderService {
                 throw new IllegalStateException("Not enough seats available");
         }
 
-        BigDecimal unit = item.getPrice() == null ? BigDecimal.ZERO : item.getPrice();
+        BigDecimal unit = resolveUnitPrice(item);
         BigDecimal total = unit.multiply(BigDecimal.valueOf(quantity));
 
         Order order = new Order();
@@ -179,11 +191,11 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public OrderItem createCashorderByBusiness(Long itemId, Long businessUserId,
-                                                 int participants, boolean wasPaid, Long currencyId) {
+                                                 int quantity, boolean wasPaid, Long currencyId) {
 
         if (itemId == null) throw new IllegalArgumentException("itemId is required");
         if (businessUserId == null) throw new IllegalArgumentException("businessUserId is required");
-        if (participants <= 0) throw new IllegalArgumentException("participants must be > 0");
+        if (quantity <= 0) throw new IllegalArgumentException("quantity must be > 0");
 
         Users user = usersRepo.findById(businessUserId)
                 .orElseThrow(() -> new IllegalArgumentException("Business user not found"));
@@ -202,12 +214,12 @@ public class OrderServiceImpl implements OrderService {
                     itemId, List.of("COMPLETED")
             );
             int remaining = capacity - already;
-            if (participants > remaining)
+            if (quantity > remaining)
                 throw new IllegalStateException("Not enough seats available");
         }
 
-        BigDecimal unit = item.getPrice() == null ? BigDecimal.ZERO : item.getPrice();
-        BigDecimal total = unit.multiply(BigDecimal.valueOf(participants));
+        BigDecimal unit = resolveUnitPrice(item);
+        BigDecimal total = unit.multiply(BigDecimal.valueOf(quantity));
 
         Order order = new Order();
         order.setUser(user);
@@ -221,7 +233,7 @@ public class OrderServiceImpl implements OrderService {
         line.setOrder(order);
         line.setItem(item);
         line.setUser(user);
-        line.setQuantity(participants);
+        line.setQuantity(quantity);
         line.setPrice(unit);
         if (currency != null) line.setCurrency(currency);
         line.setCreatedAt(LocalDateTime.now());

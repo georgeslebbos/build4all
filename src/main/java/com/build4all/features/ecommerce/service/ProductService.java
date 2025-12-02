@@ -326,6 +326,10 @@ public class ProductService {
         r.setSaleStart(p.getSaleStart());
         r.setSaleEnd(p.getSaleEnd());
 
+        // 🔥 discount logic
+        r.setEffectivePrice(p.getEffectivePrice());
+        r.setOnSale(p.isOnSaleNow());
+
         var values = itemAttributeValueRepository.findByItem(p);
         List<AttributeValueDTO> attrs = values.stream()
                 .map(v -> {
@@ -354,5 +358,17 @@ public class ProductService {
     private String capitalize(String s) {
         if (s == null || s.isBlank()) return s;
         return s.substring(0, 1).toUpperCase() + s.substring(1);
+    }
+
+    @Transactional(Transactional.TxType.SUPPORTS)
+    public List<ProductResponse> listDiscounted(Long ownerProjectId) {
+        if (ownerProjectId == null) {
+            throw new IllegalArgumentException("ownerProjectId is required");
+        }
+
+        return productRepository.findActiveDiscountedByOwnerProject(ownerProjectId)
+                .stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
     }
 }

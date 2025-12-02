@@ -121,7 +121,15 @@ public class ProductController {
 
     @GetMapping("/{id}")
     @Operation(summary = "Get product by id")
-    public ResponseEntity<?> getById(@PathVariable Long id) {
+    public ResponseEntity<?> getById(@RequestHeader("Authorization") String auth,
+            @PathVariable Long id) {
+        String token = strip(auth);
+        // same logic as Activity delete: only BUSINESS
+        if (!hasRole(token, "USER", "OWNER")) {
+            return ResponseEntity
+                    .status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Only users can access the product."));
+        }
        try {
             ProductResponse p = productService.get(id);
             return ResponseEntity.ok(p);
@@ -134,9 +142,18 @@ public class ProductController {
 
     @GetMapping
     @Operation(summary = "List products (by ownerProject, itemType, or category)")
-    public ResponseEntity<?> list(@RequestParam Long ownerProjectId,
+    public ResponseEntity<?> list(
+            @RequestHeader("Authorization") String auth,
+            @RequestParam Long ownerProjectId,
             @RequestParam(required = false) Long itemTypeId,
             @RequestParam(required = false) Long categoryId) {
+        String token = strip(auth);
+        // same logic as Activity delete: only BUSINESS
+        if (!hasRole(token, "USER", "OWNER")) {
+            return ResponseEntity
+                    .status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Only users can access the list of products."));
+        }
         try {
             List<ProductResponse> result;
             if (itemTypeId != null) {
@@ -155,9 +172,17 @@ public class ProductController {
     @GetMapping("/new-arrivals")
     @Operation(summary = "List new arrival products for an app (ownerProject)")
     public ResponseEntity<?> listNewArrivals(
+            @RequestHeader("Authorization") String auth,
             @RequestParam Long ownerProjectId,
             @RequestParam(required = false) Integer days
     ) {
+        String token = strip(auth);
+        // same logic as Activity delete: only BUSINESS
+        if (!hasRole(token, "USER", "OWNER")) {
+            return ResponseEntity
+                    .status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Only users can access the List of new arrival products for an app."));
+        }
         try {
             List<ProductResponse> result = productService.listNewArrivals(ownerProjectId, days);
             return ResponseEntity.ok(result);
@@ -173,11 +198,44 @@ public class ProductController {
     @GetMapping("/best-sellers")
     @Operation(summary = "List best-selling products for an app (ownerProject)")
     public ResponseEntity<?> listBestSellers(
+            @RequestHeader("Authorization") String auth,
             @RequestParam Long ownerProjectId,
             @RequestParam(required = false) Integer limit
     ) {
+        String token = strip(auth);
+        // same logic as Activity delete: only BUSINESS
+        if (!hasRole(token, "USER", "OWNER")) {
+            return ResponseEntity
+                    .status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Only users can access the List of best-selling products for an app."));
+        }
         try {
             var result = productService.listBestSellers(ownerProjectId, limit);
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @GetMapping("/discounted")
+    @Operation(summary = "List discounted/on-sale products for an app (ownerProject)")
+    public ResponseEntity<?> listDiscounted(
+            @RequestHeader("Authorization") String auth,
+            @RequestParam Long ownerProjectId
+    ) {
+        String token = strip(auth);
+        // same logic as Activity delete: only BUSINESS
+        if (!hasRole(token, "USER", "OWNER")) {
+            return ResponseEntity
+                    .status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Only users can access the List of discounted/on-sale products for an app."));
+        }
+        try {
+            var result = productService.listDiscounted(ownerProjectId);
             return ResponseEntity.ok(result);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)

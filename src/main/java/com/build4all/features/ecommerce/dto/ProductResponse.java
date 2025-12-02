@@ -34,6 +34,10 @@ public class ProductResponse {
     private LocalDateTime saleStart;
     private LocalDateTime saleEnd;
 
+    // 🔥 discount info
+    private BigDecimal effectivePrice; // price used in cart / display
+    private boolean onSale;            // true if sale active now
+
     private List<AttributeValueDTO> attributes;
 
     // ===== Getters & Setters =====
@@ -88,6 +92,14 @@ public class ProductResponse {
 
     public ProductType getProductType() {
         return productType;
+    }
+
+    public BigDecimal getEffectivePrice() {
+        return effectivePrice;
+    }
+
+    public boolean isOnSale() {
+        return onSale;
     }
 
     public boolean isVirtualProduct() {
@@ -212,5 +224,13 @@ public class ProductResponse {
 
     public void setAttributes(List<AttributeValueDTO> attributes) {
         this.attributes = attributes;
+    }
+
+    public void setEffectivePrice(BigDecimal effectivePrice) {
+        this.effectivePrice = effectivePrice;
+    }
+
+    public void setOnSale(boolean onSale) {
+        this.onSale = onSale;
     }
 }
