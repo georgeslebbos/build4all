@@ -113,7 +113,7 @@ public class ActivityController {
     ) throws Exception {
 
         String token = strip(auth);
-        if (!hasRole(token, "BUSINESS", "MANAGER")) {
+        if (!hasRole(token, "BUSINESS", "MANAGER","OWNER")) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Business or Manager role required."));
         }
 
@@ -151,7 +151,7 @@ public class ActivityController {
     ) throws Exception {
 
         String token = strip(auth);
-        if (!hasRole(token, "BUSINESS", "MANAGER")) {
+        if (!hasRole(token, "BUSINESS", "MANAGER","OWNER")) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Business or Manager role required."));
         }
 
@@ -172,7 +172,7 @@ public class ActivityController {
     public ResponseEntity<?> delete(@RequestHeader("Authorization") String auth,
                                     @PathVariable Long id) {
         String token = strip(auth);
-        if (!hasRole(token, "BUSINESS")) {
+        if (!hasRole(token, "BUSINESS","OWNER")) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Only Business users can delete items."));
         }
 
@@ -476,4 +476,50 @@ public class ActivityController {
         public Long getCurrencyId() { return currencyId; }
         public void setCurrencyId(Long currencyId) { this.currencyId = currencyId; }
     }
+    
+    
+    @GetMapping("/owner/app-items")
+    @Operation(summary = "List all items for an app (by ownerProjectLinkId) – OWNER / SUPER_ADMIN only")
+    public ResponseEntity<?> getByOwnerProject(
+            @RequestHeader("Authorization") String auth,
+            @RequestParam Long ownerProjectLinkId
+    ) {
+        if (auth == null || !auth.startsWith("Bearer ")) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Missing or invalid Authorization header"));
+        }
+
+        String token = strip(auth);
+
+        // OWNER or SUPER_ADMIN only
+        if (!hasRole(token, "OWNER", "SUPER_ADMIN")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "Access denied."));
+        }
+
+        List<Activity> items = activityService.findByOwnerProject(ownerProjectLinkId);
+        if (items.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("message", "No items found for this app"));
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        List<Activity> normalized = new ArrayList<>();
+        for (Activity a : items) {
+            if (a.getEndDatetime() != null && a.getEndDatetime().isBefore(now)
+                    && !"Terminated".equalsIgnoreCase(a.getStatus())) {
+                a.setStatus("Terminated");
+                activityService.save(a);
+            }
+            normalized.add(a);
+        }
+
+        // Better to send DTOs not entities
+        return ResponseEntity.ok(
+                normalized.stream()
+                        .map(this::toDto)
+                        .toList()
+        );
+    }
+
 }

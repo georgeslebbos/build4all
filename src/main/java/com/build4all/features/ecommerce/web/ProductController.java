@@ -245,4 +245,42 @@ public class ProductController {
                     .body(Map.of("error", e.getMessage()));
         }
     }
+    
+    
+    /* ------------------------ owner app products (for dashboard) ------------------------ */
+
+    @GetMapping("/owner/app-products")
+    @Operation(summary = "List all products for one app (ownerProject)")
+    public ResponseEntity<?> listOwnerAppProducts(
+            @RequestHeader("Authorization") String auth,
+            @RequestParam Long ownerProjectId
+    ) {
+        String token = strip(auth);
+
+        // Only OWNER can use this endpoint (admin app)
+        if (!hasRole(token, "OWNER")) {
+            return ResponseEntity
+                    .status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Owner role required."));
+        }
+
+        try {
+            // This should already exist in ProductService (you’re using it in /api/products list)
+            List<ProductResponse> result = productService.listByOwnerProject(ownerProjectId);
+
+            if (result.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(Map.of("message", "No products found for this app."));
+            }
+
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+
 }
