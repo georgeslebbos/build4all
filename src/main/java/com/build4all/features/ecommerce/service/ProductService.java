@@ -161,6 +161,27 @@ public class ProductService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * New arrival products for one app (ownerProject), automatic by createdAt.
+     *
+     * @param ownerProjectId the app (AdminUserProject) id
+     * @param daysBack       number of days back to consider as "new" (default 14 if null/<=0)
+     */
+    public List<ProductResponse> listNewArrivals(Long ownerProjectId, Integer daysBack) {
+        if (ownerProjectId == null) {
+            throw new IllegalArgumentException("ownerProjectId is required");
+        }
+
+        int days = (daysBack == null || daysBack <= 0) ? 14 : daysBack;
+        LocalDateTime from = LocalDateTime.now().minusDays(days);
+
+        return productRepository
+                .findByOwnerProject_IdAndCreatedAtAfterOrderByCreatedAtDesc(ownerProjectId, from)
+                .stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+    }
+
     public List<ProductResponse> listByItemType(Long itemTypeId) {
         return productRepository.findByItemType_Id(itemTypeId).stream()
                 .map(this::toResponse)

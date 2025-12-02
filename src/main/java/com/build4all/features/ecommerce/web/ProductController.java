@@ -151,4 +151,22 @@ public class ProductController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
         }
     }
+
+    @GetMapping("/new-arrivals")
+    @Operation(summary = "List new arrival products for an app (ownerProject)")
+    public ResponseEntity<?> listNewArrivals(
+            @RequestParam Long ownerProjectId,
+            @RequestParam(required = false) Integer days
+    ) {
+        try {
+            List<ProductResponse> result = productService.listNewArrivals(ownerProjectId, days);
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
 }

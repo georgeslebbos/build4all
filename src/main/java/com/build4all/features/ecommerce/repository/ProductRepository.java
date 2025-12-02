@@ -3,6 +3,7 @@ package com.build4all.features.ecommerce.repository;
 import com.build4all.features.ecommerce.domain.Product;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
+import java.time.LocalDateTime;
 
 import java.util.List;
 
@@ -20,4 +21,10 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     // 🔁 FIX HERE: use "name", not "itemName"
     List<Product> findByNameContainingIgnoreCase(String name);
+
+    // New arrivals for one app (ownerProject), ordered newest first
+    List<Product> findByOwnerProject_IdAndCreatedAtAfterOrderByCreatedAtDesc(
+            Long ownerProjectId,
+            LocalDateTime fromDate
+    );
 }
