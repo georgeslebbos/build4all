@@ -121,18 +121,8 @@ public class ProductController {
 
     @GetMapping("/{id}")
     @Operation(summary = "Get product by id")
-    public ResponseEntity<?> getById(
-            @RequestHeader("Authorization") String auth,
-            @PathVariable Long id) {
-        String token = strip(auth);
-        // same logic as Activity delete: only BUSINESS
-        if (!hasRole(token, "OWNER")) {
-            return ResponseEntity
-                    .status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "Only Owner users can access product."));
-        }
-
-        try {
+    public ResponseEntity<?> getById(@PathVariable Long id) {
+       try {
             ProductResponse p = productService.get(id);
             return ResponseEntity.ok(p);
         } catch (IllegalArgumentException e) {
@@ -144,19 +134,9 @@ public class ProductController {
 
     @GetMapping
     @Operation(summary = "List products (by ownerProject, itemType, or category)")
-    public ResponseEntity<?> list(
-            @RequestHeader("Authorization") String auth,
-            @RequestParam Long ownerProjectId,
+    public ResponseEntity<?> list(@RequestParam Long ownerProjectId,
             @RequestParam(required = false) Long itemTypeId,
-            @RequestParam(required = false) Long categoryId
-    ) {
-        String token = strip(auth);
-        // same logic as Activity delete: only BUSINESS
-        if (!hasRole(token, "OWNER")) {
-            return ResponseEntity
-                    .status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "Only Owner users can access products."));
-        }
+            @RequestParam(required = false) Long categoryId) {
         try {
             List<ProductResponse> result;
             if (itemTypeId != null) {
