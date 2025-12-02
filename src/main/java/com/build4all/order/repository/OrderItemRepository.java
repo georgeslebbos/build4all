@@ -247,4 +247,18 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
            order by oi.createdAt desc
            """)
     List<OrderItem> findRichByBusinessId(@Param("businessId") Long businessId);
+
+    /**
+     * Best-selling items for one app (ownerProjectId).
+     * Returns rows: [ itemId (Long), totalQty (Long) ] ordered by totalQty desc.
+     */
+    @Query("""
+           SELECT oi.item.id AS itemId, SUM(oi.quantity) AS totalQty
+           FROM OrderItem oi
+           JOIN oi.item i
+           WHERE i.ownerProject.id = :ownerProjectId
+           GROUP BY oi.item.id
+           ORDER BY totalQty DESC
+           """)
+    List<Object[]> findBestSellingItemsByOwnerProject(@Param("ownerProjectId") Long ownerProjectId);
 }

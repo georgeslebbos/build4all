@@ -169,4 +169,22 @@ public class ProductController {
                     .body(Map.of("error", e.getMessage()));
         }
     }
+
+    @GetMapping("/best-sellers")
+    @Operation(summary = "List best-selling products for an app (ownerProject)")
+    public ResponseEntity<?> listBestSellers(
+            @RequestParam Long ownerProjectId,
+            @RequestParam(required = false) Integer limit
+    ) {
+        try {
+            var result = productService.listBestSellers(ownerProjectId, limit);
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
 }

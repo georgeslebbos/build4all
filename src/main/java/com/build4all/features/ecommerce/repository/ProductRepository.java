@@ -27,4 +27,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             Long ownerProjectId,
             LocalDateTime fromDate
     );
+
+    // ⭐ for best sellers
+    List<Product> findByIdIn(List<Long> ids);
 }

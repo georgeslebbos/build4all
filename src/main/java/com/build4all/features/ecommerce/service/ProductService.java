@@ -17,12 +17,16 @@ import com.build4all.features.ecommerce.dto.ProductRequest;
 import com.build4all.features.ecommerce.dto.ProductResponse;
 import com.build4all.features.ecommerce.dto.ProductUpdateRequest;
 import com.build4all.features.ecommerce.repository.ProductRepository;
+import com.build4all.order.repository.OrderItemRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -35,19 +39,22 @@ public class ProductService {
     private final AdminUserProjectRepository adminUserProjectRepository;
     private final ItemAttributeRepository itemAttributeRepository;
     private final ItemAttributeValueRepository itemAttributeValueRepository;
+    private final OrderItemRepository orderItemRepository;
 
     public ProductService(ProductRepository productRepository,
                           ItemTypeRepository itemTypeRepository,
                           CurrencyRepository currencyRepository,
                           AdminUserProjectRepository adminUserProjectRepository,
                           ItemAttributeRepository itemAttributeRepository,
-                          ItemAttributeValueRepository itemAttributeValueRepository) {
+                          ItemAttributeValueRepository itemAttributeValueRepository,
+                          OrderItemRepository orderItemRepository) {
         this.productRepository = productRepository;
         this.itemTypeRepository = itemTypeRepository;
         this.currencyRepository = currencyRepository;
         this.adminUserProjectRepository = adminUserProjectRepository;
         this.itemAttributeRepository = itemAttributeRepository;
         this.itemAttributeValueRepository = itemAttributeValueRepository;
+        this.orderItemRepository = orderItemRepository;
     }
 
     // ---------------- CREATE ----------------
@@ -180,6 +187,52 @@ public class ProductService {
                 .stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Best-selling products for one app (ownerProjectId), based on total quantity sold.
+     *
+     * @param ownerProjectId app (AdminUserProject) id
+     * @param limit          max number of products to return (default 10 if null/<=0)
+     */
+    @Transactional(Transactional.TxType.SUPPORTS)
+    public List<ProductResponse> listBestSellers(Long ownerProjectId, Integer limit) {
+        if (ownerProjectId == null) {
+            throw new IllegalArgumentException("ownerProjectId is required");
+        }
+
+        int max = (limit == null || limit <= 0) ? 10 : limit;
+
+        // 1) Get [itemId, totalQty] ordered by totalQty desc
+        List<Object[]> rows = orderItemRepository.findBestSellingItemsByOwnerProject(ownerProjectId);
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+
+        // 2) Extract item IDs in order and apply limit
+        List<Long> itemIdsOrdered = rows.stream()
+                .map(r -> ((Number) r[0]).longValue())
+                .distinct()
+                .limit(max)
+                .toList();
+
+        if (itemIdsOrdered.isEmpty()) {
+            return List.of();
+        }
+
+        // 3) Load products by IDs
+        List<Product> products = productRepository.findByIdIn(itemIdsOrdered);
+        Map<Long, Product> productById = new HashMap<>();
+        for (Product p : products) {
+            productById.put(p.getId(), p);
+        }
+
+        // 4) Preserve ordering according to sales ranking
+        return itemIdsOrdered.stream()
+                .map(productById::get)
+                .filter(Objects::nonNull)
+                .map(this::toResponse)
+                .toList();
     }
 
     public List<ProductResponse> listByItemType(Long itemTypeId) {
