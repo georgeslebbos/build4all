@@ -26,7 +26,7 @@ public abstract class Item {
     private AdminUserProject ownerProject;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "business_id", nullable = false)
+    @JoinColumn(name = "business_id", nullable = true)
     @com.fasterxml.jackson.annotation.JsonIgnore
     private Businesses business;
 

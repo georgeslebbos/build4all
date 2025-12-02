@@ -1,11 +1,23 @@
 package com.build4all.features.ecommerce.repository;
 
+import com.build4all.features.ecommerce.domain.Product;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
-import com.build4all.features.ecommerce.domain.Product;
+import java.util.List;
 
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Long> {
-    // add specific queries later if needed (by SKU, low stock, etc.)
+
+    // All products in a given owner project (aup_id)
+    List<Product> findByOwnerProject_Id(Long ownerProjectId);
+
+    // By ItemType
+    List<Product> findByItemType_Id(Long itemTypeId);
+
+    // By Category (through ItemType)
+    List<Product> findByItemType_Category_Id(Long categoryId);
+
+    // 🔁 FIX HERE: use "name", not "itemName"
+    List<Product> findByNameContainingIgnoreCase(String name);
 }
