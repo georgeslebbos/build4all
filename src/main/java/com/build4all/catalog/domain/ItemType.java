@@ -27,6 +27,13 @@ public class ItemType {
     @JoinColumn(name = "category_id", nullable = false)
     private Category category;
 
+    /**
+     * NEW: internal flag to know this is the default type for its category.
+     * Used when client sends only categoryId (no itemTypeId).
+     */
+    @Column(name = "is_default_for_category", nullable = false)
+    private boolean defaultForCategory = false;
+
     public ItemType() {}
 
     public ItemType(String name, String icon, String iconLibrary, Category category) {
@@ -51,4 +58,13 @@ public class ItemType {
 
     public Category getCategory() { return category; }
     public void setCategory(Category category) { this.category = category; }
+
+    // 🔴 NEW
+    public boolean isDefaultForCategory() {
+        return defaultForCategory;
+    }
+
+    public void setDefaultForCategory(boolean defaultForCategory) {
+        this.defaultForCategory = defaultForCategory;
+    }
 }

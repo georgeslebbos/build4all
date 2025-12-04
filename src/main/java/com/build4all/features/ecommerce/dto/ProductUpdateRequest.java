@@ -7,6 +7,10 @@ import java.util.List;
 
 public class ProductUpdateRequest {
 
+    // 🔴 NEW: allow changing the type/category on update
+    private Long itemTypeId;   // optional
+    private Long categoryId;   // optional
+
     private String name;
     private String description;
     private BigDecimal price;
@@ -31,6 +35,13 @@ public class ProductUpdateRequest {
 
     // ===== Getters & Setters =====
 
+    public Long getItemTypeId() {          // 🔴 NEW
+        return itemTypeId;
+    }
+
+    public Long getCategoryId() {          // 🔴 NEW
+        return categoryId;
+    }
 
     public String getName() {
         return name;
@@ -98,6 +109,14 @@ public class ProductUpdateRequest {
 
     public List<AttributeValueDTO> getAttributes() {
         return attributes;
+    }
+
+    public void setItemTypeId(Long itemTypeId) {   // 🔴 NEW
+        this.itemTypeId = itemTypeId;
+    }
+
+    public void setCategoryId(Long categoryId) {   // 🔴 NEW
+        this.categoryId = categoryId;
     }
 
     public void setName(String name) {

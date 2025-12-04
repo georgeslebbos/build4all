@@ -9,6 +9,7 @@ public class ProductRequest {
 
     private Long ownerProjectId;  // aup_id
     private Long itemTypeId;
+    private Long categoryId;   // 🔴 NEW
     private Long currencyId;      // optional; if null use default
 
     private String name;
@@ -41,6 +42,11 @@ public class ProductRequest {
 
     public Long getItemTypeId() {
         return itemTypeId;
+    }
+
+    // 🔴 NEW
+    public Long getCategoryId() {
+        return categoryId;
     }
 
     public Long getCurrencyId() {
@@ -121,6 +127,11 @@ public class ProductRequest {
 
     public void setItemTypeId(Long itemTypeId) {
         this.itemTypeId = itemTypeId;
+    }
+
+    // 🔴 NEW
+    public void setCategoryId(Long categoryId) {
+        this.categoryId = categoryId;
     }
 
     public void setCurrencyId(Long currencyId) {

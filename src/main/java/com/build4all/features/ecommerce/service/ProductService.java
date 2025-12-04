@@ -18,6 +18,8 @@ import com.build4all.features.ecommerce.dto.ProductResponse;
 import com.build4all.features.ecommerce.dto.ProductUpdateRequest;
 import com.build4all.features.ecommerce.repository.ProductRepository;
 import com.build4all.order.repository.OrderItemRepository;
+import com.build4all.catalog.domain.Category;
+import com.build4all.catalog.repository.CategoryRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
@@ -40,6 +42,7 @@ public class ProductService {
     private final ItemAttributeRepository itemAttributeRepository;
     private final ItemAttributeValueRepository itemAttributeValueRepository;
     private final OrderItemRepository orderItemRepository;
+    private final CategoryRepository categoryRepository;
 
     public ProductService(ProductRepository productRepository,
                           ItemTypeRepository itemTypeRepository,
@@ -47,7 +50,8 @@ public class ProductService {
                           AdminUserProjectRepository adminUserProjectRepository,
                           ItemAttributeRepository itemAttributeRepository,
                           ItemAttributeValueRepository itemAttributeValueRepository,
-                          OrderItemRepository orderItemRepository) {
+                          OrderItemRepository orderItemRepository,
+                          CategoryRepository categoryRepository) {
         this.productRepository = productRepository;
         this.itemTypeRepository = itemTypeRepository;
         this.currencyRepository = currencyRepository;
@@ -55,6 +59,31 @@ public class ProductService {
         this.itemAttributeRepository = itemAttributeRepository;
         this.itemAttributeValueRepository = itemAttributeValueRepository;
         this.orderItemRepository = orderItemRepository;
+        this.categoryRepository = categoryRepository;   // 🔴 NEW
+    }
+
+    /**
+     * Resolve the ItemType when the client only sends categoryId.
+     * If a default ItemType exists for that category → reuse it.
+     * Otherwise create a new hidden "DEFAULT" ItemType linked to that category.
+     */
+    private ItemType resolveDefaultItemTypeForCategory(Long categoryId) {
+        if (categoryId == null) {
+            throw new IllegalArgumentException("categoryId is required when itemTypeId is not provided");
+        }
+
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid categoryId: " + categoryId));
+
+        return itemTypeRepository.findByCategory_IdAndDefaultForCategoryTrue(categoryId)
+                .orElseGet(() -> {
+                    ItemType t = new ItemType();
+                    t.setCategory(category);
+                    // You can choose any internal name; user never sees it
+                    t.setName("DEFAULT_" + category.getId());
+                    t.setDefaultForCategory(true);
+                    return itemTypeRepository.save(t);
+                });
     }
 
     // ---------------- CREATE ----------------
@@ -67,8 +96,18 @@ public class ProductService {
         AdminUserProject ownerProject = adminUserProjectRepository.findById(request.getOwnerProjectId())
                 .orElseThrow(() -> new IllegalArgumentException("Owner project (aup_id) not found"));
 
-        ItemType itemType = itemTypeRepository.findById(request.getItemTypeId())
-                .orElseThrow(() -> new IllegalArgumentException("Invalid item type"));
+        // Resolve ItemType depending on what the client sends
+        ItemType itemType;
+        if (request.getItemTypeId() != null) {
+            // Advanced mode: client knows the ItemType
+            itemType = itemTypeRepository.findById(request.getItemTypeId())
+                    .orElseThrow(() -> new IllegalArgumentException("Invalid item type"));
+        } else if (request.getCategoryId() != null) {
+            // Simple mode: client only knows the Category
+            itemType = resolveDefaultItemTypeForCategory(request.getCategoryId());
+        } else {
+            throw new IllegalArgumentException("Either itemTypeId or categoryId must be provided");
+        }
 
         Currency currency;
         if (request.getCurrencyId() != null) {
@@ -123,6 +162,22 @@ public class ProductService {
     public ProductResponse update(Long id, ProductUpdateRequest request) {
         Product p = productRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Product not found"));
+
+        // 🔴 NEW: handle change of ItemType / Category (optional)
+        if (request.getItemTypeId() != null || request.getCategoryId() != null) {
+            ItemType newItemType;
+
+            if (request.getItemTypeId() != null) {
+                // Advanced mode: client explicitly chooses ItemType
+                newItemType = itemTypeRepository.findById(request.getItemTypeId())
+                        .orElseThrow(() -> new IllegalArgumentException("Invalid item type"));
+            } else {
+                // Simple mode: client only provides Category → use default ItemType for that category
+                newItemType = resolveDefaultItemTypeForCategory(request.getCategoryId());
+            }
+
+            p.setItemType(newItemType);
+        }
 
         if (request.getName() != null) p.setItemName(request.getName());
         if (request.getDescription() != null) p.setDescription(request.getDescription());

@@ -17,4 +17,7 @@ public interface ItemTypeRepository extends JpaRepository<ItemType, Long> {
 
     // Direct by category
     List<ItemType> findByCategory_IdOrderByNameAsc(Long categoryId);
+
+    // 🔴 NEW: find the "default" ItemType for a given category
+    Optional<ItemType> findByCategory_IdAndDefaultForCategoryTrue(Long categoryId);
 }
