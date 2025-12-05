@@ -135,6 +135,20 @@ public class ProductService {
             p.setStock(request.getStock());
         }
 
+        // --- TAX CONFIG FROM REQUEST (Item-level) ---
+        if (request.getTaxable() != null) {
+            p.setTaxable(request.getTaxable());
+        }
+        if (request.getTaxClass() != null) {
+            p.setTaxClass(request.getTaxClass());
+        }
+
+        // --- SHIPPING METRICS (Product-level, only used if not virtual) ---
+        p.setWeightKg(request.getWeightKg());
+        p.setWidthCm(request.getWidthCm());
+        p.setHeightCm(request.getHeightCm());
+        p.setLengthCm(request.getLengthCm());
+
         // product-specific
         p.setSku(request.getSku());
         p.setProductType(request.getProductType());
@@ -185,6 +199,20 @@ public class ProductService {
         if (request.getStatus() != null) p.setStatus(request.getStatus());
         if (request.getImageUrl() != null) p.setImageUrl(request.getImageUrl());
         if (request.getStock() != null) p.setStock(request.getStock());
+
+        // --- TAX ---
+        if (request.getTaxable() != null) {
+            p.setTaxable(request.getTaxable());
+        }
+        if (request.getTaxClass() != null) {
+            p.setTaxClass(request.getTaxClass());
+        }
+
+        // --- SHIPPING ---
+        if (request.getWeightKg() != null) p.setWeightKg(request.getWeightKg());
+        if (request.getWidthCm() != null) p.setWidthCm(request.getWidthCm());
+        if (request.getHeightCm() != null) p.setHeightCm(request.getHeightCm());
+        if (request.getLengthCm() != null) p.setLengthCm(request.getLengthCm());
 
         if (request.getSku() != null) p.setSku(request.getSku());
         if (request.getProductType() != null) p.setProductType(request.getProductType());
@@ -395,6 +423,16 @@ public class ProductService {
                 })
                 .collect(Collectors.toList());
         r.setAttributes(attrs);
+
+        // --- TAX ---
+        r.setTaxable(p.isTaxable());
+        r.setTaxClass(p.getTaxClass());
+
+        // --- SHIPPING ---
+        r.setWeightKg(p.getWeightKg());
+        r.setWidthCm(p.getWidthCm());
+        r.setHeightCm(p.getHeightCm());
+        r.setLengthCm(p.getLengthCm());
 
         return r;
     }

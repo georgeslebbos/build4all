@@ -1,10 +1,13 @@
 package com.build4all.order.web;
 
 import com.build4all.order.domain.OrderItem;
+import com.build4all.order.dto.CheckoutRequest;
+import com.build4all.order.dto.CheckoutSummaryResponse;
 import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.order.service.OrderService;
 import com.build4all.security.JwtUtil;
 import io.swagger.v3.oas.annotations.Operation;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -58,6 +61,8 @@ public class OrderController {
             case "COMPLETED" -> "Completed";
             case "CANCELED" -> "Canceled";
             case "CANCEL_REQUESTED" -> "CancelRequested";
+            case "REJECTED" -> "Rejected";
+            case "REFUNDED" -> "Refunded";
             default -> s.isEmpty() ? "" : s.charAt(0) + s.substring(1).toLowerCase();
         };
     }
@@ -147,7 +152,7 @@ public class OrderController {
         out.put("id", oi.getId());
         out.put("orderStatus", orderStatus);
         out.put("wasPaid", wasPaid);
-        out.put("numberOfParticipants", oi.getQuantity());
+        out.put("quantity", oi.getQuantity());
         out.put("totalPrice", totalPrice);
         out.put("paymentMethod", paymentMethod);
         out.put("orderDatetime", (o != null) ? tryGet(o, "getOrderDate", "getCreatedAt") : oi.getCreatedAt());
@@ -220,6 +225,17 @@ public class OrderController {
         Long userId = jwt.extractId(strip(auth));
         var rows = orderItemRepo.findUserOrderCardsByStatuses(userId, List.of("CANCELED"));
         return ResponseEntity.ok(rows.stream().map(this::toUserCardShape).toList());
+    }
+
+    /* ----------------------------------- checkout (NEW) ------------------------------------ */
+
+    @PostMapping("/checkout")
+    @Operation(summary = "Create order from cart (activities + ecommerce)")
+    public ResponseEntity<?> checkout(@RequestHeader("Authorization") String auth,
+                                      @Valid @RequestBody CheckoutRequest request) {
+        Long userId = jwt.extractId(strip(auth));
+        CheckoutSummaryResponse summary = orderService.checkout(userId, request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(summary);
     }
 
     /* ----------------------------------- actions ------------------------------------ */

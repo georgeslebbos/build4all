@@ -1,10 +1,12 @@
 package com.build4all.order.domain;
 
 import com.build4all.catalog.domain.Currency;
+import com.build4all.catalog.domain.Country;
+import com.build4all.catalog.domain.Region;
 import com.build4all.user.domain.Users;
 import jakarta.persistence.*;
 
-        import java.math.BigDecimal;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -52,6 +54,37 @@ public class Order {
     @OnDelete(action = OnDeleteAction.CASCADE)
     private Currency currency;
 
+    // --- Shipping & tax ---
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "shipping_country_id")
+    private Country shippingCountry;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "shipping_region_id")
+    private Region shippingRegion;
+
+    @Column(name = "shipping_city")
+    private String shippingCity;
+
+    @Column(name = "shipping_postal_code")
+    private String shippingPostalCode;
+
+    @Column(name = "shipping_method_id")
+    private Long shippingMethodId;
+
+    @Column(name = "shipping_method_name")
+    private String shippingMethodName;
+
+    @Column(name = "shipping_total", precision = 10, scale = 2)
+    private BigDecimal shippingTotal = BigDecimal.ZERO;
+
+    @Column(name = "item_tax_total", precision = 10, scale = 2)
+    private BigDecimal itemTaxTotal = BigDecimal.ZERO;
+
+    @Column(name = "shipping_tax_total", precision = 10, scale = 2)
+    private BigDecimal shippingTaxTotal = BigDecimal.ZERO;
+
     // ===== Helper methods to manage lines =====
     public void addOrderItem(OrderItem item) {
         orderItems.add(item);
@@ -85,4 +118,76 @@ public class Order {
 
     public List<OrderItem> getOrderItems() { return orderItems; }
     public void setOrderItems(List<OrderItem> orderItems) { this.orderItems = orderItems; }
+
+    public Country getShippingCountry() {
+        return shippingCountry;
+    }
+
+    public void setShippingCountry(Country shippingCountry) {
+        this.shippingCountry = shippingCountry;
+    }
+
+    public Region getShippingRegion() {
+        return shippingRegion;
+    }
+
+    public void setShippingRegion(Region shippingRegion) {
+        this.shippingRegion = shippingRegion;
+    }
+
+    public String getShippingCity() {
+        return shippingCity;
+    }
+
+    public void setShippingCity(String shippingCity) {
+        this.shippingCity = shippingCity;
+    }
+
+    public String getShippingPostalCode() {
+        return shippingPostalCode;
+    }
+
+    public void setShippingPostalCode(String shippingPostalCode) {
+        this.shippingPostalCode = shippingPostalCode;
+    }
+
+    public Long getShippingMethodId() {
+        return shippingMethodId;
+    }
+
+    public void setShippingMethodId(Long shippingMethodId) {
+        this.shippingMethodId = shippingMethodId;
+    }
+
+    public String getShippingMethodName() {
+        return shippingMethodName;
+    }
+
+    public void setShippingMethodName(String shippingMethodName) {
+        this.shippingMethodName = shippingMethodName;
+    }
+
+    public BigDecimal getShippingTotal() {
+        return shippingTotal;
+    }
+
+    public void setShippingTotal(BigDecimal shippingTotal) {
+        this.shippingTotal = shippingTotal;
+    }
+
+    public BigDecimal getItemTaxTotal() {
+        return itemTaxTotal;
+    }
+
+    public void setItemTaxTotal(BigDecimal itemTaxTotal) {
+        this.itemTaxTotal = itemTaxTotal;
+    }
+
+    public BigDecimal getShippingTaxTotal() {
+        return shippingTaxTotal;
+    }
+
+    public void setShippingTaxTotal(BigDecimal shippingTaxTotal) {
+        this.shippingTaxTotal = shippingTaxTotal;
+    }
 }

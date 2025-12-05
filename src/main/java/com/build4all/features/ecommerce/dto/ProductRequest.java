@@ -1,5 +1,6 @@
 package com.build4all.features.ecommerce.dto;
 
+import com.build4all.tax.domain.TaxClass;
 import com.build4all.features.ecommerce.domain.ProductType;
 
 import java.math.BigDecimal;
@@ -34,6 +35,15 @@ public class ProductRequest {
 
     private List<AttributeValueDTO> attributes; // brand, model, color, etc.
 
+    // --- TAX ---
+    private Boolean taxable;        // nullable → default in service
+    private TaxClass taxClass;      // STANDARD, REDUCED, ZERO
+
+    // --- SHIPPING (physical products) ---
+    private BigDecimal weightKg;
+    private BigDecimal widthCm;
+    private BigDecimal heightCm;
+    private BigDecimal lengthCm;
     // ===== Getters & Setters =====
 
     public Long getOwnerProjectId() {
@@ -121,6 +131,14 @@ public class ProductRequest {
         return attributes;
     }
 
+    public Boolean getTaxable() { return taxable; }
+    public TaxClass getTaxClass() { return taxClass; }
+
+    public BigDecimal getWeightKg() { return weightKg; }
+    public BigDecimal getWidthCm() { return widthCm; }
+    public BigDecimal getHeightCm() { return heightCm; }
+    public BigDecimal getLengthCm() { return lengthCm; }
+
     public void setOwnerProjectId(Long ownerProjectId) {
         this.ownerProjectId = ownerProjectId;
     }
@@ -205,4 +223,12 @@ public class ProductRequest {
     public void setAttributes(List<AttributeValueDTO> attributes) {
         this.attributes = attributes;
     }
+
+    public void setTaxable(Boolean taxable) { this.taxable = taxable; }
+    public void setTaxClass(TaxClass taxClass) { this.taxClass = taxClass; }
+
+    public void setWeightKg(BigDecimal weightKg) { this.weightKg = weightKg; }
+    public void setWidthCm(BigDecimal widthCm) { this.widthCm = widthCm; }
+    public void setHeightCm(BigDecimal heightCm) { this.heightCm = heightCm; }
+    public void setLengthCm(BigDecimal lengthCm) { this.lengthCm = lengthCm; }
 }

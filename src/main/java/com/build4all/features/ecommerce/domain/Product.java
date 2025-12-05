@@ -43,6 +43,18 @@ public class Product extends Item {
     @Column(name = "sale_end")
     private LocalDateTime saleEnd;
 
+    @Column(name = "weight_kg")
+    private BigDecimal weightKg;
+
+    @Column(name = "width_cm")
+    private BigDecimal widthCm;
+
+    @Column(name = "height_cm")
+    private BigDecimal heightCm;
+
+    @Column(name = "length_cm")
+    private BigDecimal lengthCm;
+
     // ===== Getters & Setters =====
 
     public String getSku() { return sku; }
@@ -98,5 +110,23 @@ public class Product extends Item {
             return salePrice;
         }
         return getPrice();
+    }
+
+    public BigDecimal getWeightKg() { return weightKg; }
+    public void setWeightKg(BigDecimal weightKg) { this.weightKg = weightKg; }
+
+    public BigDecimal getWidthCm() { return widthCm; }
+    public void setWidthCm(BigDecimal widthCm) { this.widthCm = widthCm; }
+
+    public BigDecimal getHeightCm() { return heightCm; }
+    public void setHeightCm(BigDecimal heightCm) { this.heightCm = heightCm; }
+
+    public BigDecimal getLengthCm() { return lengthCm; }
+    public void setLengthCm(BigDecimal lengthCm) { this.lengthCm = lengthCm; }
+
+    @Transient
+    public boolean requiresShipping() {
+        // for now: if not virtual → needs shipping
+        return !isVirtualProduct();
     }
 }

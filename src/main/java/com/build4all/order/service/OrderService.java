@@ -1,16 +1,18 @@
 package com.build4all.order.service;
 
 import com.build4all.order.domain.OrderItem;
+import com.build4all.order.dto.CheckoutRequest;
+import com.build4all.order.dto.CheckoutSummaryResponse;
 
 import java.util.List;
 
 public interface OrderService {
 
-    OrderItem createBookItem(Long userId, Long itemId, int participants,
+    OrderItem createBookItem(Long userId, Long itemId, int quantity,
                              String stripePaymentId, Long currencyId);
 
     OrderItem createCashorderByBusiness(Long itemId, Long businessUserId,
-                                          int participants, boolean wasPaid, Long currencyId);
+                                        int quantity, boolean wasPaid, Long currencyId);
 
     boolean hasUserAlreadyBooked(Long itemId, Long userId);
 
@@ -33,4 +35,7 @@ public interface OrderService {
     void markPaid(Long orderItemId, Long businessId);
 
     void deleteordersByItemId(Long itemId);
+
+    // NEW generic checkout for ecommerce + activities
+    CheckoutSummaryResponse checkout(Long userId, CheckoutRequest request);
 }

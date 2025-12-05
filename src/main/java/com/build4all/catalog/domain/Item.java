@@ -2,6 +2,7 @@ package com.build4all.catalog.domain;
 
 import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.business.domain.Businesses;
+import com.build4all.tax.domain.TaxClass;
 import jakarta.persistence.*;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
@@ -43,6 +44,13 @@ public abstract class Item {
 
     @Column(name = "price")
     private BigDecimal price;
+
+    @Column(name = "taxable", nullable = false)
+    private boolean taxable = true;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "tax_class", nullable = false)
+    private TaxClass taxClass = TaxClass.STANDARD;
 
     @Column(name = "status", nullable = false)
     private String status = "Upcoming";
@@ -91,6 +99,12 @@ public abstract class Item {
     public BigDecimal getPrice() { return price; }
     public void setPrice(BigDecimal price) { this.price = price; }
 
+    public boolean isTaxable() { return taxable; }
+    public void setTaxable(boolean taxable) { this.taxable = taxable; }
+
+    public TaxClass getTaxClass() { return taxClass; }
+    public void setTaxClass(TaxClass taxClass) { this.taxClass = taxClass; }
+
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
 
@@ -108,4 +122,12 @@ public abstract class Item {
 
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
 }
