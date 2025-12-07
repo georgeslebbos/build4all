@@ -197,10 +197,8 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
            select new map(
                oi.id as id,
                o.status.name as orderStatus,
-               oi.quantity as numberOfParticipants,
-               i.startDatetime as startDatetime,
+               oi.quantity as quantity,
                i.name as itemName,
-               i.location as location,
                i.imageUrl as imageUrl,
                (case when upper(o.status.name) = 'COMPLETED' then true else false end) as wasPaid
            )
@@ -216,10 +214,8 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
            select new map(
              oi.id as id,
              o.status.name as orderStatus,
-             oi.quantity as numberOfParticipants,
-             i.startDatetime as startDatetime,
+             oi.quantity as quantity,
              i.name as itemName,
-             i.location as location,
              i.imageUrl as imageUrl,
              (case when upper(o.status.name) = 'COMPLETED' then true else false end) as wasPaid
            )
