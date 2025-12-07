@@ -20,13 +20,17 @@ public class CheckoutSummaryResponse {
 
     private List<CheckoutLineSummary> lines;
 
+    // 🔹 NEW: coupon fields (do NOT touch existing constructor)
+    private String couponCode;
+    private BigDecimal couponDiscount;
+
     // ===== Constructors =====
 
     // No-arg constructor (needed by Jackson / JPA / frameworks)
     public CheckoutSummaryResponse() {
     }
 
-    // All-args constructor used in OrderServiceImpl
+    // All-args constructor used in OrderServiceImpl (kept as-is)
     public CheckoutSummaryResponse(Long orderId,
                                    LocalDateTime orderDate,
                                    BigDecimal itemsSubtotal,
@@ -129,5 +133,23 @@ public class CheckoutSummaryResponse {
 
     public void setLines(List<CheckoutLineSummary> lines) {
         this.lines = lines;
+    }
+
+    // 🔹 NEW: couponCode / couponDiscount
+
+    public String getCouponCode() {
+        return couponCode;
+    }
+
+    public void setCouponCode(String couponCode) {
+        this.couponCode = couponCode;
+    }
+
+    public BigDecimal getCouponDiscount() {
+        return couponDiscount;
+    }
+
+    public void setCouponDiscount(BigDecimal couponDiscount) {
+        this.couponDiscount = couponDiscount;
     }
 }

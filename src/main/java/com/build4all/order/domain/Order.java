@@ -4,6 +4,7 @@ import com.build4all.catalog.domain.Currency;
 import com.build4all.catalog.domain.Country;
 import com.build4all.catalog.domain.Region;
 import com.build4all.user.domain.Users;
+import com.build4all.payment.domain.PaymentMethod; // 🔹 NEW import
 import jakarta.persistence.*;
 
 import java.math.BigDecimal;
@@ -84,6 +85,19 @@ public class Order {
 
     @Column(name = "shipping_tax_total", precision = 10, scale = 2)
     private BigDecimal shippingTaxTotal = BigDecimal.ZERO;
+
+    // --- Coupon ---
+
+    @Column(name = "coupon_code", length = 100)
+    private String couponCode;
+
+    @Column(name = "coupon_discount", precision = 10, scale = 2)
+    private BigDecimal couponDiscount = BigDecimal.ZERO;
+
+    // --- Payment method (STRIPE, CASH, PAYPAL, etc.) ---
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "payment_method_id")
+    private PaymentMethod paymentMethod;
 
     // ===== Helper methods to manage lines =====
     public void addOrderItem(OrderItem item) {
@@ -189,5 +203,29 @@ public class Order {
 
     public void setShippingTaxTotal(BigDecimal shippingTaxTotal) {
         this.shippingTaxTotal = shippingTaxTotal;
+    }
+
+    public String getCouponCode() {
+        return couponCode;
+    }
+
+    public void setCouponCode(String couponCode) {
+        this.couponCode = couponCode;
+    }
+
+    public BigDecimal getCouponDiscount() {
+        return couponDiscount;
+    }
+
+    public void setCouponDiscount(BigDecimal couponDiscount) {
+        this.couponDiscount = couponDiscount;
+    }
+
+    public PaymentMethod getPaymentMethod() {
+        return paymentMethod;
+    }
+
+    public void setPaymentMethod(PaymentMethod paymentMethod) {
+        this.paymentMethod = paymentMethod;
     }
 }

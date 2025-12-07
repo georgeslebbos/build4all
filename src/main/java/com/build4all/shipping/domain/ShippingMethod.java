@@ -128,4 +128,12 @@ public class ShippingMethod {
     public void setRegion(Region region) {
         this.region = region;
     }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
 }

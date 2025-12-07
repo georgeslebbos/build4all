@@ -17,5 +17,9 @@ public interface CartService {
     void clearCart(Long userId);
 
     // converts active cart to Order + OrderItems, returns created orderId
-    Long checkout(Long userId, String paymentMethod, String stripePaymentId, Long currencyId);
+    Long checkout(Long userId,
+                  String paymentMethod,
+                  String stripePaymentId,
+                  Long currencyId,
+                  String couponCode);
 }

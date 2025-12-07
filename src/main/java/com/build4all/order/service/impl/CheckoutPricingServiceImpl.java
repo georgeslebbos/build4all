@@ -8,6 +8,8 @@ import com.build4all.order.dto.CheckoutRequest;
 import com.build4all.order.dto.CheckoutSummaryResponse;
 import com.build4all.order.dto.ShippingAddressDTO;
 import com.build4all.order.service.CheckoutPricingService;
+import com.build4all.promo.domain.Coupon;
+import com.build4all.promo.service.CouponService;
 import com.build4all.shipping.dto.ShippingQuote;
 import com.build4all.shipping.service.ShippingService;
 import com.build4all.tax.service.TaxService;
@@ -25,13 +27,16 @@ public class CheckoutPricingServiceImpl implements CheckoutPricingService {
     private final ShippingService shippingService;
     private final TaxService taxService;
     private final CurrencyRepository currencyRepository;
+    private final CouponService couponService;
 
     public CheckoutPricingServiceImpl(ShippingService shippingService,
                                       TaxService taxService,
-                                      CurrencyRepository currencyRepository) {
+                                      CurrencyRepository currencyRepository,
+                                      CouponService couponService) {
         this.shippingService = shippingService;
         this.taxService = taxService;
         this.currencyRepository = currencyRepository;
+        this.couponService = couponService;
     }
 
     @Override
@@ -61,7 +66,7 @@ public class CheckoutPricingServiceImpl implements CheckoutPricingService {
         // ---- Shipping & tax ----
         ShippingAddressDTO address = request.getShippingAddress();
 
-        // Make sure the selected shipping method is present on the address DTO
+        // Keep your previous behavior: copy selected shippingMethodId into address
         if (address != null && request.getShippingMethodId() != null) {
             address.setShippingMethodId(request.getShippingMethodId());
         }
@@ -69,7 +74,6 @@ public class CheckoutPricingServiceImpl implements CheckoutPricingService {
         BigDecimal shippingTotal = BigDecimal.ZERO;
 
         if (address != null && address.getShippingMethodId() != null) {
-            // ShippingService.getQuote(ownerProjectId, address, lines)
             ShippingQuote quote = shippingService.getQuote(
                     ownerProjectId,
                     address,
@@ -92,16 +96,37 @@ public class CheckoutPricingServiceImpl implements CheckoutPricingService {
                 shippingTotal
         );
 
+        // ---- Coupon logic ----
+        BigDecimal couponDiscount = BigDecimal.ZERO;
+        String couponCode = request.getCouponCode();
+
+        if (couponCode != null && !couponCode.isBlank()) {
+            Coupon coupon = couponService.validateForOrder(
+                    ownerProjectId,
+                    couponCode,
+                    itemsSubtotal
+            );
+            if (coupon != null) {
+                couponDiscount = couponService.computeDiscount(coupon, itemsSubtotal);
+            }
+        }
+
+        // ---- Grand total (after discount) ----
         BigDecimal grandTotal = itemsSubtotal
                 .add(shippingTotal)
                 .add(itemTaxTotal)
-                .add(shippingTaxTotal);
+                .add(shippingTaxTotal)
+                .subtract(couponDiscount);
+
+        if (grandTotal.compareTo(BigDecimal.ZERO) < 0) {
+            grandTotal = BigDecimal.ZERO;
+        }
 
         // ---- Build line summaries ----
         List<CheckoutLineSummary> lineSummaries = lines.stream()
                 .map(line -> new CheckoutLineSummary(
                         line.getItemId(),
-                        null, // itemName can be filled on client or another layer
+                        null, // itemName can be filled on client or in another layer
                         line.getQuantity(),
                         line.getUnitPrice(),
                         line.getLineSubtotal()
@@ -117,9 +142,14 @@ public class CheckoutPricingServiceImpl implements CheckoutPricingService {
         response.setGrandTotal(grandTotal);
         response.setLines(lineSummaries);
 
+        // NEW: coupon info in response
+        response.setCouponCode(couponCode);
+        response.setCouponDiscount(couponDiscount);
+
         if (currencyId != null) {
             Currency currency = currencyRepository.findById(currencyId).orElse(null);
             if (currency != null) {
+                response.setCurrencyCode(currency.getCode());
                 response.setCurrencySymbol(currency.getSymbol());
             }
         }

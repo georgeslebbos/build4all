@@ -10,16 +10,12 @@ import com.build4all.cart.dto.UpdateCartItemRequest;
 import com.build4all.cart.repository.CartItemRepository;
 import com.build4all.cart.repository.CartRepository;
 import com.build4all.cart.service.CartService;
-import com.build4all.catalog.domain.Currency;
 import com.build4all.catalog.domain.Item;
-import com.build4all.catalog.repository.CurrencyRepository;
 import com.build4all.catalog.repository.ItemRepository;
-import com.build4all.order.domain.Order;
-import com.build4all.order.domain.OrderItem;
-import com.build4all.order.domain.OrderStatus;
-import com.build4all.order.repository.OrderItemRepository;
-import com.build4all.order.repository.OrderRepository;
-import com.build4all.order.repository.OrderStatusRepository;
+import com.build4all.order.dto.CartLine;
+import com.build4all.order.dto.CheckoutRequest;
+import com.build4all.order.dto.CheckoutSummaryResponse;
+import com.build4all.order.service.OrderService;
 import com.build4all.user.domain.Users;
 import com.build4all.user.repository.UsersRepository;
 import jakarta.transaction.Transactional;
@@ -37,28 +33,18 @@ public class CartServiceImpl implements CartService {
     private final CartItemRepository cartItemRepo;
     private final UsersRepository usersRepo;
     private final ItemRepository itemRepo;
-    private final CurrencyRepository currencyRepo;
-
-    private final OrderRepository orderRepo;
-    private final OrderItemRepository orderItemRepo;
-    private final OrderStatusRepository orderStatusRepo;
+    private final OrderService orderService;
 
     public CartServiceImpl(CartRepository cartRepo,
                            CartItemRepository cartItemRepo,
                            UsersRepository usersRepo,
                            ItemRepository itemRepo,
-                           CurrencyRepository currencyRepo,
-                           OrderRepository orderRepo,
-                           OrderItemRepository orderItemRepo,
-                           OrderStatusRepository orderStatusRepo) {
+                           OrderService orderService) {
         this.cartRepo = cartRepo;
         this.cartItemRepo = cartItemRepo;
         this.usersRepo = usersRepo;
         this.itemRepo = itemRepo;
-        this.currencyRepo = currencyRepo;
-        this.orderRepo = orderRepo;
-        this.orderItemRepo = orderItemRepo;
-        this.orderStatusRepo = orderStatusRepo;
+        this.orderService = orderService;
     }
 
     /* ==============================
@@ -248,54 +234,77 @@ public class CartServiceImpl implements CartService {
         cartRepo.save(cart);
     }
 
+    /**
+     * Converts the user's ACTIVE cart into an Order by delegating to OrderService.checkout,
+     * so that tax, shipping, and coupon logic are applied in one place.
+     */
     @Override
-    public Long checkout(Long userId, String paymentMethod, String stripePaymentId, Long currencyId) {
+    public Long checkout(Long userId,
+                         String paymentMethod,
+                         String stripePaymentId,
+                         Long currencyId,
+                         String couponCode) {
+
         Cart cart = cartRepo.findByUser_IdAndStatus(userId, CartStatus.ACTIVE)
                 .orElseThrow(() -> new IllegalStateException("No active cart"));
 
-        if (cart.getItems().isEmpty())
+        if (cart.getItems() == null || cart.getItems().isEmpty())
             throw new IllegalStateException("Cart is empty");
 
         Users user = usersRepo.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
-        Currency currency = null;
-        if (currencyId != null) {
-            currency = currencyRepo.findById(currencyId)
-                    .orElseThrow(() -> new IllegalArgumentException("Currency not found"));
-        } else if (cart.getCurrency() != null) {
-            currency = cart.getCurrency();
+        if (paymentMethod == null || paymentMethod.isBlank()) {
+            throw new IllegalArgumentException("paymentMethod is required");
         }
+
+        // Determine effective currencyId:
+        Long effectiveCurrencyId = currencyId;
+        if (effectiveCurrencyId == null) {
+            if (cart.getCurrency() != null && cart.getCurrency().getId() != null) {
+                effectiveCurrencyId = cart.getCurrency().getId();
+            } else {
+                throw new IllegalArgumentException("currencyId is required");
+            }
+        }
+
+        // Map CartItems → CartLine list for CheckoutRequest
+        List<CartLine> lines = cart.getItems().stream().map(ci -> {
+            Item item = ci.getItem();
+            if (item == null || item.getId() == null) {
+                throw new IllegalStateException("Cart item has no associated product");
+            }
+
+            CartLine line = new CartLine();
+            line.setItemId(item.getId());
+            line.setQuantity(ci.getQuantity());
+            // Optionally pass unit price; OrderService may still recompute from DB
+            line.setUnitPrice(ci.getUnitPrice());
+            return line;
+        }).toList();
+
+        // Build CheckoutRequest for OrderService
+        CheckoutRequest checkoutRequest = new CheckoutRequest();
+        checkoutRequest.setLines(lines);
+        checkoutRequest.setCurrencyId(effectiveCurrencyId);
+        checkoutRequest.setPaymentMethod(paymentMethod);
+        checkoutRequest.setStripePaymentId(stripePaymentId);
+        checkoutRequest.setCouponCode(couponCode);
+
+        // If you later store shipping on Cart, you can map it here:
+        // ShippingAddressDTO addr = new ShippingAddressDTO();
+        // addr.setCountryId(cart.getShippingCountryId());
+        // addr.setRegionId(cart.getShippingRegionId());
+        // addr.setCity(cart.getShippingCity());
+        // addr.setPostalCode(cart.getShippingPostalCode());
+        // checkoutRequest.setShippingAddress(addr);
+        // checkoutRequest.setShippingMethodId(cart.getShippingMethodId());
+        checkoutRequest.setShippingAddress(null);
 
         // You can plug Stripe validation here if needed (similar to OrderServiceImpl)
 
-        OrderStatus pending = orderStatusRepo.findByNameIgnoreCase("PENDING")
-                .orElseThrow(() -> new IllegalStateException("OrderStatus PENDING not found"));
-
-        // Create order header
-        Order order = new Order();
-        order.setUser(user);
-        order.setStatus(pending);
-        order.setOrderDate(LocalDateTime.now());
-        recalcTotals(cart);
-        order.setTotalPrice(cart.getTotalPrice());
-        if (currency != null) order.setCurrency(currency);
-
-        order = orderRepo.save(order);
-
-        // Create order items from cart items
-        for (CartItem ci : cart.getItems()) {
-            OrderItem oi = new OrderItem();
-            oi.setOrder(order);
-            oi.setItem(ci.getItem());
-            oi.setUser(user);
-            oi.setQuantity(ci.getQuantity());
-            oi.setPrice(ci.getUnitPrice());
-            oi.setCurrency(currency != null ? currency : ci.getCurrency());
-            oi.setCreatedAt(LocalDateTime.now());
-            oi.setUpdatedAt(LocalDateTime.now());
-            orderItemRepo.save(oi);
-        }
+        // Delegate to OrderService so tax, shipping, coupon etc. are all applied there
+        CheckoutSummaryResponse summary = orderService.checkout(userId, checkoutRequest);
 
         // mark cart as converted & clear items
         cart.setStatus(CartStatus.CONVERTED);
@@ -304,6 +313,6 @@ public class CartServiceImpl implements CartService {
         recalcTotals(cart);
         cartRepo.save(cart);
 
-        return order.getId();
+        return summary.getOrderId();
     }
 }

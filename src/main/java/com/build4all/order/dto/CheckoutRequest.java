@@ -11,8 +11,11 @@ public class CheckoutRequest {
     private String paymentMethod;
     private String stripePaymentId;
 
-    // 🔹 Add this field to fix request.getCurrencyId()
+    // 🔹 currency of the order
     private Long currencyId;
+
+    // 🔹 coupon support
+    private String couponCode;
 
     public List<CartLine> getLines() {
         return lines;
@@ -60,5 +63,13 @@ public class CheckoutRequest {
 
     public void setCurrencyId(Long currencyId) {
         this.currencyId = currencyId;
+    }
+
+    public String getCouponCode() {
+        return couponCode;
+    }
+
+    public void setCouponCode(String couponCode) {
+        this.couponCode = couponCode;
     }
 }

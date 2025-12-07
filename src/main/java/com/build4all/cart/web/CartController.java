@@ -126,7 +126,17 @@ public class CartController {
                 ? Long.valueOf(body.get("currencyId").toString())
                 : null;
 
-        Long orderId = cartService.checkout(userId, paymentMethod, stripePaymentId, currencyId);
+        String couponCode = body.get("couponCode") != null
+                ? body.get("couponCode").toString()
+                : null;
+
+        Long orderId = cartService.checkout(
+                userId,
+                paymentMethod,
+                stripePaymentId,
+                currencyId,
+                couponCode
+        );
         return ResponseEntity.ok(Map.of("orderId", orderId));
     }
 

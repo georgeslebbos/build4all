@@ -7,5 +7,9 @@ import java.util.List;
 
 public interface ShippingMethodRepository extends JpaRepository<ShippingMethod, Long> {
 
+    // For OWNER/ADMIN listing
+    List<ShippingMethod> findByOwnerProject_Id(Long ownerProjectId);
+
+    // For public enabled methods
     List<ShippingMethod> findByOwnerProject_IdAndEnabledTrue(Long ownerProjectId);
 }

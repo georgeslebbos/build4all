@@ -1,39 +1,34 @@
 package com.build4all.order.service.impl;
 
-import com.build4all.order.domain.Order;
-import com.build4all.order.domain.OrderStatus;
-import com.build4all.order.domain.OrderItem;
-import com.build4all.order.repository.OrderRepository;
-import com.build4all.order.repository.OrderStatusRepository;
-import com.build4all.order.repository.OrderItemRepository;
-import com.build4all.order.service.OrderService;
-
+import com.build4all.catalog.domain.Country;
 import com.build4all.catalog.domain.Currency;
 import com.build4all.catalog.domain.Item;
-import com.build4all.catalog.domain.Country;
 import com.build4all.catalog.domain.Region;
+import com.build4all.catalog.repository.CountryRepository;
 import com.build4all.catalog.repository.CurrencyRepository;
 import com.build4all.catalog.repository.ItemRepository;
-import com.build4all.catalog.repository.CountryRepository;
 import com.build4all.catalog.repository.RegionRepository;
-
+import com.build4all.order.domain.Order;
+import com.build4all.order.domain.OrderItem;
+import com.build4all.order.domain.OrderStatus;
+import com.build4all.order.dto.CartLine;
 import com.build4all.order.dto.CheckoutRequest;
-import com.build4all.order.dto.CheckoutLineSummary;
 import com.build4all.order.dto.CheckoutSummaryResponse;
 import com.build4all.order.dto.ShippingAddressDTO;
-import com.build4all.order.dto.CartLine;
-
+import com.build4all.order.repository.OrderItemRepository;
+import com.build4all.order.repository.OrderRepository;
+import com.build4all.order.repository.OrderStatusRepository;
+import com.build4all.order.service.CheckoutPricingService;
+import com.build4all.order.service.OrderService;
 import com.build4all.user.domain.Users;
 import com.build4all.user.repository.UsersRepository;
-
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Locale;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -49,6 +44,9 @@ public class OrderServiceImpl implements OrderService {
     private final CountryRepository countryRepo;
     private final RegionRepository regionRepo;
 
+    // 🔹 NEW: central pricing engine (shipping + tax + coupon)
+    private final CheckoutPricingService checkoutPricingService;
+
     public OrderServiceImpl(OrderItemRepository orderItemRepo,
                             OrderRepository orderRepo,
                             UsersRepository usersRepo,
@@ -56,7 +54,8 @@ public class OrderServiceImpl implements OrderService {
                             CurrencyRepository currencyRepo,
                             OrderStatusRepository orderStatusRepo,
                             CountryRepository countryRepo,
-                            RegionRepository regionRepo) {
+                            RegionRepository regionRepo,
+                            CheckoutPricingService checkoutPricingService) {
         this.orderItemRepo = orderItemRepo;
         this.orderRepo = orderRepo;
         this.usersRepo = usersRepo;
@@ -65,6 +64,7 @@ public class OrderServiceImpl implements OrderService {
         this.orderStatusRepo = orderStatusRepo;
         this.countryRepo = countryRepo;
         this.regionRepo = regionRepo;
+        this.checkoutPricingService = checkoutPricingService;
     }
 
     /* ===============================
@@ -100,6 +100,7 @@ public class OrderServiceImpl implements OrderService {
     private BigDecimal resolveUnitPrice(Item item) {
         if (item == null) return BigDecimal.ZERO;
 
+        // If ecommerce Product has an effective price (discounted)
         if (item instanceof com.build4all.features.ecommerce.domain.Product product) {
             BigDecimal eff = product.getEffectivePrice();
             return eff != null ? eff : BigDecimal.ZERO;
@@ -137,35 +138,6 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /* ===============================
-       SAFE HELPERS FOR TAX/SHIPPING
-       =============================== */
-
-    private BigDecimal safe(BigDecimal v) {
-        return v == null ? BigDecimal.ZERO : v;
-    }
-
-    private BigDecimal calculateShippingTotal(List<CartLine> lines,
-                                              ShippingAddressDTO addr) {
-        if (addr == null) {
-            return BigDecimal.ZERO;
-        }
-        // TODO: replace with real rules (per country, method, weight...)
-        return new BigDecimal("5.00"); // flat rate placeholder
-    }
-
-    private BigDecimal calculateItemTaxTotal(BigDecimal itemsSubtotal) {
-        // TODO: replace with real tax rules
-        BigDecimal rate = new BigDecimal("0.10"); // 10%
-        return safe(itemsSubtotal).multiply(rate);
-    }
-
-    private BigDecimal calculateShippingTaxTotal(BigDecimal shippingTotal) {
-        // TODO: replace with real tax rules
-        BigDecimal rate = new BigDecimal("0.11"); // 11%
-        return safe(shippingTotal).multiply(rate);
-    }
-
-    /* ===============================
        CREATE ORDER (STRIPE) - activities single item
        =============================== */
 
@@ -179,8 +151,7 @@ public class OrderServiceImpl implements OrderService {
         if (stripePaymentId == null || stripePaymentId.isBlank())
             throw new IllegalArgumentException("stripePaymentId is required");
 
-        boolean DEV_SKIP_STRIPE_CHECK = true; // placeholder, currently unused
-
+        // Stripe validation
         try {
             var pi = com.stripe.model.PaymentIntent.retrieve(stripePaymentId);
             if (pi == null || !"succeeded".equalsIgnoreCase(pi.getStatus()))
@@ -200,6 +171,7 @@ public class OrderServiceImpl implements OrderService {
                     .orElseThrow(() -> new IllegalArgumentException("Currency not found"));
         }
 
+        // capacity
         Integer capacity = tryCapacity(item);
         if (capacity != null) {
             int already = orderItemRepo.sumQuantityByItemIdAndStatusNames(
@@ -491,9 +463,11 @@ public class OrderServiceImpl implements OrderService {
             throw new IllegalArgumentException("paymentMethod is required");
         }
 
+        // Normalize paymentMethod
         String paymentMethod = request.getPaymentMethod().trim().toUpperCase();
         boolean isStripe = "STRIPE".equals(paymentMethod);
 
+        // Stripe validation if needed
         if (isStripe) {
             String stripePaymentId = request.getStripePaymentId();
             if (stripePaymentId == null || stripePaymentId.isBlank()) {
@@ -516,7 +490,59 @@ public class OrderServiceImpl implements OrderService {
         Currency currency = currencyRepo.findById(request.getCurrencyId())
                 .orElseThrow(() -> new IllegalArgumentException("Currency not found"));
 
-        // ---- Prepare shipping address (optional) ----
+        List<CartLine> lines = request.getLines();
+
+        // ---- Load items once, compute unitPrice/lineSubtotal, check capacity
+        Map<Long, Item> itemCache = new HashMap<>();
+        Long ownerProjectId = null;
+
+        for (CartLine line : lines) {
+            if (line.getItemId() == null) {
+                throw new IllegalArgumentException("itemId is required in cart line");
+            }
+            if (line.getQuantity() <= 0) {
+                throw new IllegalArgumentException("quantity must be > 0 for itemId = " + line.getItemId());
+            }
+
+            Item item = itemRepo.findById(line.getItemId())
+                    .orElseThrow(() -> new IllegalArgumentException("Item not found: " + line.getItemId()));
+            itemCache.put(item.getId(), item);
+
+            // ownerProject consistency (single app per cart)
+            if (item.getOwnerProject() == null || item.getOwnerProject().getId() == null) {
+                throw new IllegalStateException("Item " + item.getId() + " has no ownerProject");
+            }
+            Long opId = item.getOwnerProject().getId();
+            if (ownerProjectId == null) {
+                ownerProjectId = opId;
+            } else if (!ownerProjectId.equals(opId)) {
+                throw new IllegalArgumentException("All cart items must belong to the same app (ownerProjectId)");
+            }
+
+            // capacity / stock check
+            Integer capacity = tryCapacity(item);
+            if (capacity != null) {
+                int already = orderItemRepo.sumQuantityByItemIdAndStatusNames(
+                        item.getId(), List.of("COMPLETED")
+                );
+                int remaining = capacity - already;
+                if (line.getQuantity() > remaining) {
+                    throw new IllegalStateException("Not enough quantity available for itemId = " + item.getId());
+                }
+            }
+
+            // compute and store prices in CartLine (so pricing service can use them)
+            BigDecimal unit = resolveUnitPrice(item);
+            BigDecimal lineTotal = unit.multiply(BigDecimal.valueOf(line.getQuantity()));
+            line.setUnitPrice(unit);
+            line.setLineSubtotal(lineTotal);
+        }
+
+        if (ownerProjectId == null) {
+            throw new IllegalArgumentException("Could not resolve ownerProjectId from cart items");
+        }
+
+        // ---- Prepare shipping address entities (for persisting on Order)
         ShippingAddressDTO addr = request.getShippingAddress();
         Country shippingCountry = null;
         Region shippingRegion = null;
@@ -531,100 +557,47 @@ public class OrderServiceImpl implements OrderService {
             }
         }
 
-        // ---- Build line items & compute items subtotal ----
-        final BigDecimal[] itemsSubtotalHolder = { BigDecimal.ZERO };
+        // ---- Delegate full pricing (shipping + tax + coupon) to CheckoutPricingService
+        CheckoutSummaryResponse priced = checkoutPricingService.priceCheckout(
+                ownerProjectId,
+                request.getCurrencyId(),
+                request
+        );
 
-        List<CheckoutLineSummary> lineSummaries = request.getLines().stream().map(line -> {
-            if (line.getItemId() == null) {
-                throw new IllegalArgumentException("itemId is required in cart line");
-            }
-            if (line.getQuantity() <= 0) {
-                throw new IllegalArgumentException("quantity must be > 0 for itemId = " + line.getItemId());
-            }
-
-            Item item = itemRepo.findById(line.getItemId())
-                    .orElseThrow(() -> new IllegalArgumentException("Item not found: " + line.getItemId()));
-
-            // Capacity check for activities / limited stock
-            Integer capacity = tryCapacity(item);
-            if (capacity != null) {
-                int already = orderItemRepo.sumQuantityByItemIdAndStatusNames(
-                        item.getId(), List.of("COMPLETED")
-                );
-                int remaining = capacity - already;
-                if (line.getQuantity() > remaining) {
-                    throw new IllegalStateException("Not enough quantity available for itemId = " + item.getId());
-                }
-            }
-
-            BigDecimal unit = resolveUnitPrice(item);
-            BigDecimal lineTotal = unit.multiply(BigDecimal.valueOf(line.getQuantity()));
-            itemsSubtotalHolder[0] = itemsSubtotalHolder[0].add(lineTotal);
-
-            String itemName = null;
-            try {
-                Method m = item.getClass().getMethod("getName");
-                Object v = m.invoke(item);
-                if (v != null) {
-                    itemName = v.toString();
-                }
-            } catch (Exception ignored) {}
-
-            return new CheckoutLineSummary(
-                    item.getId(),
-                    itemName,
-                    line.getQuantity(),
-                    unit,
-                    lineTotal
-            );
-        }).toList();
-
-        BigDecimal itemsSubtotal = itemsSubtotalHolder[0];
-
-        // ---- Shipping + tax ----
-        BigDecimal shippingTotal = calculateShippingTotal(request.getLines(), addr);
-        BigDecimal itemTaxTotal = calculateItemTaxTotal(itemsSubtotal);
-        BigDecimal shippingTaxTotal = calculateShippingTaxTotal(shippingTotal);
-
-        BigDecimal grandTotal = itemsSubtotal
-                .add(shippingTotal)
-                .add(itemTaxTotal)
-                .add(shippingTaxTotal);
-
-        // ---- Create Order header ----
+        // ---- Create Order header using priced totals ----
         Order order = new Order();
         order.setUser(user);
         order.setStatus(requireStatus("PENDING"));
         order.setOrderDate(LocalDateTime.now());
         order.setCurrency(currency);
-        order.setTotalPrice(grandTotal);
+        order.setTotalPrice(priced.getGrandTotal());
 
-        // Shipping fields on Order
         if (addr != null) {
             order.setShippingCountry(shippingCountry);
             order.setShippingRegion(shippingRegion);
             order.setShippingCity(addr.getCity());
             order.setShippingPostalCode(addr.getPostalCode());
+            // note: if you want, you can also persist:
+            order.setShippingMethodId(addr.getShippingMethodId());
+            order.setShippingMethodName(addr.getShippingMethodName());
         }
 
-        // Shipping method is not currently available on CheckoutRequest.
-        // If you later add getShippingMethodId()/Name() to CheckoutRequest,
-        // you can set them here.
-        // order.setShippingMethodId(...);
-        // order.setShippingMethodName(...);
-
-        order.setShippingTotal(shippingTotal);
-        order.setItemTaxTotal(itemTaxTotal);
-        order.setShippingTaxTotal(shippingTaxTotal);
+        order.setShippingTotal(priced.getShippingTotal());
+        order.setItemTaxTotal(priced.getItemTaxTotal());
+        order.setShippingTaxTotal(priced.getShippingTaxTotal());
+        order.setCouponCode(priced.getCouponCode());
+        order.setCouponDiscount(priced.getCouponDiscount());
 
         order = orderRepo.save(order);
 
-        // ---- Create OrderItem lines ----
-        for (CartLine line : request.getLines()) {
-            Item item = itemRepo.findById(line.getItemId())
-                    .orElseThrow(() -> new IllegalArgumentException("Item not found: " + line.getItemId()));
-
-            BigDecimal unit = resolveUnitPrice(item);
+        // ---- Create OrderItem lines (price from CartLine / pricing) ----
+        for (CartLine line : lines) {
+            Item item = itemCache.get(line.getItemId());
+            if (item == null) {
+                // Should not happen, but safe-guard
+                item = itemRepo.findById(line.getItemId())
+                        .orElseThrow(() -> new IllegalArgumentException("Item not found: " + line.getItemId()));
+            }
 
             OrderItem oi = new OrderItem();
             oi.setOrder(order);
@@ -632,31 +605,16 @@ public class OrderServiceImpl implements OrderService {
             oi.setUser(user);
             oi.setCurrency(currency);
             oi.setQuantity(line.getQuantity());
-            oi.setPrice(unit);
+            oi.setPrice(line.getUnitPrice()); // must match pricing
             oi.setCreatedAt(LocalDateTime.now());
             oi.setUpdatedAt(LocalDateTime.now());
 
             orderItemRepo.save(oi);
         }
 
-        String currencyCode = null;
-        String currencySymbol = null;
-        try {
-            currencyCode = currency.getCode();
-            currencySymbol = currency.getSymbol();
-        } catch (Exception ignored) {}
-
-        return new CheckoutSummaryResponse(
-                order.getId(),
-                order.getOrderDate(),
-                itemsSubtotal,
-                shippingTotal,
-                itemTaxTotal,
-                shippingTaxTotal,
-                grandTotal,
-                currencyCode,
-                currencySymbol,
-                lineSummaries
-        );
+        // ---- Attach order id/date to response and return ----
+        priced.setOrderId(order.getId());
+        priced.setOrderDate(order.getOrderDate());
+        return priced;
     }
 }
