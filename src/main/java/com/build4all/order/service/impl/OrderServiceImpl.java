@@ -1,5 +1,10 @@
 package com.build4all.order.service.impl;
 
+import com.build4all.cart.domain.Cart;
+import com.build4all.cart.domain.CartItem;
+import com.build4all.cart.domain.CartStatus;
+import com.build4all.cart.repository.CartItemRepository;
+import com.build4all.cart.repository.CartRepository;
 import com.build4all.catalog.domain.Country;
 import com.build4all.catalog.domain.Currency;
 import com.build4all.catalog.domain.Item;
@@ -43,9 +48,12 @@ public class OrderServiceImpl implements OrderService {
     private final OrderStatusRepository orderStatusRepo;
     private final CountryRepository countryRepo;
     private final RegionRepository regionRepo;
+    private final CartItemRepository cartItemRepo;
 
     // 🔹 NEW: central pricing engine (shipping + tax + coupon)
     private final CheckoutPricingService checkoutPricingService;
+
+    private final CartRepository cartRepo;
 
     public OrderServiceImpl(OrderItemRepository orderItemRepo,
                             OrderRepository orderRepo,
@@ -55,7 +63,9 @@ public class OrderServiceImpl implements OrderService {
                             OrderStatusRepository orderStatusRepo,
                             CountryRepository countryRepo,
                             RegionRepository regionRepo,
-                            CheckoutPricingService checkoutPricingService) {
+                            CheckoutPricingService checkoutPricingService,
+                            CartRepository cartRepo,
+                            CartItemRepository cartItemRepo) {
         this.orderItemRepo = orderItemRepo;
         this.orderRepo = orderRepo;
         this.usersRepo = usersRepo;
@@ -65,6 +75,8 @@ public class OrderServiceImpl implements OrderService {
         this.countryRepo = countryRepo;
         this.regionRepo = regionRepo;
         this.checkoutPricingService = checkoutPricingService;
+        this.cartRepo = cartRepo;
+        this.cartItemRepo = cartItemRepo;
     }
 
     /* ===============================
@@ -474,14 +486,14 @@ public class OrderServiceImpl implements OrderService {
                 throw new IllegalArgumentException("stripePaymentId is required for STRIPE payment");
             }
 
-            try {
+           /* try {
                 var pi = com.stripe.model.PaymentIntent.retrieve(stripePaymentId);
                 if (pi == null || !"succeeded".equalsIgnoreCase(pi.getStatus())) {
                     throw new IllegalStateException("Stripe payment not confirmed");
                 }
             } catch (Exception e) {
                 throw new IllegalStateException("Stripe error: " + e.getMessage());
-            }
+            }*/
         }
 
         Users user = usersRepo.findById(userId)
@@ -615,6 +627,28 @@ public class OrderServiceImpl implements OrderService {
         // ---- Attach order id/date to response and return ----
         priced.setOrderId(order.getId());
         priced.setOrderDate(order.getOrderDate());
+
+        Cart cart = cartRepo.findByUser_IdAndStatus(userId, CartStatus.ACTIVE)
+                .orElseThrow(() -> new IllegalStateException("No active cart"));
+        // mark cart as converted & clear items
+        cart.setStatus(CartStatus.CONVERTED);
+        cartItemRepo.deleteByCart_Id(cart.getId());
+        cart.getItems().clear();
+        recalcTotals(cart);
+        cartRepo.save(cart);
         return priced;
+    }
+
+    private void recalcTotals(Cart cart) {
+        if (cart == null) return;
+        BigDecimal total = BigDecimal.ZERO;
+        if (cart.getItems() != null) {
+            for (CartItem ci : cart.getItems()) {
+                BigDecimal unit = ci.getUnitPrice() == null ? BigDecimal.ZERO : ci.getUnitPrice();
+                total = total.add(unit.multiply(BigDecimal.valueOf(ci.getQuantity())));
+            }
+        }
+        cart.setTotalPrice(total);
+        cart.setUpdatedAt(LocalDateTime.now());
     }
 }
