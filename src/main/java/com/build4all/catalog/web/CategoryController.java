@@ -8,13 +8,12 @@ import com.build4all.catalog.domain.Category;
 import com.build4all.catalog.repository.IconRepository;
 import com.build4all.project.repository.ProjectRepository;
 import com.build4all.catalog.repository.CategoryRepository;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @RestController
@@ -42,6 +41,16 @@ public class CategoryController {
                 c.getIconName(),
                 c.getIconLibrary()
         );
+    }
+
+    private ResponseEntity<Map<String, Object>> error(HttpStatus status, String msg) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("error", msg);
+        return ResponseEntity.status(status).body(body);
+    }
+
+    private ResponseEntity<Map<String, Object>> badRequest(String msg) {
+        return error(HttpStatus.BAD_REQUEST, msg);
     }
 
     /* ------------ READ ------------ */
@@ -74,11 +83,17 @@ public class CategoryController {
     @PostMapping
     public ResponseEntity<?> create(@RequestBody CategoryRequest req,
                                     @RequestParam(defaultValue = "true") boolean ensureIconExists) {
-        if (req.getProjectId() == null) return ResponseEntity.badRequest().body("projectId is required");
-        if (req.getName() == null || req.getName().isBlank()) return ResponseEntity.badRequest().body("name is required");
+        if (req.getProjectId() == null) {
+            return badRequest("projectId is required");
+        }
+        if (req.getName() == null || req.getName().isBlank()) {
+            return badRequest("name is required");
+        }
 
         Project project = projectRepo.findById(req.getProjectId()).orElse(null);
-        if (project == null) return ResponseEntity.badRequest().body("project not found: " + req.getProjectId());
+        if (project == null) {
+            return badRequest("project not found: " + req.getProjectId());
+        }
 
         String name = req.getName().trim().toUpperCase();
         String iconName = req.getIconName() == null ? null : req.getIconName().trim();
@@ -86,7 +101,8 @@ public class CategoryController {
                 ? "Ionicons" : req.getIconLibrary().trim();
 
         if (categoryRepo.existsByNameIgnoreCaseAndProject_Id(name, project.getId())) {
-            return ResponseEntity.status(409).body("Category already exists in this project: " + name);
+            return error(HttpStatus.CONFLICT,
+                    "Category already exists in this project: " + name);
         }
 
         if (ensureIconExists && iconName != null && !iconName.isBlank()) {
@@ -109,19 +125,26 @@ public class CategoryController {
         entity.setIconLibrary(iconLib);
 
         Category saved = categoryRepo.save(entity);
-        return ResponseEntity.created(URI.create("/api/admin/categories/" + saved.getId()))
-                .body(toDto(saved));
+
+        CategoryDTO body = toDto(saved);
+        return ResponseEntity
+                .created(URI.create("/api/admin/categories/" + saved.getId()))
+                .body(body);
     }
 
     @PostMapping("/batch")
     public ResponseEntity<?> createBatch(@RequestBody List<CategoryRequest> list,
                                          @RequestParam(defaultValue = "true") boolean ensureIconExists) {
-        if (list == null || list.isEmpty()) return ResponseEntity.badRequest().body("payload is empty");
+        if (list == null || list.isEmpty()) {
+            return badRequest("payload is empty");
+        }
 
         Optional<CategoryRequest> missing = list.stream()
                 .filter(r -> r.getProjectId() == null || r.getName() == null || r.getName().isBlank())
                 .findFirst();
-        if (missing.isPresent()) return ResponseEntity.badRequest().body("each item requires projectId and name");
+        if (missing.isPresent()) {
+            return badRequest("each item requires projectId and name");
+        }
 
         List<CategoryDTO> saved = list.stream().map(req -> {
             Project project = projectRepo.findById(req.getProjectId()).orElse(null);
@@ -129,7 +152,6 @@ public class CategoryController {
 
             String name = req.getName().trim().toUpperCase();
 
-            // if exists in the same project, return existing
             if (categoryRepo.existsByNameIgnoreCaseAndProject_Id(name, project.getId())) {
                 return categoryRepo.findByNameIgnoreCaseAndProject_Id(name, project.getId())
                         .map(this::toDto).orElse(null);
@@ -169,13 +191,17 @@ public class CategoryController {
                                     @RequestBody CategoryRequest req,
                                     @RequestParam(defaultValue = "true") boolean ensureIconExists) {
         Optional<Category> opt = categoryRepo.findById(id);
-        if (opt.isEmpty()) return ResponseEntity.notFound().build();
+        if (opt.isEmpty()) {
+            return error(HttpStatus.NOT_FOUND, "Category not found");
+        }
         Category existing = opt.get();
 
         if (req.getProjectId() != null && !req.getProjectId().equals(
                 existing.getProject() != null ? existing.getProject().getId() : null)) {
             Project project = projectRepo.findById(req.getProjectId()).orElse(null);
-            if (project == null) return ResponseEntity.badRequest().body("project not found: " + req.getProjectId());
+            if (project == null) {
+                return badRequest("project not found: " + req.getProjectId());
+            }
             existing.setProject(project);
         }
 
@@ -185,7 +211,8 @@ public class CategoryController {
             if (projId != null
                     && !existing.getName().equalsIgnoreCase(newName)
                     && categoryRepo.existsByNameIgnoreCaseAndProject_Id(newName, projId)) {
-                return ResponseEntity.status(409).body("Category already exists in this project: " + newName);
+                return error(HttpStatus.CONFLICT,
+                        "Category already exists in this project: " + newName);
             }
             existing.setName(newName);
         }
@@ -227,8 +254,10 @@ public class CategoryController {
     /* ------------ DELETE ------------ */
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        if (!categoryRepo.existsById(id)) return ResponseEntity.notFound().build();
+    public ResponseEntity<?> delete(@PathVariable Long id) {
+        if (!categoryRepo.existsById(id)) {
+            return error(HttpStatus.NOT_FOUND, "Category not found");
+        }
         categoryRepo.deleteById(id);
         return ResponseEntity.noContent().build();
     }

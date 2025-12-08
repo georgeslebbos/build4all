@@ -1,4 +1,3 @@
-// com/build4all/catalog/web/ItemTypeController.java
 package com.build4all.catalog.web;
 
 import com.build4all.catalog.dto.ItemTypeDTO;
@@ -8,11 +7,14 @@ import com.build4all.catalog.repository.ItemTypeRepository;
 import com.build4all.catalog.service.ItemTypeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
@@ -29,6 +31,7 @@ public class ItemTypeController {
     }
 
     // ---------- Payload ----------
+
     public static class ItemTypePayload {
         private String name;
         private String icon;
@@ -46,7 +49,20 @@ public class ItemTypeController {
         public void setCategoryId(Long categoryId) { this.categoryId = categoryId; }
     }
 
-    // ---------- GET: raw entities ----------
+    // ---------- Common error helpers ----------
+
+    private ResponseEntity<Map<String, Object>> error(HttpStatus status, String msg) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("error", msg);
+        return ResponseEntity.status(status).body(body);
+    }
+
+    private ResponseEntity<Map<String, Object>> badRequest(String msg) {
+        return error(HttpStatus.BAD_REQUEST, msg);
+    }
+
+    // ---------- GET: raw entities (mainly backend/admin use) ----------
+
     @Operation(summary = "List all item types (entities)")
     @ApiResponse(responseCode = "200", description = "Successful")
     @GetMapping
@@ -55,48 +71,76 @@ public class ItemTypeController {
     }
 
     // ---------- DELETE ----------
+
     @Operation(summary = "Delete an item type")
-    @ApiResponse(responseCode = "204", description = "Deleted")
+    @ApiResponse(responseCode = "200", description = "Deleted")
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        if (!itemTypeRepository.existsById(id)) return ResponseEntity.notFound().build();
+    public ResponseEntity<?> delete(@PathVariable Long id) {
+        if (!itemTypeRepository.existsById(id)) {
+            return error(HttpStatus.NOT_FOUND, "Item type not found");
+        }
         itemTypeService.deleteItemType(id);
-        return ResponseEntity.noContent().build();
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("message", "Item type deleted");
+        return ResponseEntity.ok(body);
     }
 
     // ---------- CREATE ----------
+
     @Operation(summary = "Create an item type (admin)")
     @ApiResponse(responseCode = "201", description = "Created")
     @PostMapping
-    public ResponseEntity<ItemType> create(@RequestBody ItemTypePayload body) {
-        ItemType saved = itemTypeService.createItemType(
-                body.getName(),
-                body.getIcon(),
-                body.getIconLibrary(),
-                body.getCategoryId()
-        );
-        return ResponseEntity
-                .created(URI.create("/api/item-types/" + saved.getId()))
-                .body(saved);
+    public ResponseEntity<?> create(@RequestBody ItemTypePayload body) {
+        try {
+            if (body.getCategoryId() == null) {
+                return badRequest("categoryId is required");
+            }
+            if (body.getName() == null || body.getName().isBlank()) {
+                return badRequest("name is required");
+            }
+
+            ItemType saved = itemTypeService.createItemType(
+                    body.getName(),
+                    body.getIcon(),
+                    body.getIconLibrary(),
+                    body.getCategoryId()
+            );
+
+            ItemTypeDTO dto = toDto(saved);
+            return ResponseEntity
+                    .created(URI.create("/api/item-types/" + saved.getId()))
+                    .body(dto);
+        } catch (IllegalArgumentException ex) {
+            // أي validation / business error من الـ service نرجعه كـ JSON
+            return badRequest(ex.getMessage());
+        }
     }
 
     // ---------- UPDATE ----------
+
     @Operation(summary = "Update an item type (admin)")
     @ApiResponse(responseCode = "200", description = "Updated")
     @PutMapping("/{id}")
-    public ResponseEntity<ItemType> update(@PathVariable Long id,
-                                           @RequestBody ItemTypePayload body) {
-        ItemType updated = itemTypeService.updateItemType(
-                id,
-                body.getName(),
-                body.getIcon(),
-                body.getIconLibrary(),
-                body.getCategoryId()
-        );
-        return ResponseEntity.ok(updated);
+    public ResponseEntity<?> update(@PathVariable Long id,
+                                    @RequestBody ItemTypePayload body) {
+        try {
+            ItemType updated = itemTypeService.updateItemType(
+                    id,
+                    body.getName(),
+                    body.getIcon(),
+                    body.getIconLibrary(),
+                    body.getCategoryId()
+            );
+            ItemTypeDTO dto = toDto(updated);
+            return ResponseEntity.ok(dto);
+        } catch (IllegalArgumentException ex) {
+            return badRequest(ex.getMessage());
+        }
     }
 
     // ---------- LIST BY PROJECT ----------
+
     @Operation(summary = "List item types for a project (via category.project)")
     @GetMapping("/by-project/{projectId}")
     public List<ItemTypeDTO> getByProject(@PathVariable Long projectId) {
@@ -107,6 +151,7 @@ public class ItemTypeController {
     }
 
     // ---------- LIST BY CATEGORY ----------
+
     @Operation(summary = "List item types for a category")
     @GetMapping("/by-category/{categoryId}")
     public List<ItemTypeDTO> getByCategory(@PathVariable Long categoryId) {
@@ -117,6 +162,7 @@ public class ItemTypeController {
     }
 
     // ---------- DTO mapper ----------
+
     private ItemTypeDTO toDto(ItemType type) {
         Category cat = type.getCategory();
         Long categoryId = (cat != null) ? cat.getId() : null;

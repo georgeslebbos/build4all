@@ -2,6 +2,7 @@ package com.build4all.catalog.web;
 
 import com.build4all.catalog.domain.Currency;
 import com.build4all.catalog.dto.CurrencyRequest;
+import com.build4all.catalog.dto.CurrencyDTO;
 import com.build4all.catalog.repository.CurrencyRepository;
 import com.build4all.catalog.service.CurrencyService;
 import com.build4all.admin.domain.AdminUserProject;
@@ -34,6 +35,17 @@ public class CurrencyController {
     @Autowired
     private AdminUserProjectRepository adminUserProjectRepository; // 👈 per-app currency
 
+    // --------------- DTO MAPPER ---------------
+
+    private CurrencyDTO toDto(Currency c) {
+        return new CurrencyDTO(
+                c.getId(),
+                c.getCurrencyType(),
+                c.getCode(),
+                c.getSymbol()
+        );
+    }
+
     // --------------- AUTH HELPER ---------------
 
     private boolean isAuthorized(String token) {
@@ -51,6 +63,16 @@ public class CurrencyController {
         // User token check
         return jwtUtil.isUserToken(jwt);
     }
+
+    // --------------- GET CURRENCY BY ID (for dart-define id) ---------------
+
+    @GetMapping("/{id}")
+    public ResponseEntity<CurrencyDTO> getById(@PathVariable Long id) {
+        return currencyRepository.findById(id)
+                .map(c -> ResponseEntity.ok(toDto(c)))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
 
     // --------------- GET CURRENT CURRENCY FOR ONE APP ---------------
 
@@ -131,6 +153,6 @@ public class CurrencyController {
         app.setCurrency(selectedCurrency.get());
         adminUserProjectRepository.save(app);
 
-        return ResponseEntity.ok(selectedCurrency.get());
+        return ResponseEntity.ok(toDto(selectedCurrency.get()));
     }
 }

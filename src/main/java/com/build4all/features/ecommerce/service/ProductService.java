@@ -1,6 +1,10 @@
 package com.build4all.features.ecommerce.service;
 
 import com.build4all.admin.domain.AdminUserProject;
+import org.springframework.web.multipart.MultipartFile;
+import java.nio.file.*;
+import java.io.IOException;
+import java.util.UUID;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.catalog.domain.Currency;
 import com.build4all.catalog.domain.ItemAttribute;
@@ -170,6 +174,22 @@ public class ProductService {
 
         return toResponse(saved);
     }
+    
+    public ProductResponse createWithImage(ProductRequest request, MultipartFile image) throws IOException {
+        // if image exists, override imageUrl before create
+        String url = saveProductImage(image);
+
+        if (url != null) {
+            // If your ProductRequest has setter:
+            request.setImageUrl(url);
+        }
+
+        // If ProductRequest does NOT have setter, do this instead:
+        // and handle inside create() by preferring a local variable
+        // (but most likely you have setters)
+
+        return create(request);
+    }
 
     // ---------------- UPDATE ----------------
 
@@ -236,6 +256,68 @@ public class ProductService {
 
         return toResponse(saved);
     }
+    
+    public ProductResponse updateWithImage(Long id, ProductUpdateRequest request, MultipartFile imageFile) throws IOException {
+        Product p = productRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Product not found"));
+
+        // handle ItemType/Category change
+        if (request.getItemTypeId() != null || request.getCategoryId() != null) {
+            ItemType newItemType = (request.getItemTypeId() != null)
+                    ? itemTypeRepository.findById(request.getItemTypeId())
+                        .orElseThrow(() -> new IllegalArgumentException("Invalid item type"))
+                    : resolveDefaultItemTypeForCategory(request.getCategoryId());
+
+            p.setItemType(newItemType);
+        }
+
+        if (request.getName() != null) p.setItemName(request.getName());
+        if (request.getDescription() != null) p.setDescription(request.getDescription());
+        if (request.getPrice() != null) p.setPrice(request.getPrice());
+        if (request.getStatus() != null) p.setStatus(request.getStatus());
+        if (request.getStock() != null) p.setStock(request.getStock());
+
+        if (request.getTaxable() != null) p.setTaxable(request.getTaxable());
+        if (request.getTaxClass() != null) p.setTaxClass(request.getTaxClass());
+
+        if (request.getWeightKg() != null) p.setWeightKg(request.getWeightKg());
+        if (request.getWidthCm() != null) p.setWidthCm(request.getWidthCm());
+        if (request.getHeightCm() != null) p.setHeightCm(request.getHeightCm());
+        if (request.getLengthCm() != null) p.setLengthCm(request.getLengthCm());
+
+        if (request.getSku() != null) p.setSku(request.getSku());
+        if (request.getProductType() != null) p.setProductType(request.getProductType());
+        if (request.getVirtualProduct() != null) p.setVirtualProduct(request.getVirtualProduct());
+        if (request.getDownloadable() != null) p.setDownloadable(request.getDownloadable());
+        if (request.getDownloadUrl() != null) p.setDownloadUrl(request.getDownloadUrl());
+        if (request.getExternalUrl() != null) p.setExternalUrl(request.getExternalUrl());
+        if (request.getButtonText() != null) p.setButtonText(request.getButtonText());
+
+        if (request.getSalePrice() != null) p.setSalePrice(request.getSalePrice());
+        if (request.getSaleStart() != null) p.setSaleStart(parseDateTimeOrNull(request.getSaleStart()));
+        if (request.getSaleEnd() != null) p.setSaleEnd(parseDateTimeOrNull(request.getSaleEnd()));
+
+        // ✅ image rules:
+        // 1) if imageFile provided => replace old local image
+        // 2) else if request.imageUrl provided => allow manual URL replace (optional)
+        if (imageFile != null && !imageFile.isEmpty()) {
+            deleteLocalImageIfManaged(p.getImageUrl());
+            p.setImageUrl(saveProductImage(imageFile));
+        } else if (request.getImageUrl() != null) {
+            p.setImageUrl(request.getImageUrl());
+        }
+
+        Product saved = productRepository.save(p);
+
+        if (request.getAttributes() != null) {
+            var oldValues = itemAttributeValueRepository.findByItem(saved);
+            itemAttributeValueRepository.deleteAll(oldValues);
+            saveAttributes(saved, saved.getItemType(), request.getAttributes());
+        }
+
+        return toResponse(saved);
+    }
+
 
     // ---------------- READ / LIST / DELETE ----------------
 
@@ -338,6 +420,22 @@ public class ProductService {
     }
 
     // ---------------- ATTRIBUTES ----------------
+    
+    private String saveProductImage(MultipartFile file) throws IOException {
+        if (file == null || file.isEmpty()) return null;
+
+        String original = file.getOriginalFilename() == null ? "image" : file.getOriginalFilename();
+        String filename = UUID.randomUUID() + "_" + original.replaceAll("\\s+", "_");
+
+        Path baseDir = Paths.get("uploads", "products");
+        if (!Files.exists(baseDir)) Files.createDirectories(baseDir);
+
+        Files.copy(file.getInputStream(), baseDir.resolve(filename), StandardCopyOption.REPLACE_EXISTING);
+
+        // Public URL (match how your app serves /uploads)
+        return "/uploads/products/" + filename;
+    }
+
 
     private void saveAttributes(Product product,
                                 ItemType itemType,
@@ -464,4 +562,23 @@ public class ProductService {
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
+    
+  
+    /** Only delete local files we manage. */
+    private void deleteLocalImageIfManaged(String url) {
+        if (url == null || url.isBlank()) return;
+        if (!url.startsWith("/uploads/")) return;
+
+        try {
+            String fileName = url.substring("/uploads/".length()).replace("\\", "/");
+            if (fileName.isBlank()) return;
+
+            Path uploads = Paths.get("uploads");
+            Path filePath = uploads.resolve(fileName).normalize();
+
+            Files.deleteIfExists(filePath);
+        } catch (Exception ignored) {
+            // don't fail the request 
+        }
+        }
 }
