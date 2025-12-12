@@ -65,7 +65,7 @@ public class AdminUserService {
     public AdminUser createAdminUser(String username, String firstName, String lastName,
                                      String email, String plainPassword, String roleName) {
 
-        Role role = roleRepository.findByName(roleName.toUpperCase())
+        Role role = roleRepository.findByNameIgnoreCase(roleName)
                 .orElseThrow(() -> new RuntimeException("Role not found: " + roleName));
 
         Optional<AdminUser> existingAdmin = adminUserRepository.findByEmail(email);
@@ -76,16 +76,16 @@ public class AdminUserService {
         String encodedPassword = passwordEncoder.encode(plainPassword);
 
         AdminUser admin = new AdminUser(username, firstName, lastName, email, encodedPassword, role);
-
         return adminUserRepository.save(admin);
     }
+
 
     public Optional<AdminUser> findByUsernameOrEmail(String input) {
         return adminUserRepository.findByUsernameOrEmail(input, input);
     }
 
     public AdminUser promoteUserToManager(Users user) {
-        Role managerRole = roleRepository.findByName("MANAGER")
+        Role managerRole = roleRepository.findByNameIgnoreCase("MANAGER")
                 .orElseThrow(() -> new RuntimeException("Manager role not found"));
 
         Optional<AdminUser> existing = adminUserRepository.findByEmail(user.getEmail());
@@ -99,13 +99,14 @@ public class AdminUserService {
                 user.getLastName(),
                 user.getEmail(),
                 user.getPasswordHash(),
-                managerRole);
+                managerRole
+        );
 
         return adminUserRepository.save(manager);
     }
 
     public AdminUser promoteUserToManager(Users user, Businesses business) {
-        Role managerRole = roleRepository.findByName("MANAGER")
+        Role managerRole = roleRepository.findByNameIgnoreCase("MANAGER")
                 .orElseThrow(() -> new RuntimeException("Role MANAGER not found"));
 
         AdminUser manager = new AdminUser();
@@ -115,11 +116,8 @@ public class AdminUserService {
         manager.setEmail(user.getEmail());
         manager.setPasswordHash(user.getPasswordHash());
         manager.setRole(managerRole);
-
-        // 👇 Direct FK instead of join-table
         manager.setBusiness(business);
 
-        // 👇 No AdminUserBusiness creation anymore
         return adminUserRepository.save(manager);
     }
 
@@ -208,7 +206,7 @@ public class AdminUserService {
     }
 
     public boolean hasSuperAdmin() {
-        return adminUserRepository.countByRoleNameIgnoreCase("SUPER_ADMIN") > 0;
+        return adminUserRepository.countByRole_NameIgnoreCase("SUPER_ADMIN") > 0;
     }
     
     public AdminUser requireById(Long adminId) {

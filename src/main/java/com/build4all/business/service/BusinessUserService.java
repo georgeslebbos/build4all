@@ -4,6 +4,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import com.build4all.role.domain.Role;
+import com.build4all.role.repository.RoleRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.build4all.business.dto.BusinessUserDto;
@@ -21,11 +24,18 @@ public class BusinessUserService {
     private final BusinessUserRepository businessUserRepo;
     private final BusinessesRepository businessRepo;
     private final UserStatusRepository statusRepo;
+    private final RoleRepository roleRepository;
 
-    public BusinessUserService(BusinessUserRepository businessUserRepo, BusinessesRepository businessRepo, UserStatusRepository statusRepo) {
+    public BusinessUserService(BusinessUserRepository businessUserRepo, BusinessesRepository businessRepo, UserStatusRepository statusRepo, RoleRepository roleRepository) {
         this.businessUserRepo = businessUserRepo;
         this.businessRepo = businessRepo;
         this.statusRepo = statusRepo;
+        this.roleRepository = roleRepository;
+    }
+
+    private Role getRoleOrThrow(String name) {
+        return roleRepository.findByNameIgnoreCase(name)
+                .orElseThrow(() -> new RuntimeException("Role " + name + " not found"));
     }
 
     public BusinessUser createBusinessUser(Long businessId, BusinessUserDto dto) {
@@ -33,6 +43,7 @@ public class BusinessUserService {
         user.setFirstName(dto.getFirstName());
         user.setLastName(dto.getLastName());
         user.setEmail(dto.getEmail());
+        user.setRole(getRoleOrThrow("USER"));
 
         // Optional fields
         user.setUsername(dto.getUsername());
@@ -60,6 +71,9 @@ public class BusinessUserService {
         // ✅ Set business
         user.setBusiness(businessRepo.findById(businessId)
             .orElseThrow(() -> new RuntimeException("Business not found")));
+
+        Role BusinessRole = roleRepository.findByNameIgnoreCase("BUSINESS")
+                .orElseThrow(() -> new RuntimeException("Role BUSINESS not found"));
 
         return businessUserRepo.save(user);
     }

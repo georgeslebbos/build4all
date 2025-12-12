@@ -9,19 +9,25 @@ import com.build4all.role.repository.RoleRepository;
 @Configuration
 public class DataInitializer {
 
-	@Bean
-	public CommandLineRunner initRoles(RoleRepository roleRepository) {
-	    return args -> {
-	        if (!roleRepository.existsByNameIgnoreCase("SUPER_ADMIN")) {
-	            roleRepository.save(new Role("SUPER_ADMIN"));
-	        }
-	        if (!roleRepository.existsByNameIgnoreCase("MANAGER")) {
-	            roleRepository.save(new Role("MANAGER"));
-	        }
-	        if (!roleRepository.existsByNameIgnoreCase("OWNER")) {
-	            roleRepository.save(new Role("OWNER"));
-	        }
-	    };
-	}
+    @Bean
+    public CommandLineRunner initRoles(RoleRepository roleRepository) {
+        return args -> {
+            if (!roleRepository.existsByNameIgnoreCase("SUPER_ADMIN")) {
+                roleRepository.save(new Role("SUPER_ADMIN"));
+            }
+            if (!roleRepository.existsByNameIgnoreCase("MANAGER")) {
+                roleRepository.save(new Role("MANAGER"));
+            }
+            if (!roleRepository.existsByNameIgnoreCase("OWNER")) {
+                roleRepository.save(new Role("OWNER"));
+            }
+            if (!roleRepository.existsByNameIgnoreCase("USER")) {
+                roleRepository.save(new Role("USER"));
+            }
+            if (!roleRepository.existsByNameIgnoreCase("BUSINESS")) {
+                roleRepository.save(new Role("BUSINESS"));
+            }
+        };
+    }
 
 }

@@ -10,10 +10,12 @@ public interface RoleRepository extends JpaRepository<Role, Long> {
     Optional<Role> findTopByNameIgnoreCase(String name);
 
     boolean existsByNameIgnoreCase(String name);
+    Optional<Role> findByNameIgnoreCase(String name);
 
    
     @Deprecated
     default Optional<Role> findByName(String name) {
         return findTopByNameIgnoreCase(name);
     }
+
 }

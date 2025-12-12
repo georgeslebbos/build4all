@@ -3,11 +3,19 @@ package com.build4all.business.domain;
 import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.catalog.domain.Item;
 import com.build4all.review.domain.Review;
+import com.build4all.role.domain.Role;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
@@ -27,7 +35,7 @@ import java.util.List;
 		      @Index(name = "idx_biz_public", columnList = "is_public_profile")
 		  }
 		)
-public class Businesses {
+public class Businesses implements UserDetails {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -68,6 +76,11 @@ public class Businesses {
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "status")
     private BusinessStatus status;
+
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "role_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
+    private Role role;
 
     @Column(name = "is_public_profile", nullable = true)
     private Boolean isPublicProfile = true;
@@ -177,6 +190,22 @@ public class Businesses {
     public List<Review> getReviews() { return reviews; }
     public void setReviews(List<Review> reviews) { this.reviews = reviews; }
 
+    public Role getRole() {
+        return role;
+    }
+
+    public Boolean getPublicProfile() {
+        return isPublicProfile;
+    }
+
+    public void setRole(Role role) {
+        this.role = role;
+    }
+
+    public void setPublicProfile(Boolean publicProfile) {
+        isPublicProfile = publicProfile;
+    }
+
     @PrePersist
     protected void onCreate() {
         this.createdAt = this.updatedAt = LocalDateTime.now();
@@ -186,5 +215,53 @@ public class Businesses {
     @PreUpdate
     protected void onUpdate() {
         this.updatedAt = LocalDateTime.now();
+    }
+
+    // ========== UserDetails implementation ==========
+
+    @Override
+    @JsonIgnore
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        if (role == null || role.getName() == null) {
+            return Collections.emptyList();
+        }
+        String authority = "ROLE_" + role.getName().toUpperCase(); // USER -> ROLE_USER
+        return List.of(new SimpleGrantedAuthority(authority));
+    }
+
+    public String getUsername() { return email; }
+    public void setUsername(String email) { this.email = email; }
+
+    @Override
+    @JsonIgnore
+    public String getPassword() {
+        return passwordHash;
+    }
+
+
+    @Override
+    @JsonIgnore
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    @JsonIgnore
+    public boolean isAccountNonLocked() {
+        if (status == null || status.getName() == null) return true;
+        String s = status.getName().toUpperCase();
+        return !s.equals("INACTIVE") && !s.equals("DELETED");
+    }
+
+    @Override
+    @JsonIgnore
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+
+    @Override
+    @JsonIgnore
+    public boolean isEnabled() {
+        return status != null && "ACTIVE".equalsIgnoreCase(status.getName());
     }
 }

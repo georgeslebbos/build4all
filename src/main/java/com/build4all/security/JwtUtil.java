@@ -45,6 +45,12 @@ public class JwtUtil {
     public String generateToken(Users user) {
         String subject = user.getEmail() != null ? user.getEmail() : user.getPhoneNumber();
 
+        // 👇 read role from DB, default to USER if null
+        String roleName = "USER";
+        if (user.getRole() != null && user.getRole().getName() != null) {
+            roleName = user.getRole().getName();
+        }
+
         return Jwts.builder()
                 .setSubject(subject)
                 .claim("id", user.getId())
@@ -52,7 +58,7 @@ public class JwtUtil {
                 .claim("firstName", user.getFirstName())
                 .claim("lastName", user.getLastName())
                 .claim("profileImageUrl", user.getProfilePictureUrl())
-                .claim("role", "USER")
+                .claim("role", roleName)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
                 .signWith(key, SignatureAlgorithm.HS256)
@@ -68,13 +74,19 @@ public class JwtUtil {
             throw new IllegalArgumentException("Business must have either email or phone number to generate token");
         }
 
+        // 👇 read role from DB, default to USER if null
+        String roleName = "BUSINESS";
+        if (business.getRole() != null && business.getRole().getName() != null) {
+            roleName = business.getRole().getName();
+        }
+
         return Jwts.builder()
                 .setSubject(subject)
                 .claim("id", business.getId())
                 .claim("businessName", business.getBusinessName())
                 .claim("logoUrl", business.getBusinessLogoUrl())
                 .claim("bannerUrl", business.getBusinessBannerUrl())
-                .claim("role", "BUSINESS")
+                .claim("role", roleName)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
                 .signWith(key, SignatureAlgorithm.HS256)
@@ -82,11 +94,17 @@ public class JwtUtil {
     }
 
     public String generateToken(AdminUser adminUser) {
+
+        // 👇 read role from DB, default to USER if null
+        String roleName = "USER";
+        if (adminUser.getRole() != null && adminUser.getRole().getName() != null) {
+            roleName = adminUser.getRole().getName();
+        }
         return Jwts.builder()
                 .setSubject(adminUser.getEmail())
                 .claim("id", adminUser.getAdminId())
                 .claim("username", adminUser.getUsername())
-                .claim("role", adminUser.getRole().getName())
+                .claim("role", roleName)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
                 .signWith(key, SignatureAlgorithm.HS256)

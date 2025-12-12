@@ -5,6 +5,8 @@ import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.catalog.domain.Category;
 import com.build4all.catalog.repository.CategoryRepository;
 import com.build4all.notifications.service.EmailService;
+import com.build4all.role.domain.Role;
+import com.build4all.role.repository.RoleRepository;
 import com.build4all.user.domain.PendingUser;
 import com.build4all.user.domain.UserCategories;
 import com.build4all.user.domain.UserStatus;
@@ -43,6 +45,7 @@ public class UserService {
     @Autowired private CategoryRepository categoryRepository;
     @Autowired private PendingUserRepository pendingUserRepository;
     @Autowired private UserStatusRepository userStatusRepository;
+    @Autowired private RoleRepository roleRepository;
 
     /* Tenant link repository */
     @Autowired private AdminUserProjectRepository aupRepo;
@@ -56,6 +59,11 @@ public class UserService {
     public UserStatus getStatus(String name) {
         return userStatusRepository.findByName(name.toUpperCase())
             .orElseThrow(() -> new RuntimeException("UserStatus " + name + " not found"));
+    }
+
+    private Role getRoleOrThrow(String name) {
+        return roleRepository.findByNameIgnoreCase(name)
+                .orElseThrow(() -> new RuntimeException("Role " + name + " not found"));
     }
 
     /** Ensure the tenant link exists and return it. */
@@ -216,6 +224,8 @@ public class UserService {
         if (pending.getEmail() != null) user.setEmail(pending.getEmail());
         if (pending.getPhoneNumber() != null) user.setPhoneNumber(pending.getPhoneNumber());
         user.setIsPublicProfile(isPublicProfile != null ? isPublicProfile : true);
+
+        user.setRole(getRoleOrThrow("USER"));
 
         if (profileImage != null && !profileImage.isEmpty()) {
             String filename = UUID.randomUUID() + "_" + profileImage.getOriginalFilename();
@@ -385,6 +395,7 @@ public class UserService {
         newUser.setProfilePictureUrl(pictureUrl);
         newUser.setIsPublicProfile(true);
         newUser.setStatus(getStatus("ACTIVE"));
+        newUser.setRole(getRoleOrThrow("USER"));
         newUser.setPasswordHash("");
         newUser.setCreatedAt(LocalDateTime.now());
         newUser.setLastLogin(LocalDateTime.now());
@@ -457,6 +468,7 @@ public class UserService {
         newUser.setProfilePictureUrl(picture);
         newUser.setIsPublicProfile(true);
         newUser.setStatus(getStatus("ACTIVE"));
+        newUser.setRole(getRoleOrThrow("USER"));
         newUser.setPasswordHash("");
         newUser.setCreatedAt(LocalDateTime.now());
         newUser.setLastLogin(LocalDateTime.now());

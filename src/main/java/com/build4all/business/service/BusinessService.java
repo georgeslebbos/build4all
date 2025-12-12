@@ -43,6 +43,7 @@ public class BusinessService {
     @Autowired private BusinessStatusRepository businessStatusRepository;
     @Autowired private AdminUserProjectRepository adminUserProjectRepository;
 
+
     private final EmailService emailService;
     public BusinessService(EmailService emailService) { this.emailService = emailService; }
 
@@ -291,6 +292,9 @@ public class BusinessService {
         PendingBusiness pending = pendingBusinessRepository.findById(pendingId)
                 .orElseThrow(() -> new RuntimeException("Pending business not found."));
 
+        Role BusinessRole = roleRepository.findByNameIgnoreCase("BUSINESS")
+                .orElseThrow(() -> new RuntimeException("Role BUSINESS not found"));
+
         Businesses business = new Businesses();
         business.setOwnerProjectLink(app);
         business.setEmail(pending.getEmail());
@@ -301,6 +305,7 @@ public class BusinessService {
         business.setBusinessName(businessName);
         business.setDescription(description);
         business.setWebsiteUrl(websiteUrl);
+        business.setRole(BusinessRole);
         business.setCreatedAt(LocalDateTime.now());
         business.setUpdatedAt(LocalDateTime.now());
 
@@ -336,6 +341,9 @@ public class BusinessService {
             MultipartFile banner
     ) throws IOException {
 
+        Role BusinessRole = roleRepository.findByNameIgnoreCase("BUSINESS")
+                .orElseThrow(() -> new RuntimeException("Role BUSINESS not found"));
+
         Businesses existing = businessRepository.findById(id).orElse(null);
         if (existing == null) throw new IllegalArgumentException("Business with ID " + id + " not found.");
 
@@ -366,6 +374,7 @@ public class BusinessService {
         }
         existing.setDescription(description);
         existing.setWebsiteUrl(websiteUrl);
+        existing.setRole(BusinessRole);
 
         Path uploadDir = Paths.get("uploads/");
         if (!Files.exists(uploadDir)) Files.createDirectories(uploadDir);
@@ -448,6 +457,9 @@ public class BusinessService {
         Businesses existing = businessRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Business with ID " + id + " not found."));
 
+        Role BusinessRole = roleRepository.findByNameIgnoreCase("BUSINESS")
+                .orElseThrow(() -> new RuntimeException("Role BUSINESS not found"));
+
         // If the business is tied to an app, delegate to the tenant-aware method
         Long ownerProjectLinkId = (existing.getOwnerProjectLink() != null)
                 ? existing.getOwnerProjectLink().getId()
@@ -474,6 +486,7 @@ public class BusinessService {
         existing.setBusinessName(name);
         existing.setDescription(description);
         existing.setWebsiteUrl(websiteUrl);
+        existing.setRole(BusinessRole);
 
         if (password != null && !password.trim().isEmpty()) {
             if (password.length() < 6) throw new IllegalArgumentException("Password must be at least 6 characters long.");
@@ -636,7 +649,7 @@ public class BusinessService {
         PendingManager pending = pendingOpt.get();
         Businesses business = pending.getBusiness();
 
-        Role managerRole = roleRepository.findByName("MANAGER")
+        Role managerRole = roleRepository.findByNameIgnoreCase("MANAGER")
                 .orElseThrow(() -> new RuntimeException("Manager role not found"));
 
         if (adminUsersRepository.findByEmail(pending.getEmail()).isPresent()) {

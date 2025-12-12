@@ -27,9 +27,7 @@ public interface AdminUsersRepository extends JpaRepository<AdminUser, Long> {
 
 	void deleteByBusiness_Id(Long businessId);
 
-	int countByRoleNameIgnoreCase(String string);
-
-
+    int countByRole_NameIgnoreCase(String roleName);
 
 
 }

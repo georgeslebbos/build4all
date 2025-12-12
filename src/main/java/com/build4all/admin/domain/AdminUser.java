@@ -4,7 +4,9 @@ import com.build4all.role.domain.Role;
 import com.build4all.business.domain.Businesses;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import org.hibernate.annotations.OnDelete;
@@ -12,10 +14,13 @@ import org.hibernate.annotations.OnDeleteAction;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
 
 @Entity
 @Table(name = "AdminUser")
-public class AdminUser {
+public class AdminUser implements UserDetails {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -38,7 +43,7 @@ public class AdminUser {
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "role_id", nullable = false)
     @OnDelete(action = OnDeleteAction.CASCADE)
     private Role role;
@@ -84,7 +89,6 @@ public class AdminUser {
     public Long getAdminId() { return adminId; }
     public void setAdminId(Long adminId) { this.adminId = adminId; }
 
-    public String getUsername() { return username; }
     public void setUsername(String username) { this.username = username; }
 
     public String getFirstName() { return firstName; }
@@ -120,6 +124,53 @@ public class AdminUser {
     public Set<AdminUserProject> getProjectLinks() { return projectLinks; }
     public void setProjectLinks(Set<AdminUserProject> projectLinks) { this.projectLinks = projectLinks; }
 
+    // --- UserDetails implementation ---
+
+    @Override
+    @JsonIgnore
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        if (role == null || role.getName() == null) {
+            return List.of();
+        }
+        return List.of(new SimpleGrantedAuthority("ROLE_" + role.getName().toUpperCase()));
+    }
+
+    @Override
+    @JsonIgnore
+    public String getPassword() {
+        return passwordHash;
+    }
+
+    @Override
+    @JsonIgnore
+    public String getUsername() {
+        // you can choose username OR email, but be consistent with how you authenticate
+        return username;
+    }
+
+    @Override
+    @JsonIgnore
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    @JsonIgnore
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+
+    @Override
+    @JsonIgnore
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+
+    @Override
+    @JsonIgnore
+    public boolean isEnabled() {
+        return true;
+    }
     /** convenience helpers */
     public void addProjectLink(AdminUserProject link) {
         projectLinks.add(link);
