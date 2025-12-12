@@ -161,13 +161,44 @@ public class ProductController {
 
     /* ------------------------ update ------------------------ */
 
+    /* ------------------------ update ------------------------ */
+
     @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Update product with optional image (flat form-data)")
     public ResponseEntity<?> updateWithImage(
             @RequestHeader("Authorization") String auth,
             @PathVariable Long id,
 
-            @ModelAttribute ProductUpdateRequest request,
+            @RequestParam(required = false) Long itemTypeId,
+            @RequestParam(required = false) Long categoryId,
+
+            @RequestParam(required = false) String name,
+            @RequestParam(required = false) String description,
+            @RequestParam(required = false) BigDecimal price,
+            @RequestParam(required = false) Integer stock,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String sku,
+
+            @RequestParam(required = false) ProductType productType,
+            @RequestParam(required = false) Boolean virtualProduct,
+            @RequestParam(required = false) Boolean downloadable,
+            @RequestParam(required = false) String downloadUrl,
+            @RequestParam(required = false) String externalUrl,
+            @RequestParam(required = false) String buttonText,
+
+            @RequestParam(required = false) BigDecimal salePrice,
+            @RequestParam(required = false) String saleStart,
+            @RequestParam(required = false) String saleEnd,
+
+            @RequestParam(required = false) Boolean taxable,
+            @RequestParam(required = false) TaxClass taxClass,
+
+            @RequestParam(required = false) BigDecimal weightKg,
+            @RequestParam(required = false) BigDecimal widthCm,
+            @RequestParam(required = false) BigDecimal heightCm,
+            @RequestParam(required = false) BigDecimal lengthCm,
+
+            @RequestParam(required = false) String attributesJson,
 
             // ✅ same key as create
             @RequestParam(value = "image", required = false) MultipartFile image
@@ -180,7 +211,53 @@ public class ProductController {
         }
 
         try {
-            ProductResponse updated = productService.updateWithImage(id, request, image);
+            // 🔧 Build ProductUpdateRequest manually from flat form-data
+            ProductUpdateRequest req = new ProductUpdateRequest();
+            req.setItemTypeId(itemTypeId);
+            req.setCategoryId(categoryId);
+
+            req.setName(name);
+            req.setDescription(description);
+            req.setPrice(price);
+            req.setStock(stock);
+            req.setStatus(status);
+            req.setSku(sku);
+
+            if (productType != null) {
+                req.setProductType(productType);
+            }
+
+            // these are Boolean in ProductUpdateRequest
+            req.setVirtualProduct(virtualProduct);
+            req.setDownloadable(downloadable);
+
+            req.setDownloadUrl(downloadUrl);
+            req.setExternalUrl(externalUrl);
+            req.setButtonText(buttonText);
+
+            req.setSalePrice(salePrice);
+            req.setSaleStart(saleStart);
+            req.setSaleEnd(saleEnd);
+
+            req.setTaxable(taxable);
+            req.setTaxClass(taxClass);
+
+            req.setWeightKg(weightKg);
+            req.setWidthCm(widthCm);
+            req.setHeightCm(heightCm);
+            req.setLengthCm(lengthCm);
+
+            // 🔁 attributesJson → List<AttributeValueDTO>
+            if (attributesJson != null && !attributesJson.isBlank()) {
+                ObjectMapper om = new ObjectMapper();
+                List<AttributeValueDTO> attrs = om.readValue(
+                        attributesJson,
+                        new TypeReference<List<AttributeValueDTO>>() {}
+                );
+                req.setAttributes(attrs);
+            }
+
+            ProductResponse updated = productService.updateWithImage(id, req, image);
             return ResponseEntity.ok(updated);
 
         } catch (IllegalArgumentException e) {
@@ -191,6 +268,7 @@ public class ProductController {
                     .body(Map.of("error", e.getMessage()));
         }
     }
+
 
     /* ------------------------ delete ------------------------ */
 
