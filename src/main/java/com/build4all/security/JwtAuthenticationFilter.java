@@ -24,6 +24,21 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * JWT Authentication filter that runs once per request.
+ *
+ * What it does:
+ * - Reads Authorization: Bearer <token>
+ * - Extracts subject (email/phone) + role from the JWT
+ * - Loads the correct principal object (Users/AdminUser/Businesses) from DB based on the role
+ * - Creates a Spring Security Authentication and stores it in SecurityContext
+ *
+ * Why this matters:
+ * - After this filter runs, controllers/services can use:
+ *   - SecurityContextHolder.getContext().getAuthentication()
+ *   - @AuthenticationPrincipal
+ *   - @PreAuthorize("hasRole('...')")
+ */
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtUtil jwtUtil;
@@ -50,81 +65,116 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             FilterChain filterChain
     ) throws ServletException, IOException {
 
+        // Read the Authorization header: "Bearer <jwt>"
         String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
 
-        // No Authorization header or not Bearer --> just continue
+        // No Authorization header or not "Bearer ..." --> skip auth and continue request normally.
+        // Result: request is treated as anonymous by Spring Security.
         if (authHeader == null || !authHeader.toLowerCase().startsWith("bearer ")) {
             filterChain.doFilter(request, response);
             return;
         }
 
+        // Extract raw JWT string (remove "Bearer ")
         String token = authHeader.substring(7).trim();
 
         try {
-            // subject = email / phone / admin email / business email ...
+            // subject = identifier stored in JWT subject:
+            // - user email or phone
+            // - admin email
+            // - business email or phone (depending how you generate the token)
             String subject = jwtUtil.extractUsername(token);
-            String roleName = jwtUtil.extractRole(token); // "USER", "SUPER_ADMIN", "BUSINESS", "OWNER", "MANAGER"
 
-            // If token is bad or security context already set, skip
+            // role = claim "role" inside JWT (e.g. USER, SUPER_ADMIN, BUSINESS, OWNER, MANAGER)
+            String roleName = jwtUtil.extractRole(token);
+
+            // If token parsing failed OR already authenticated earlier in the chain, do nothing.
+            // Example: another filter already set authentication (rare here, but good safety check).
             if (subject == null || roleName == null ||
                     SecurityContextHolder.getContext().getAuthentication() != null) {
                 filterChain.doFilter(request, response);
                 return;
             }
 
-            Object principal = subject; // default: just the String
+            // Default principal is the raw subject string.
+            // We try to upgrade it into a full entity object (Users/AdminUser/Businesses).
+            Object principal = subject;
 
-            // Attach the correct entity depending on role
+            // Attach the correct entity depending on role.
+            // This is useful because later you can access principal fields directly in controllers.
             switch (roleName.toUpperCase()) {
+
                 case "USER" -> {
-                    // Try email, then phone
+                    // In your system, a USER token subject can be email OR phone.
+                    // You try email first, then phone.
                     Users user = usersRepository.findByEmail(subject);
                     if (user == null) {
                         user = usersRepository.findByPhoneNumber(subject);
                     }
                     if (user != null) {
-                        principal = user; // Users entity
+                        principal = user; // principal becomes Users entity
                     }
                 }
 
                 case "SUPER_ADMIN", "OWNER" -> {
-                    // AdminUser is identified by email in your AuthController
+                    // Admin/Owner tokens use email as subject (from AuthController token generation).
                     Optional<AdminUser> adminOpt = adminUsersRepository.findByEmail(subject);
                     if (adminOpt.isPresent()) {
-                        principal = adminOpt.get(); // AdminUser entity
+                        principal = adminOpt.get(); // principal becomes AdminUser entity
                     }
                 }
 
-                case "BUSINESS" , "MANAGER"-> {
-                    // Adapt to your repository; here I assume findByEmail(...) exists
+                case "BUSINESS" -> {
+                    // Business tokens typically use email or phone as subject depending on token generation.
+                    // Here you assume findByEmail exists and subject is email.
                     Optional<Businesses> bizOpt = businessesRepository.findByEmail(subject);
                     if (bizOpt.isPresent()) {
-                        principal = bizOpt.get(); // Businesses entity
+                        principal = bizOpt.get(); // principal becomes Businesses entity
                     }
-                    // If your BusinessesRepository uses another method name
-                    // just replace with the correct one.
+                    // If subject could be phone too, you may want a fallback:
+                    // businessesRepository.findByPhoneNumber(subject)
                 }
 
                 default -> {
-                    // Other roles in the future: keep principal as String
+                    // For roles not handled yet (e.g., MANAGER, etc.),
+                    // we keep principal as a String subject for now.
+                    // NOTE: If MANAGER is also stored in AdminUser, you can include it in the Admin case.
                 }
             }
 
-            // Create authorities: ROLE_USER, ROLE_SUPER_ADMIN, ROLE_BUSINESS, ROLE_OWNER, ROLE_MANAGER
+            // Build authorities list used by Spring Security:
+            // - If roleName = "USER" => "ROLE_USER"
+            // - If roleName = "SUPER_ADMIN" => "ROLE_SUPER_ADMIN"
+            // This matches hasRole('USER') / hasRole('SUPER_ADMIN') usage in @PreAuthorize.
             List<GrantedAuthority> authorities = List.of(
                     new SimpleGrantedAuthority("ROLE_" + roleName.toUpperCase())
             );
 
+            // Create Authentication object:
+            // - principal: entity or subject string
+            // - credentials: null (we are not authenticating by password here; token already proves it)
+            // - authorities: derived from JWT role claim
             UsernamePasswordAuthenticationToken auth =
                     new UsernamePasswordAuthenticationToken(principal, null, authorities);
+
+            // Adds request details (IP, session id, etc.) for auditing/logging if needed
             auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
+            // Store the Authentication into the SecurityContext.
+            // After this line:
+            // - request is authenticated
+            // - controllers can check roles
+            // - @AuthenticationPrincipal can resolve the principal object
             SecurityContextHolder.getContext().setAuthentication(auth);
 
         } catch (Exception ignored) {
-            // invalid token -> leave context empty, request stays anonymous
+            // Any parsing/validation exception:
+            // - keep SecurityContext empty
+            // - request continues as anonymous
+            // (You may log here if you want debugging, but don't expose token details.)
         }
 
+        // Continue filter chain (controller execution happens after this)
         filterChain.doFilter(request, response);
     }
 }

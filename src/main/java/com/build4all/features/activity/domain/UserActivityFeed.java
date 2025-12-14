@@ -1,6 +1,6 @@
 package com.build4all.features.activity.domain;
 
-import com.build4all.config.FeedTypeSeeder;
+import com.build4all.feedType.FeedTypeSeeder;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import org.hibernate.annotations.OnDelete;

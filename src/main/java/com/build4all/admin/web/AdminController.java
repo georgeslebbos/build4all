@@ -26,6 +26,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -33,6 +34,19 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/api/superadmin")
 @Tag(name = "Admin Dashboard", description = "Admin-level statistics and monitoring")
+/**
+ * Controller exposing SUPER_ADMIN-only endpoints.
+ *
+ * Responsibilities:
+ * - Dashboard stats (users/items/orders/feedback)
+ * - Users management (toggle status, delete)
+ * - SUPER_ADMIN profile management (profile update, password update, notification prefs, view "me")
+ * - Businesses management (delete business, disable, activate)
+ *
+ * Security approach used here:
+ * - Each endpoint checks Authorization Bearer token manually using JwtUtil.extractRole(...)
+ * - Only allows role == "SUPER_ADMIN"
+ */
 public class AdminController {
 
     @Autowired private AdminStatsService statsService;
@@ -43,15 +57,26 @@ public class AdminController {
     @Autowired private ReviewRepository reviewRepository;
     @Autowired private BusinessStatusRepository businessStatusRepository;
     @Autowired private JwtUtil jwtUtil;
+
     @Autowired
     private BusinessService businessService;
-    
+
     @Autowired
     private UserStatusRepository userStatusRepository;
 
+    @Autowired
+    private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
 
-    @Autowired private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
-
+    /**
+     * Helper method to check whether the request token belongs to a SUPER_ADMIN.
+     *
+     * Expected header: "Authorization: Bearer <token>"
+     * - removes the "Bearer " prefix
+     * - extracts role claim
+     * - compares it with SUPER_ADMIN
+     *
+     * Any parsing error => false.
+     */
     private boolean isSuperAdmin(String token) {
         try {
             token = token.substring(7).trim();
@@ -65,17 +90,18 @@ public class AdminController {
     @GetMapping("/stats")
     @Operation(summary = "Get system stats", description = "Returns total users, activities, orders, and feedback for the selected period")
     @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+            @ApiResponse(responseCode = "200", description = "Successful"),
+            @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
+            @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
+            @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
+            @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
+            @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+    })
     public ResponseEntity<?> getStats(@RequestParam(defaultValue = "today") String period,
                                       @RequestHeader("Authorization") String token) {
         try {
+            // Manual parsing of Bearer token + role check
             token = token.substring(7).trim(); // Remove "Bearer "
             String role = jwtUtil.extractRole(token);
 
@@ -83,23 +109,24 @@ public class AdminController {
                 return ResponseEntity.status(401).body("Unauthorized");
             }
 
+            // Delegate to stats service (counts users/items/orders/feedback based on time range)
             return ResponseEntity.ok(statsService.getStats(period));
         } catch (Exception e) {
             return ResponseEntity.status(401).body("Invalid token");
         }
     }
- 
+
     @GetMapping("/registrations/monthly")
     @Operation(summary = "Get monthly user registration counts", description = "Returns user registration counts per month for the last 6 months")
     @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+            @ApiResponse(responseCode = "200", description = "Successful"),
+            @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
+            @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
+            @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
+            @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
+            @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+    })
     public ResponseEntity<?> getMonthlyUserRegistrations(@RequestHeader("Authorization") String token) {
         try {
             token = token.substring(7).trim(); // Remove "Bearer " prefix
@@ -109,6 +136,7 @@ public class AdminController {
                 return ResponseEntity.status(401).body("Unauthorized");
             }
 
+            // Returns last 6 months counts (YearMonth -> count)
             Map<String, Long> registrations = statsService.getMonthlyRegistrations();
             return ResponseEntity.ok(registrations);
         } catch (Exception e) {
@@ -119,14 +147,14 @@ public class AdminController {
     @GetMapping("/activities/popular")
     @Operation(summary = "Get popular activities", description = "Returns most booked or viewed activities and their popularity metrics")
     @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+            @ApiResponse(responseCode = "200", description = "Successful"),
+            @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
+            @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
+            @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
+            @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
+            @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+    })
     public ResponseEntity<?> getPopularActivities(@RequestHeader("Authorization") String token) {
         try {
             token = token.substring(7).trim(); // Remove "Bearer " prefix
@@ -136,6 +164,7 @@ public class AdminController {
                 return ResponseEntity.status(401).body("Unauthorized");
             }
 
+            // Note: method name says "Activities", but it actually returns popular items (as you updated in service).
             List<Map<String, Object>> activities = statsService.getPopularItems();
             return ResponseEntity.ok(activities);
         } catch (Exception e) {
@@ -143,18 +172,17 @@ public class AdminController {
         }
     }
 
-
     @GetMapping("/activities")
     @Operation(summary = "Get all activities posted by businesses", description = "Returns title, business name, date, participants, and description for all activities")
     @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+            @ApiResponse(responseCode = "200", description = "Successful"),
+            @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
+            @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
+            @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
+            @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
+            @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+    })
     public ResponseEntity<?> getAllActivities(@RequestHeader("Authorization") String token) {
         try {
             token = token.substring(7).trim(); // Remove "Bearer " prefix
@@ -164,6 +192,7 @@ public class AdminController {
                 return ResponseEntity.status(401).body("Unauthorized");
             }
 
+            // Returns admin view of items/activities as AdminItemDTO.
             List<AdminItemDTO> activities = adminItemService.getAllItems();
             return ResponseEntity.ok(activities);
         } catch (Exception e) {
@@ -171,20 +200,21 @@ public class AdminController {
         }
     }
 
-
     @Operation(summary = "Toggle user status", description = "Toggle a user’s status between ACTIVE and INACTIVE")
     @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+            @ApiResponse(responseCode = "200", description = "Successful"),
+            @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
+            @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
+            @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
+            @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
+            @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+    })
     @PutMapping("/{userId}/toggle-status")
     public ResponseEntity<String> toggleUserStatus(@PathVariable Long userId,
                                                    @RequestHeader("Authorization") String token) {
+
+        // Uses helper which expects the full header value (Bearer ...).
         if (!isSuperAdmin(token)) {
             return ResponseEntity.status(401).body("Unauthorized");
         }
@@ -198,12 +228,13 @@ public class AdminController {
         String currentStatus = user.getStatus().getName();
 
         try {
+            // Toggle between ACTIVE and INACTIVE by loading proper UserStatus entity from DB.
             if ("ACTIVE".equalsIgnoreCase(currentStatus)) {
                 user.setStatus(userStatusRepository.findByName("INACTIVE")
-                    .orElseThrow(() -> new RuntimeException("INACTIVE status not found")));
+                        .orElseThrow(() -> new RuntimeException("INACTIVE status not found")));
             } else {
                 user.setStatus(userStatusRepository.findByName("ACTIVE")
-                    .orElseThrow(() -> new RuntimeException("ACTIVE status not found")));
+                        .orElseThrow(() -> new RuntimeException("ACTIVE status not found")));
             }
 
             usersRepository.save(user);
@@ -213,17 +244,16 @@ public class AdminController {
         }
     }
 
-
     @Operation(summary = "Delete user", description = "Permanently delete a user account by ID")
     @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+            @ApiResponse(responseCode = "200", description = "Successful"),
+            @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
+            @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
+            @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
+            @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
+            @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+    })
     @DeleteMapping("/users/{userId}")
     public ResponseEntity<String> deleteUser(@PathVariable Long userId,
                                              @RequestHeader("Authorization") String token) {
@@ -240,7 +270,8 @@ public class AdminController {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found");
             }
 
-            adminUserService.deleteUserAndDependencies(userId); // ✅ cascades other related deletions
+            // Delegates deletion of dependencies to the service (orders + reviews + user).
+            adminUserService.deleteUserAndDependencies(userId);
             return ResponseEntity.ok("User and all related data deleted successfully.");
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -250,50 +281,54 @@ public class AdminController {
 
     @Operation(summary = "Update admin profile", description = "Update admin profile information (first name, last name, username, email)")
     @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+            @ApiResponse(responseCode = "200", description = "Successful"),
+            @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
+            @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
+            @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
+            @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
+            @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+    })
     @PutMapping("/profile")
     public ResponseEntity<?> updateAdminProfile(@RequestBody AdminProfileUpdateDTO dto,
                                                 @RequestHeader("Authorization") String token) {
+
+        // Only SUPER_ADMIN can update their profile through this controller.
         if (!isSuperAdmin(token)) return ResponseEntity.status(401).body("Unauthorized");
 
+        // Extract the admin id from token claims.
         token = token.substring(7).trim(); // Remove "Bearer "
         Long currentAdminId = jwtUtil.extractId(token);
-        AdminUser admin = adminUsersRepository.findById(currentAdminId).orElse(null);
 
+        AdminUser admin = adminUsersRepository.findById(currentAdminId).orElse(null);
         if (admin == null) {
             return ResponseEntity.status(404).body("Admin user not found.");
         }
 
+        // Directly overwrites fields from DTO (assumes DTO contains final desired values).
         admin.setFirstName(dto.getFirstName());
         admin.setLastName(dto.getLastName());
         admin.setUsername(dto.getUsername());
         admin.setEmail(dto.getEmail());
 
         adminUsersRepository.save(admin);
-        
         return ResponseEntity.ok("Admin profile updated successfully.");
     }
 
     @Operation(summary = "Update admin password", description = "Change the password of a SUPER_ADMIN after verifying the current password")
     @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+            @ApiResponse(responseCode = "200", description = "Successful"),
+            @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
+            @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
+            @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
+            @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
+            @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+    })
     @PutMapping("/password")
     public ResponseEntity<String> updateAdminPassword(@RequestBody AdminPasswordUpdateDTO dto,
                                                       @RequestHeader("Authorization") String token) {
+
         if (!isSuperAdmin(token)) return ResponseEntity.status(401).body("Unauthorized");
 
         token = token.substring(7).trim();
@@ -305,10 +340,13 @@ public class AdminController {
         }
 
         AdminUser admin = optionalAdmin.get();
+
+        // Verifies current password before allowing update.
         if (!passwordEncoder.matches(dto.getCurrentPassword(), admin.getPasswordHash())) {
             return ResponseEntity.status(403).body("Current password is incorrect.");
         }
 
+        // Hash and store the new password.
         admin.setPasswordHash(passwordEncoder.encode(dto.getNewPassword()));
         adminUsersRepository.save(admin);
 
@@ -317,17 +355,18 @@ public class AdminController {
 
     @Operation(summary = "Update notification preferences", description = "Update admin notification settings for item and feedback alerts")
     @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+            @ApiResponse(responseCode = "200", description = "Successful"),
+            @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
+            @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
+            @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
+            @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
+            @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+    })
     @PutMapping("/notifications")
     public ResponseEntity<String> updateNotificationPreferences(@RequestBody AdminNotificationPreferencesDTO dto,
                                                                 @RequestHeader("Authorization") String token) {
+
         if (!isSuperAdmin(token)) return ResponseEntity.status(401).body("Unauthorized");
 
         token = token.substring(7).trim();
@@ -338,6 +377,7 @@ public class AdminController {
             return ResponseEntity.status(404).body("Admin user not found.");
         }
 
+        // Copy notification preferences from DTO to entity.
         admin.setNotifyItemUpdates(dto.isNotifyItemUpdates());
         admin.setNotifyUserFeedback(dto.isNotifyUserFeedback());
         adminUsersRepository.save(admin);
@@ -345,49 +385,53 @@ public class AdminController {
         return ResponseEntity.ok("Notification preferences updated successfully.");
     }
 
-
     @Operation(summary = "Get all feedback", description = "Returns submitter name, content, rating, and date for all feedback")
     @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+            @ApiResponse(responseCode = "200", description = "Successful"),
+            @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
+            @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
+            @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
+            @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
+            @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+    })
     @GetMapping("/feedback")
     public ResponseEntity<?> getAllFeedback(@RequestHeader("Authorization") String token) {
+        // Returns all reviews/feedback in the system (SUPER_ADMIN only).
         if (!isSuperAdmin(token)) return ResponseEntity.status(401).body("Unauthorized");
         return ResponseEntity.ok(reviewRepository.findAll());
     }
-    
+
     @GetMapping("/me")
     @Operation(summary = "Get current admin profile", description = "Returns profile details of the currently logged-in SUPER_ADMIN")
     @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+            @ApiResponse(responseCode = "200", description = "Successful"),
+            @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
+            @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
+            @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
+            @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
+            @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+    })
     public ResponseEntity<?> getCurrentAdminProfile(@RequestHeader("Authorization") String token) {
+
+        // Only SUPER_ADMIN can call this endpoint (returns their own profile).
         if (!isSuperAdmin(token)) {
             return ResponseEntity.status(401).body("Unauthorized");
         }
 
         token = token.substring(7).trim(); // Remove "Bearer "
         Long currentAdminId = jwtUtil.extractId(token);
-        Optional<AdminUser> optionalAdmin = adminUsersRepository.findById(currentAdminId);
 
+        Optional<AdminUser> optionalAdmin = adminUsersRepository.findById(currentAdminId);
         if (optionalAdmin.isEmpty()) {
             return ResponseEntity.status(404).body("Admin not found.");
         }
 
         AdminUser admin = optionalAdmin.get();
 
+        // Returns a lightweight map response (instead of DTO).
+        // Useful for frontend quickly, but a DTO would be cleaner for consistency.
         return ResponseEntity.ok(Map.of(
                 "id", admin.getAdminId(),
                 "firstName", admin.getFirstName(),
@@ -398,24 +442,27 @@ public class AdminController {
                 "notifyUserFeedback", admin.getNotifyUserFeedback()
         ));
     }
-    
-    @Operation(summary = "Delete a business and all related data", description = "Only SUPER_ADMIN can delete a business account along with all related activities, orders, reviews, and admin links.")
+
+    @Operation(summary = "Delete a business and all related data",
+            description = "Only SUPER_ADMIN can delete a business account along with all related activities, orders, reviews, and admin links.")
     @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+            @ApiResponse(responseCode = "200", description = "Successful"),
+            @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
+            @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
+            @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
+            @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
+            @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+    })
     @DeleteMapping("/businesses/{businessId}")
     public ResponseEntity<String> deleteBusinessBySuperAdmin(@PathVariable Long businessId,
                                                              @RequestHeader("Authorization") String token) {
+
         if (!isSuperAdmin(token)) return ResponseEntity.status(401).body("Unauthorized");
 
         try {
-            businessService.delete(businessId); // ✅ this handles everything: activities, orders, reviews, links
+            // Service encapsulates deletion of all dependent data.
+            businessService.delete(businessId);
             return ResponseEntity.ok("Business and all related data deleted successfully.");
         } catch (RuntimeException e) {
             return ResponseEntity.status(404).body("Business not found.");
@@ -424,29 +471,30 @@ public class AdminController {
         }
     }
 
-    @Operation (summary = "Disable a Business", description="Only super admins can disable a business")
+    @Operation(summary = "Disable a Business", description = "Only super admins can disable a business")
     @ApiResponses(value = {
-    	    @ApiResponse(responseCode = "200", description = "Successful"),
-    	    @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
-    	    @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
-    	    @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
-    	    @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
-    	    @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
-    	    @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
-    	})
+            @ApiResponse(responseCode = "200", description = "Successful"),
+            @ApiResponse(responseCode = "400", description = "Bad Request – Invalid or missing parameters or token"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized – Authentication credentials are missing or invalid"),
+            @ApiResponse(responseCode = "402", description = "Payment Required – Payment is required to access this resource (reserved)"),
+            @ApiResponse(responseCode = "403", description = "Forbidden – You do not have permission to perform this action"),
+            @ApiResponse(responseCode = "404", description = "Not Found – The requested resource could not be found"),
+            @ApiResponse(responseCode = "500", description = "Internal Server Error – An unexpected error occurred on the server")
+    })
     @PutMapping("/businesses/{businessId}/disable")
     public ResponseEntity<?> disableBusiness(@PathVariable Long businessId,
                                              @RequestHeader("Authorization") String token) {
+
         if (!isSuperAdmin(token)) return ResponseEntity.status(401).body("Unauthorized");
 
         try {
             Businesses business = businessService.findById(businessId);
 
-          
+            // Load "inactive by admin" status from DB and apply it.
             BusinessStatus inactiveStatus = businessStatusRepository.findByNameIgnoreCase("INACTIVEBYADMIN")
-                .orElseThrow(() -> new RuntimeException("INACTIVE status not found in DB"));
+                    .orElseThrow(() -> new RuntimeException("INACTIVE status not found in DB"));
 
-            business.setStatus(inactiveStatus); 
+            business.setStatus(inactiveStatus);
             businessService.save(business);
 
             return ResponseEntity.ok("Business marked as INACTIVE due to low rating.");
@@ -456,39 +504,39 @@ public class AdminController {
     }
 
     @Operation(summary = "Reactivate a Business", description = "Only SUPER_ADMIN can reactivate a disabled business")
-@ApiResponses(value = {
-    @ApiResponse(responseCode = "200", description = "Business reactivated successfully"),
-    @ApiResponse(responseCode = "400", description = "Invalid parameters or business not found"),
-    @ApiResponse(responseCode = "401", description = "Unauthorized – Only SUPER_ADMIN allowed"),
-    @ApiResponse(responseCode = "500", description = "Server error")
-})
-@PutMapping("/businesses/{businessId}/activate")
-public ResponseEntity<?> activateBusiness(
-        @PathVariable Long businessId,
-        @RequestHeader("Authorization") String token) {
-    // Check SUPER_ADMIN auth
-    if (!isSuperAdmin(token)) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Unauthorized");
-    }
-    try {
-        Businesses business = businessService.findById(businessId);
-        if (business == null) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Business not found");
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Business reactivated successfully"),
+            @ApiResponse(responseCode = "400", description = "Invalid parameters or business not found"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized – Only SUPER_ADMIN allowed"),
+            @ApiResponse(responseCode = "500", description = "Server error")
+    })
+    @PutMapping("/businesses/{businessId}/activate")
+    public ResponseEntity<?> activateBusiness(
+            @PathVariable Long businessId,
+            @RequestHeader("Authorization") String token) {
+
+        // Check SUPER_ADMIN auth
+        if (!isSuperAdmin(token)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Unauthorized");
         }
 
-        BusinessStatus activeStatus = businessStatusRepository.findByNameIgnoreCase("ACTIVE")
-            .orElseThrow(() -> new RuntimeException("ACTIVE status not found"));
+        try {
+            Businesses business = businessService.findById(businessId);
+            if (business == null) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Business not found");
+            }
 
-        business.setStatus(activeStatus);
-        businessService.save(business);
+            // Load ACTIVE status from DB and apply it back to the business.
+            BusinessStatus activeStatus = businessStatusRepository.findByNameIgnoreCase("ACTIVE")
+                    .orElseThrow(() -> new RuntimeException("ACTIVE status not found"));
 
-        return ResponseEntity.ok(Map.of("message", "Business reactivated successfully", "businessId", business.getId()));
-    } catch (Exception e) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("error", "Failed to reactivate business: " + e.getMessage()));
+            business.setStatus(activeStatus);
+            businessService.save(business);
+
+            return ResponseEntity.ok(Map.of("message", "Business reactivated successfully", "businessId", business.getId()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to reactivate business: " + e.getMessage()));
+        }
     }
-}
-
-
-
 }

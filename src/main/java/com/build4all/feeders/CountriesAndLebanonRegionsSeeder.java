@@ -1,4 +1,4 @@
-package com.build4all.config;
+package com.build4all.feeders;
 
 import com.build4all.catalog.domain.Country;
 import com.build4all.catalog.domain.Region;

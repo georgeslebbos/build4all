@@ -1,4 +1,4 @@
-package com.build4all.config;
+package com.build4all.feeders;
 
 import com.build4all.business.domain.BusinessStatus;
 import com.build4all.business.repository.BusinessStatusRepository;

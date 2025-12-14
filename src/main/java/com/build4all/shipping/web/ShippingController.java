@@ -18,6 +18,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.List;
 import java.util.Map;
@@ -190,15 +191,16 @@ public class ShippingController {
 
     @PostMapping("/methods")
     @Operation(summary = "Create shipping method (OWNER/ADMIN)")
+    @PreAuthorize("hasRole('OWNER')")
     public ResponseEntity<?> createMethod(
             @RequestHeader("Authorization") String auth,
             @RequestBody ShippingMethodRequest req
     ) {
-        String token = strip(auth);
+       /* String token = strip(auth);
         if (!hasRole(token, "OWNER", "ADMIN")) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(Map.of("message", "Owner/Admin role required"));
-        }
+        }*/
 
         try {
             if (req.getOwnerProjectId() == null) {

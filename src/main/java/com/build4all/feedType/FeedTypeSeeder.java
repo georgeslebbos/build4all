@@ -1,4 +1,4 @@
-package com.build4all.config;
+package com.build4all.feedType;
 
 import com.build4all.feedType.repository.FeedTypeRepository;
 import jakarta.persistence.Column;

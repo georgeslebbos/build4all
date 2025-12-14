@@ -1,4 +1,4 @@
-package com.build4all.config;
+package com.build4all.feeders;
 
 import com.build4all.order.domain.OrderStatus;
 import com.build4all.order.repository.OrderStatusRepository; // keep if your repo is named *State*

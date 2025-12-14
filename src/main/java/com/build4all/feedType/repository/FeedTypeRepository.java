@@ -1,6 +1,6 @@
 package com.build4all.feedType.repository;
 
-import com.build4all.config.FeedTypeSeeder;
+import com.build4all.feedType.FeedTypeSeeder;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;
