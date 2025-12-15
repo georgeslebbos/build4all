@@ -8,8 +8,29 @@ import java.util.Optional;
 
 public interface PaymentMethodRepository extends JpaRepository<PaymentMethod, Long> {
 
+    /**
+     * Returns all payment gateways that are enabled at PLATFORM level.
+     *
+     * Example:
+     * - STRIPE enabled=true
+     * - CASH enabled=true
+     * - PAYPAL enabled=false
+     *
+     * This method is used when you want to list "available plugins" globally
+     * (like installed payment plugins in WooCommerce).
+     */
     List<PaymentMethod> findByEnabledTrue();
 
-    // 👇 to validate methods by name (STRIPE, CASH, ...)
+    /**
+     * Finds a payment gateway by its CODE (name) ignoring case.
+     *
+     * Example:
+     * - findByNameIgnoreCase("stripe") -> returns PaymentMethod(name="STRIPE")
+     *
+     * Common usages:
+     * - Validating the gateway exists before saving PaymentMethodConfig
+     * - Preventing duplicates when creating payment methods
+     * - Ensuring a requested payment method is supported at platform level
+     */
     Optional<PaymentMethod> findByNameIgnoreCase(String name);
 }

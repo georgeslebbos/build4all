@@ -9,6 +9,7 @@ public class CheckoutRequest {
     private ShippingAddressDTO shippingAddress;
 
     private String paymentMethod;
+    private String destinationAccountId;   // ✅ NEW (Stripe Connect acct_... optional)
     private String stripePaymentId;
 
     // 🔹 currency of the order
@@ -71,5 +72,13 @@ public class CheckoutRequest {
 
     public void setCouponCode(String couponCode) {
         this.couponCode = couponCode;
+    }
+
+    public String getDestinationAccountId() {
+        return destinationAccountId;
+    }
+
+    public void setDestinationAccountId(String destinationAccountId) {
+        this.destinationAccountId = destinationAccountId;
     }
 }

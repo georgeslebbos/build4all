@@ -24,6 +24,13 @@ public class CheckoutSummaryResponse {
     private String couponCode;
     private BigDecimal couponDiscount;
 
+    private Long paymentTransactionId;
+    private String paymentProviderCode;   // STRIPE / CASH / PAYPAL
+    private String providerPaymentId;     // pi_... or CASH_ORDER_...
+    private String clientSecret;          // Stripe only
+    private String redirectUrl;           // PayPal-like providers later
+    private String paymentStatus;         // CREATED / OFFLINE_PENDING / ...
+
     // ===== Constructors =====
 
     // No-arg constructor (needed by Jackson / JPA / frameworks)
@@ -151,5 +158,53 @@ public class CheckoutSummaryResponse {
 
     public void setCouponDiscount(BigDecimal couponDiscount) {
         this.couponDiscount = couponDiscount;
+    }
+
+    public Long getPaymentTransactionId() {
+        return paymentTransactionId;
+    }
+
+    public String getPaymentProviderCode() {
+        return paymentProviderCode;
+    }
+
+    public String getProviderPaymentId() {
+        return providerPaymentId;
+    }
+
+    public String getClientSecret() {
+        return clientSecret;
+    }
+
+    public String getRedirectUrl() {
+        return redirectUrl;
+    }
+
+    public String getPaymentStatus() {
+        return paymentStatus;
+    }
+
+    public void setPaymentTransactionId(Long paymentTransactionId) {
+        this.paymentTransactionId = paymentTransactionId;
+    }
+
+    public void setPaymentProviderCode(String paymentProviderCode) {
+        this.paymentProviderCode = paymentProviderCode;
+    }
+
+    public void setProviderPaymentId(String providerPaymentId) {
+        this.providerPaymentId = providerPaymentId;
+    }
+
+    public void setClientSecret(String clientSecret) {
+        this.clientSecret = clientSecret;
+    }
+
+    public void setRedirectUrl(String redirectUrl) {
+        this.redirectUrl = redirectUrl;
+    }
+
+    public void setPaymentStatus(String paymentStatus) {
+        this.paymentStatus = paymentStatus;
     }
 }
