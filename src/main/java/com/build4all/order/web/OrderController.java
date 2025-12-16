@@ -18,12 +18,41 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * OrderController
+ *
+ * REST API entry point for:
+ * - User order listing (my orders)
+ * - Generic checkout from cart (activities + ecommerce)
+ * - Order actions (cancel, refund, mark paid, etc.)
+ * - Business views (orders for a business, insights)
+ *
+ * Important design choice:
+ * - This controller is mostly a thin layer:
+ *   * extract user/business id from JWT
+ *   * call OrderService for business logic
+ *   * shape responses into the Flutter-friendly “card” models
+ *
+ * The checkout endpoint:
+ * - POST /api/orders/checkout
+ * - Calls orderService.checkout(userId, request)
+ * - Returns CheckoutSummaryResponse
+ *
+ * If you integrated Payment Orchestrator:
+ * - CheckoutSummaryResponse should carry payment fields (clientSecret, redirectUrl, etc.)
+ * - Flutter uses these fields to complete payment and/or show status.
+ */
 @RestController
 @RequestMapping("/api/orders")
 public class OrderController {
 
+    /** Main entry point for all order-related business logic */
     private final OrderService orderService;
+
+    /** JWT parser used to extract userId/businessId from Authorization Bearer token */
     private final JwtUtil jwt;
+
+    /** Used only for read-model queries (order cards, business list, insights) */
     private final OrderItemRepository orderItemRepo;
 
     public OrderController(OrderService orderService,
@@ -34,6 +63,10 @@ public class OrderController {
         this.orderItemRepo = orderItemRepo;
     }
 
+    /**
+     * Strip "Bearer " prefix (if present) from Authorization header.
+     * Your JwtUtil expects the raw token string, not the full header.
+     */
     private String strip(String auth) {
         if (auth == null) return "";
         return auth.replace("Bearer ", "").trim();
@@ -41,6 +74,15 @@ public class OrderController {
 
     /* ---------------------------- helpers (safe getters + shaping) ---------------------------- */
 
+    /**
+     * Reflection helper:
+     * - Your domain model has variations (Item may be Activity/Product/etc.)
+     * - Not all classes share the same getter names for the same concept.
+     * This tries multiple getters safely (returns null if nothing works).
+     *
+     * Example:
+     * tryGet(item, "getName", "getItemName", "getTitle")
+     */
     private Object tryGet(Object target, String... candidates) {
         if (target == null) return null;
         Class<?> c = target.getClass();
@@ -53,6 +95,11 @@ public class OrderController {
         return null;
     }
 
+    /**
+     * UI convenience:
+     * - Convert raw status codes stored in DB (PENDING, COMPLETED, ...)
+     *   into the style you want to show in Flutter cards.
+     */
     private static String titleCaseStatus(String raw) {
         if (raw == null) return "";
         String s = raw.trim().toUpperCase();
@@ -67,6 +114,17 @@ public class OrderController {
         };
     }
 
+    /**
+     * Shapes a DB projection row (Map) into the exact structure the Flutter “order card” expects.
+     *
+     * Input row keys come from OrderItemRepository.findUserOrderCards() projection.
+     * Output shape:
+     * {
+     *   id, quantity, wasPaid, orderStatus,
+     *   item: { itemName, location, startDatetime, imageUrl },
+     *   order: { status }
+     * }
+     */
     private Map<String, Object> toUserCardShape(Map<String, Object> row) {
         Map<String, Object> out = new HashMap<>(row);
 
@@ -89,6 +147,20 @@ public class OrderController {
         return out;
     }
 
+    /**
+     * Shapes a rich OrderItem entity into a Business Dashboard order row:
+     * Includes:
+     * - item minimal info
+     * - user minimal info
+     * - computed totalPrice
+     * - status/wasPaid
+     * - paymentMethod (if present on order header)
+     *
+     * Note:
+     * - paymentMethod is extracted via reflection because your Order.getPaymentMethod()
+     *   may return an entity (PaymentMethod) not a string; you may later normalize this
+     *   to return code/name only (e.g., "STRIPE").
+     */
     private Map<String, Object> toBusinessOrderShape(OrderItem oi) {
         var o = oi.getOrder();
         var i = oi.getItem();
@@ -102,6 +174,7 @@ public class OrderController {
         item.put("startDatetime", i != null ? tryGet(i, "getStartDatetime", "getStartDateTime", "getStartAt", "getStart") : null);
         item.put("imageUrl", i != null ? tryGet(i, "getImageUrl", "getImage", "getImagePath") : null);
 
+        // Currency might come from order header or from line currency, so we handle both safely.
         Map<String, Object> currency = null;
         Object oc = (o != null) ? tryGet(o, "getCurrency") : null;
         if (oc != null) {
@@ -118,6 +191,7 @@ public class OrderController {
             currency.put("symbol", tryGet(cur, "getSymbol"));
         }
 
+        // Minimal user card for business view
         Map<String, Object> user = null;
         if (u != null) {
             user = new HashMap<>();
@@ -128,6 +202,8 @@ public class OrderController {
             user.put("profilePictureUrl", tryGet(u, "getProfilePictureUrl", "getAvatarUrl", "getPhotoUrl"));
         }
 
+        // Total price display:
+        // Prefer order header totalPrice; fallback to line calculation (price * qty).
         double totalPrice = 0.0;
         Object oTot = (o != null) ? tryGet(o, "getTotalPrice") : null;
         if (oTot instanceof BigDecimal bd) {
@@ -136,6 +212,7 @@ public class OrderController {
             totalPrice = oi.getPrice().multiply(BigDecimal.valueOf(oi.getQuantity())).doubleValue();
         }
 
+        // Resolve order status name (status is an entity)
         Object rawStatus = (o != null) ? tryGet(o, "getStatus") : null;
         String statusName = null;
         if (rawStatus != null) {
@@ -146,6 +223,11 @@ public class OrderController {
         String orderStatus = titleCaseStatus(statusName);
         boolean wasPaid = "COMPLETED".equalsIgnoreCase(statusName);
 
+        // Payment method:
+        // Depending on your domain it could be:
+        // - Order.getPaymentMethod() -> PaymentMethod entity
+        // - Order.getMethod() -> string
+        // We keep reflection to be safe.
         Object paymentMethod = (o != null) ? tryGet(o, "getPaymentMethod", "getMethod", "getPaymentType") : null;
 
         Map<String, Object> out = new HashMap<>();
@@ -162,6 +244,14 @@ public class OrderController {
         return out;
     }
 
+    /**
+     * Shapes OrderItem into a lightweight “insights” row:
+     * - who (clientName)
+     * - what (itemName)
+     * - paid or not (wasPaid)
+     *
+     * Used by: GET /api/orders/insights/orders
+     */
     private Map<String, Object> toInsightShape(OrderItem oi) {
         var u = oi.getUser();
         String clientName = null;
@@ -196,6 +286,10 @@ public class OrderController {
 
     /* --------------------------------- user tickets --------------------------------- */
 
+    /**
+     * GET /api/orders/myorders
+     * Returns the user's orders in the Flutter “card” structure.
+     */
     @GetMapping("/myorders")
     @Operation(summary = "List all my orders (card model)")
     public ResponseEntity<?> myOrders(@RequestHeader("Authorization") String auth) {
@@ -205,6 +299,12 @@ public class OrderController {
         return ResponseEntity.ok(shaped);
     }
 
+    /**
+     * GET /api/orders/myorders/pending
+     * Pending includes:
+     * - PENDING
+     * - CANCEL_REQUESTED (because user still sees it as “pending resolution”)
+     */
     @GetMapping("/myorders/pending")
     public ResponseEntity<?> myPending(@RequestHeader("Authorization") String auth) {
         Long userId = jwt.extractId(strip(auth));
@@ -213,6 +313,7 @@ public class OrderController {
         return ResponseEntity.ok(rows.stream().map(this::toUserCardShape).toList());
     }
 
+    /** GET /api/orders/myorders/completed */
     @GetMapping("/myorders/completed")
     public ResponseEntity<?> myCompleted(@RequestHeader("Authorization") String auth) {
         Long userId = jwt.extractId(strip(auth));
@@ -220,6 +321,7 @@ public class OrderController {
         return ResponseEntity.ok(rows.stream().map(this::toUserCardShape).toList());
     }
 
+    /** GET /api/orders/myorders/canceled */
     @GetMapping("/myorders/canceled")
     public ResponseEntity<?> myCanceled(@RequestHeader("Authorization") String auth) {
         Long userId = jwt.extractId(strip(auth));
@@ -229,6 +331,20 @@ public class OrderController {
 
     /* ----------------------------------- checkout (NEW) ------------------------------------ */
 
+    /**
+     * POST /api/orders/checkout
+     *
+     * Main checkout endpoint for both:
+     * - Activities booking
+     * - Ecommerce products purchase
+     *
+     * Expected:
+     * - Authorization: Bearer <jwt>
+     * - Body: CheckoutRequest (lines, currencyId, paymentMethod, shipping address, coupon...)
+     *
+     * Returns:
+     * - CheckoutSummaryResponse (totals + orderId + payment fields if you integrated payment orchestrator)
+     */
     @PostMapping("/checkout")
     @Operation(summary = "Create order from cart (activities + ecommerce)")
     public ResponseEntity<?> checkout(@RequestHeader("Authorization") String auth,
@@ -240,6 +356,10 @@ public class OrderController {
 
     /* ----------------------------------- actions ------------------------------------ */
 
+    /**
+     * PUT /api/orders/cancel/{orderItemId}
+     * User cancels their own order item (service enforces ownership rules).
+     */
     @PutMapping("/cancel/{orderItemId}")
     public ResponseEntity<?> cancel(@RequestHeader("Authorization") String auth,
                                     @PathVariable Long orderItemId) {
@@ -248,6 +368,10 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
+    /**
+     * PUT /api/orders/pending/{orderItemId}
+     * Reset order status back to PENDING (allowed only if not completed).
+     */
     @PutMapping("/pending/{orderItemId}")
     public ResponseEntity<?> resetToPending(@RequestHeader("Authorization") String auth,
                                             @PathVariable Long orderItemId) {
@@ -256,6 +380,10 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
+    /**
+     * DELETE /api/orders/delete/{orderItemId}
+     * Deletes an order item (service validates ownership/permissions).
+     */
     @DeleteMapping("/delete/{orderItemId}")
     public ResponseEntity<?> delete(@RequestHeader("Authorization") String auth,
                                     @PathVariable Long orderItemId) {
@@ -264,6 +392,10 @@ public class OrderController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * PUT /api/orders/refund/{orderItemId}
+     * Requests or performs refund logic (service decides eligibility and status transitions).
+     */
     @PutMapping("/refund/{orderItemId}")
     public ResponseEntity<?> refund(@RequestHeader("Authorization") String auth,
                                     @PathVariable Long orderItemId) {
@@ -272,6 +404,10 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
+    /**
+     * PUT /api/orders/cancel/request/{orderItemId}
+     * User requests cancellation (business will approve/reject).
+     */
     @PutMapping("/cancel/request/{orderItemId}")
     public ResponseEntity<?> requestCancel(@RequestHeader("Authorization") String auth,
                                            @PathVariable Long orderItemId) {
@@ -280,6 +416,10 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
+    /**
+     * PUT /api/orders/cancel/approve/{orderItemId}
+     * Business approves the cancel request (ownership enforced by service).
+     */
     @PutMapping("/cancel/approve/{orderItemId}")
     public ResponseEntity<?> approveCancel(@RequestHeader("Authorization") String auth,
                                            @PathVariable Long orderItemId) {
@@ -288,6 +428,10 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
+    /**
+     * PUT /api/orders/cancel/reject/{orderItemId}
+     * Business rejects cancel request (back to PENDING).
+     */
     @PutMapping("/cancel/reject/{orderItemId}")
     public ResponseEntity<?> rejectCancel(@RequestHeader("Authorization") String auth,
                                           @PathVariable Long orderItemId) {
@@ -296,6 +440,10 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
+    /**
+     * PUT /api/orders/cancel/mark-refunded/{orderItemId}
+     * Business marks canceled order as refunded (status => REFUNDED).
+     */
     @PutMapping("/cancel/mark-refunded/{orderItemId}")
     public ResponseEntity<?> markRefunded(@RequestHeader("Authorization") String auth,
                                           @PathVariable Long orderItemId) {
@@ -304,6 +452,11 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
+    /**
+     * PUT /api/orders/mark-paid/{orderItemId}
+     * Business manually marks an order as paid/completed.
+     * (Useful for cash payments, bank transfer, etc.)
+     */
     @PutMapping("/mark-paid/{orderItemId}")
     public ResponseEntity<?> markPaid(@RequestHeader("Authorization") String auth,
                                       @PathVariable Long orderItemId) {
@@ -314,6 +467,10 @@ public class OrderController {
 
     /* ------------------------------- business views --------------------------------- */
 
+    /**
+     * GET /api/orders/mybusinessorders
+     * Returns business orders list (shaped for business dashboard).
+     */
     @GetMapping("/mybusinessorders")
     public ResponseEntity<?> myBusinessOrders(@RequestHeader("Authorization") String auth) {
         Long businessId = jwt.extractBusinessId(strip(auth));
@@ -322,6 +479,10 @@ public class OrderController {
         return ResponseEntity.ok(list);
     }
 
+    /**
+     * GET /api/orders/insights/orders
+     * Returns lightweight insights rows (clientName, itemName, wasPaid).
+     */
     @GetMapping("/insights/orders")
     public ResponseEntity<?> insights(@RequestHeader("Authorization") String auth) {
         Long businessId = jwt.extractBusinessId(strip(auth));
@@ -332,18 +493,30 @@ public class OrderController {
 
     /* ----------------------------------- errors ------------------------------------- */
 
+    /**
+     * Converts IllegalArgumentException into HTTP 400 with JSON: { "error": "..." }
+     * Helpful for Flutter forms and validation errors.
+     */
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<?> badRequest(IllegalArgumentException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Map.of("error", ex.getMessage()));
     }
 
+    /**
+     * Catch-all exception handler: HTTP 500 with JSON error message.
+     * (In production, consider logging ex + hiding internal error details.)
+     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<?> serverError(Exception ex) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("error", ex.getMessage()));
     }
 
+    /**
+     * PUT /api/orders/order/reject/{orderItemId}
+     * Business rejects an order (status => REJECTED).
+     */
     @PutMapping("/order/reject/{orderItemId}")
     public ResponseEntity<?> rejectOrder(@RequestHeader("Authorization") String auth,
                                          @PathVariable Long orderItemId) {
@@ -352,6 +525,10 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
+    /**
+     * PUT /api/orders/order/unreject/{orderItemId}
+     * Business restores rejected order back to PENDING.
+     */
     @PutMapping("/order/unreject/{orderItemId}")
     public ResponseEntity<?> unrejectOrder(@RequestHeader("Authorization") String auth,
                                            @PathVariable Long orderItemId) {

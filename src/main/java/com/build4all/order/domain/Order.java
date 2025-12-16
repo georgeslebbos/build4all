@@ -18,38 +18,87 @@ import org.hibernate.annotations.OnDeleteAction;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+/**
+ * Order (orders table)
+ *
+ * Represents the "order header" record:
+ * - Who placed the order (user)
+ * - Current status (PENDING/COMPLETED/...)
+ * - Totals (grand total, shipping, taxes, coupon)
+ * - Shipping destination/method
+ * - Payment method chosen (STRIPE/CASH/...)
+ *
+ * One Order has many OrderItem lines.
+ *
+ * Notes:
+ * - We use LAZY relations to avoid loading heavy objects automatically.
+ * - Some fields are @JsonIgnore to avoid infinite recursion in JSON serialization
+ *   and to keep API responses light.
+ */
 @JsonIgnoreProperties({"hibernateLazyInitializer","handler"})
 @Entity
 @Table(name = "orders")
 public class Order {
 
+    /** Primary key for the order header (order_id) */
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "order_id")
     private Long id;
 
     // 🔗 user who owns the order
+    /**
+     * The user who placed/owns this order.
+     * LAZY: fetched only when needed.
+     * @JsonIgnore: prevents exposing full user entity in order JSON
+     *             and avoids circular references.
+     */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     @JsonIgnore
     private Users user;
 
     // 🔗 one order -> many orderItems
+    /**
+     * Order lines.
+     * mappedBy="order": OrderItem has the FK to Order.
+     * cascade=ALL: saving Order can save its OrderItems.
+     * orphanRemoval=true: removing a line from this list will delete it from DB.
+     * @JsonIgnore to avoid recursion (Order -> OrderItem -> Order -> ...)
+     */
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonIgnore
     private List<OrderItem> orderItems = new ArrayList<>();
 
+    /**
+     * Date/time when this order was created/updated (you are using it also in status flips).
+     * Default = now when the entity is instantiated.
+     */
     @Column(name = "order_date", nullable = false)
     private LocalDateTime orderDate = LocalDateTime.now();
 
     // 🔗 status from order_status table
+    /**
+     * Current status of the order.
+     * Stored as a foreign key to order_status table (status_id).
+     * Examples: PENDING, COMPLETED, CANCELED, REFUNDED, ...
+     */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "status_id", nullable = false)
     private OrderStatus status;
 
+    /**
+     * Grand total amount for the order (items + shipping + taxes - discount).
+     * precision=10, scale=2 => up to 99999999.99 (depends on DB)
+     */
     @Column(name = "total_price", precision = 10, scale = 2)
     private BigDecimal totalPrice = BigDecimal.ZERO;
 
+    /**
+     * Currency of the order total (USD/SAR/LBP...).
+     * OnDelete CASCADE: if a currency is deleted, orders referencing it will be deleted.
+     * (Be careful: usually currencies are "master data" and should never be deleted.)
+     */
     @ManyToOne
     @JoinColumn(name = "currency_id")
     @OnDelete(action = OnDeleteAction.CASCADE)
@@ -57,54 +106,90 @@ public class Order {
 
     // --- Shipping & tax ---
 
+    /**
+     * Shipping country (optional).
+     * For digital products or bookings, it can be null.
+     */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "shipping_country_id")
     private Country shippingCountry;
 
+    /**
+     * Shipping region/state (optional).
+     */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "shipping_region_id")
     private Region shippingRegion;
 
+    /** City in shipping address (optional) */
     @Column(name = "shipping_city")
     private String shippingCity;
 
+    /** Postal/ZIP code (optional) */
     @Column(name = "shipping_postal_code")
     private String shippingPostalCode;
 
+    /**
+     * Selected shipping method id (from your shipping module),
+     * stored as a simple Long for flexibility.
+     */
     @Column(name = "shipping_method_id")
     private Long shippingMethodId;
 
+    /** Human-readable shipping method name (useful for invoices/history) */
     @Column(name = "shipping_method_name")
     private String shippingMethodName;
 
+    /** Shipping total amount (without taxes if you separate them) */
     @Column(name = "shipping_total", precision = 10, scale = 2)
     private BigDecimal shippingTotal = BigDecimal.ZERO;
 
+    /** Tax amount that applies to items subtotal */
     @Column(name = "item_tax_total", precision = 10, scale = 2)
     private BigDecimal itemTaxTotal = BigDecimal.ZERO;
 
+    /** Tax amount that applies to shipping total */
     @Column(name = "shipping_tax_total", precision = 10, scale = 2)
     private BigDecimal shippingTaxTotal = BigDecimal.ZERO;
 
     // --- Coupon ---
 
+    /** Coupon code applied at checkout (if any) */
     @Column(name = "coupon_code", length = 100)
     private String couponCode;
 
+    /** Discount amount coming from coupon (positive number stored as amount) */
     @Column(name = "coupon_discount", precision = 10, scale = 2)
     private BigDecimal couponDiscount = BigDecimal.ZERO;
 
     // --- Payment method (STRIPE, CASH, PAYPAL, etc.) ---
+    /**
+     * Payment method selected at checkout:
+     * - STRIPE
+     * - CASH
+     * - PAYPAL (future)
+     *
+     * Stored as FK to payment_method table (payment_method_id).
+     */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "payment_method_id")
     private PaymentMethod paymentMethod;
 
     // ===== Helper methods to manage lines =====
+
+    /**
+     * Adds an OrderItem to this order and sets the back-reference.
+     * Use this if you build order items through the entity instead of setting order manually.
+     */
     public void addOrderItem(OrderItem item) {
         orderItems.add(item);
         item.setOrder(this);
     }
 
+    /**
+     * Removes an OrderItem from this order and clears the back-reference.
+     * orphanRemoval=true => removing from list will delete the row from DB after flush.
+     */
     public void removeOrderItem(OrderItem item) {
         orderItems.remove(item);
         item.setOrder(null);
