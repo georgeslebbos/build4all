@@ -376,5 +376,48 @@
       "categoryName": "Nails",
       "itemTypeName": "Nail Care"
     }
+  ],
+  "taxRules": [
+    {
+      "name": "VAT Lebanon 11%",
+      "rate": 11.00,
+      "appliesToShipping": false,
+      "enabled": true,
+      "countryIso2": "LB",
+      "regionCode": "BEIRUT"
+    }
+  ],
+  "shippingMethods": [
+    {
+      "name": "Standard Delivery",
+      "description": "Delivery in 2-3 days",
+      "type": "FLAT_RATE",
+      "flatRate": 3.00,
+      "enabled": true,
+      "countryIso2": "LB"
+    },
+    {
+      "name": "Free Over 50$",
+      "description": "Free shipping if subtotal >= 50$",
+      "type": "FREE_OVER_THRESHOLD",
+      "flatRate": 3.00,
+      "freeShippingThreshold": 50.00,
+      "enabled": true,
+      "countryIso2": "LB"
+    }
+  ],
+  "coupons": [
+    {
+      "code": "WELCOME10",
+      "description": "10% off first order",
+      "type": "PERCENT",
+      "value": 10.00,
+      "globalUsageLimit": 1000,
+      "maxDiscountAmount": 50.00,
+      "minOrderAmount": 0.00,
+      "validFrom": "2025-12-01T00:00:00",
+      "validTo": "2026-12-31T23:59:59",
+      "active": true
+    }
   ]
 }
