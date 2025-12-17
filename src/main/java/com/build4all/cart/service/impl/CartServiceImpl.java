@@ -29,10 +29,19 @@ import java.util.List;
 @Transactional
 public class CartServiceImpl implements CartService {
 
+    // Cart header repository (Cart table)
     private final CartRepository cartRepo;
+
+    // Cart lines repository (CartItem table)
     private final CartItemRepository cartItemRepo;
+
+    // Used to validate the cart owner exists when creating a new cart
     private final UsersRepository usersRepo;
+
+    // Used to load items/products when adding to cart
     private final ItemRepository itemRepo;
+
+    // Delegation to central checkout/order logic (pricing + order creation)
     private final OrderService orderService;
 
     public CartServiceImpl(CartRepository cartRepo,
@@ -51,6 +60,14 @@ public class CartServiceImpl implements CartService {
        Reflection helper (like in OrderController)
        ============================== */
 
+    /**
+     * Tries to call a getter method from a list of candidate method names.
+     * This is useful because different Item subclasses might expose different getters:
+     * - getName / getTitle / getItemName
+     * - getImageUrl / getImage / getThumbnailUrl
+     *
+     * We keep it "safe" (catch exceptions) so the API never crashes due to missing methods.
+     */
     private Object tryGet(Object target, String... candidates) {
         if (target == null) return null;
         Class<?> c = target.getClass();
@@ -67,11 +84,22 @@ public class CartServiceImpl implements CartService {
        Internal helpers
        ============================== */
 
+    /**
+     * Returns the user's ACTIVE cart.
+     * If none exists, creates a new cart with status ACTIVE and returns it.
+     *
+     * Why this helper?
+     * - Keeps all public methods consistent (always operate on ACTIVE cart)
+     * - Centralizes "create if missing" behavior in one place
+     */
     private Cart getOrCreateActiveCart(Long userId) {
         return cartRepo.findByUser_IdAndStatus(userId, CartStatus.ACTIVE)
                 .orElseGet(() -> {
+                    // Validate user exists (cart must have an owner)
                     Users user = usersRepo.findById(userId)
                             .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+                    // Create cart header
                     Cart cart = new Cart();
                     cart.setUser(user);
                     cart.setStatus(CartStatus.ACTIVE);
@@ -82,6 +110,14 @@ public class CartServiceImpl implements CartService {
                 });
     }
 
+    /**
+     * Recalculates the cart header total from its items:
+     * total = Σ (unitPrice * quantity)
+     *
+     * Notes:
+     * - unitPrice is the price "captured" when the item was added to cart.
+     * - We update updatedAt on each recalculation.
+     */
     private void recalcTotals(Cart cart) {
         if (cart == null) return;
         BigDecimal total = BigDecimal.ZERO;
@@ -95,12 +131,21 @@ public class CartServiceImpl implements CartService {
         cart.setUpdatedAt(LocalDateTime.now());
     }
 
+    /**
+     * Maps Cart entity → CartResponse DTO (API response shape).
+     *
+     * Why not return entities?
+     * - Avoid LazyInitialization issues
+     * - Avoid exposing internal JPA model
+     * - Provide a stable and frontend-friendly JSON structure
+     */
     private CartResponse toResponse(Cart cart) {
         CartResponse res = new CartResponse();
         res.setCartId(cart.getId());
         res.setStatus(cart.getStatus().name());
         res.setTotalPrice(cart.getTotalPrice());
 
+        // currency symbol is optional (cart may not have currency set yet)
         String symbol = null;
         if (cart.getCurrency() != null) {
             try {
@@ -109,6 +154,7 @@ public class CartServiceImpl implements CartService {
         }
         res.setCurrencySymbol(symbol);
 
+        // Build item responses
         List<CartItemResponse> items = cart.getItems().stream().map(ci -> {
             CartItemResponse r = new CartItemResponse();
             Item item = ci.getItem();
@@ -124,6 +170,7 @@ public class CartServiceImpl implements CartService {
             Object imageObj = tryGet(item, "getImageUrl", "getImage", "getPhotoUrl", "getThumbnailUrl");
             r.setImageUrl(imageObj != null ? imageObj.toString() : null);
 
+            // Quantity + pricing
             r.setQuantity(ci.getQuantity());
             r.setUnitPrice(ci.getUnitPrice() == null ? BigDecimal.ZERO : ci.getUnitPrice());
             r.setLineTotal(r.getUnitPrice().multiply(BigDecimal.valueOf(ci.getQuantity())));
@@ -138,6 +185,10 @@ public class CartServiceImpl implements CartService {
        Public API (CartService)
        ============================== */
 
+    /**
+     * Returns the user's cart (creates one if not found).
+     * Always recalculates totals before returning.
+     */
     @Override
     public CartResponse getMyCart(Long userId) {
         Cart cart = getOrCreateActiveCart(userId);
@@ -145,16 +196,28 @@ public class CartServiceImpl implements CartService {
         return toResponse(cart);
     }
 
+    /**
+     * Adds an item to the cart.
+     *
+     * Behavior:
+     * - If item already exists in cart → increments quantity
+     * - Else → creates a new CartItem line
+     * - Captures unit price at time of adding (important if prices can change later)
+     * - Recalculates totals and saves cart
+     */
     @Override
     public CartResponse addToCart(Long userId, AddToCartRequest request) {
         if (request.getQuantity() <= 0)
             throw new IllegalArgumentException("Quantity must be > 0");
 
         Cart cart = getOrCreateActiveCart(userId);
+
+        // Load item from DB (ensures it exists and we have its currency/price)
         Item item = itemRepo.findById(request.getItemId())
                 .orElseThrow(() -> new IllegalArgumentException("Item not found"));
 
         // set cart currency from first item if null
+        // (prevents mixing currencies accidentally)
         if (cart.getCurrency() == null && item.getCurrency() != null) {
             cart.setCurrency(item.getCurrency());
         }
@@ -166,16 +229,22 @@ public class CartServiceImpl implements CartService {
                 .orElse(null);
 
         if (existing != null) {
+            // Increase quantity, preserve captured unitPrice
             existing.setQuantity(existing.getQuantity() + request.getQuantity());
         } else {
+            // Create new line
             CartItem ci = new CartItem();
             ci.setItem(item);
             ci.setQuantity(request.getQuantity());
+
+            // Capture unit price at time of adding to cart
+            // (in ecommerce you may later want to use "effective price" if item is Product with discount)
             ci.setUnitPrice(item.getPrice() == null ? BigDecimal.ZERO : item.getPrice());
+
             ci.setCurrency(item.getCurrency());
             ci.setCreatedAt(LocalDateTime.now());
             ci.setUpdatedAt(LocalDateTime.now());
-            cart.addItem(ci);
+            cart.addItem(ci); // also sets back-reference + updates cart timestamp
         }
 
         recalcTotals(cart);
@@ -183,6 +252,13 @@ public class CartServiceImpl implements CartService {
         return toResponse(cart);
     }
 
+    /**
+     * Updates quantity for a cart item.
+     *
+     * Rules:
+     * - cartItemId must belong to the user's ACTIVE cart
+     * - quantity <= 0 means remove the item
+     */
     @Override
     public CartResponse updateCartItem(Long userId, Long cartItemId, UpdateCartItemRequest request) {
         Cart cart = getOrCreateActiveCart(userId);
@@ -193,9 +269,11 @@ public class CartServiceImpl implements CartService {
                 .orElseThrow(() -> new IllegalArgumentException("Cart item not found or not in your cart"));
 
         if (request.getQuantity() <= 0) {
+            // Remove from cart and delete line
             cart.removeItem(ci);
             cartItemRepo.delete(ci);
         } else {
+            // Update quantity
             ci.setQuantity(request.getQuantity());
             ci.setUpdatedAt(LocalDateTime.now());
         }
@@ -205,6 +283,9 @@ public class CartServiceImpl implements CartService {
         return toResponse(cart);
     }
 
+    /**
+     * Removes a cart item completely from the user's ACTIVE cart.
+     */
     @Override
     public CartResponse removeCartItem(Long userId, Long cartItemId) {
         Cart cart = getOrCreateActiveCart(userId);
@@ -222,14 +303,22 @@ public class CartServiceImpl implements CartService {
         return toResponse(cart);
     }
 
+    /**
+     * Clears all cart items and resets totals.
+     * Safe behavior: if cart doesn't exist, do nothing.
+     */
     @Override
     public void clearCart(Long userId) {
         Cart cart = cartRepo.findByUser_IdAndStatus(userId, CartStatus.ACTIVE)
                 .orElse(null);
         if (cart == null) return;
 
+        // Bulk delete (fast)
         cartItemRepo.deleteByCart_Id(cart.getId());
+
+        // Keep entity state consistent in memory
         cart.getItems().clear();
+
         recalcTotals(cart);
         cartRepo.save(cart);
     }
@@ -245,12 +334,14 @@ public class CartServiceImpl implements CartService {
                          Long currencyId,
                          String couponCode) {
 
+        // Load active cart (must exist)
         Cart cart = cartRepo.findByUser_IdAndStatus(userId, CartStatus.ACTIVE)
                 .orElseThrow(() -> new IllegalStateException("No active cart"));
 
         if (cart.getItems() == null || cart.getItems().isEmpty())
             throw new IllegalStateException("Cart is empty");
 
+        // Validate user exists (also helps with clearer error message)
         Users user = usersRepo.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
@@ -259,6 +350,8 @@ public class CartServiceImpl implements CartService {
         }
 
         // Determine effective currencyId:
+        // - Prefer explicit currencyId argument
+        // - Else fallback to cart currency
         Long effectiveCurrencyId = currencyId;
         if (effectiveCurrencyId == null) {
             if (cart.getCurrency() != null && cart.getCurrency().getId() != null) {
@@ -278,8 +371,11 @@ public class CartServiceImpl implements CartService {
             CartLine line = new CartLine();
             line.setItemId(item.getId());
             line.setQuantity(ci.getQuantity());
+
             // Optionally pass unit price; OrderService may still recompute from DB
+            // (In your OrderServiceImpl.checkout, you recompute unitPrice anyway)
             line.setUnitPrice(ci.getUnitPrice());
+
             return line;
         }).toList();
 
@@ -288,7 +384,11 @@ public class CartServiceImpl implements CartService {
         checkoutRequest.setLines(lines);
         checkoutRequest.setCurrencyId(effectiveCurrencyId);
         checkoutRequest.setPaymentMethod(paymentMethod);
+
+        // Legacy field: stripePaymentId (depending on your new flow it might be unused)
         checkoutRequest.setStripePaymentId(stripePaymentId);
+
+        // Coupon code (optional)
         checkoutRequest.setCouponCode(couponCode);
 
         // If you later store shipping on Cart, you can map it here:
@@ -307,6 +407,9 @@ public class CartServiceImpl implements CartService {
         CheckoutSummaryResponse summary = orderService.checkout(userId, checkoutRequest);
 
         // mark cart as converted & clear items
+        // IMPORTANT: In the "new payment flow", you might prefer clearing cart only after payment is confirmed.
+        // Your OrderServiceImpl.checkout already clears cart after starting payment successfully.
+        // If both places clear cart, you may end up doing it twice.
         cart.setStatus(CartStatus.CONVERTED);
         cartItemRepo.deleteByCart_Id(cart.getId());
         cart.getItems().clear();

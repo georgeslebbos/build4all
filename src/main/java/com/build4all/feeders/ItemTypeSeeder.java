@@ -17,7 +17,7 @@ import java.util.Optional;
 
 @Configuration
 public class ItemTypeSeeder {
-
+/*
     private static class Seed {
         final String itemTypeName;   // e.g., "Football"
         final String categoryName;   // e.g., "SPORTS"
@@ -129,5 +129,5 @@ public class ItemTypeSeeder {
                 }
             }
         };
-    }
+    }*/
 }

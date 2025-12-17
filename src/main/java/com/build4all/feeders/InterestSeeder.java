@@ -13,7 +13,7 @@ import java.util.Map;
 
 @Configuration
 public class InterestSeeder {
-
+/*
     @Bean
     public CommandLineRunner seedCategories(CategoryRepository categoryRepo,
                                             ProjectRepository projectRepo) {
@@ -62,5 +62,5 @@ public class InterestSeeder {
                         });
             }
         };
-    }
+    }*/
 }
