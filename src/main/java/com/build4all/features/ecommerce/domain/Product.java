@@ -4,7 +4,6 @@ import com.build4all.catalog.domain.Item;
 import jakarta.persistence.*;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "products")
@@ -33,15 +32,6 @@ public class Product extends Item {
 
     @Column(name = "button_text")
     private String buttonText;        // optional: "Buy now", "Book now"
-
-    @Column(name = "sale_price")
-    private BigDecimal salePrice;
-
-    @Column(name = "sale_start")
-    private LocalDateTime saleStart;
-
-    @Column(name = "sale_end")
-    private LocalDateTime saleEnd;
 
     @Column(name = "weight_kg")
     private BigDecimal weightKg;
@@ -77,40 +67,6 @@ public class Product extends Item {
 
     public String getButtonText() { return buttonText; }
     public void setButtonText(String buttonText) { this.buttonText = buttonText; }
-
-    public BigDecimal getSalePrice() { return salePrice; }
-    public void setSalePrice(BigDecimal salePrice) { this.salePrice = salePrice; }
-
-    public LocalDateTime getSaleStart() { return saleStart; }
-    public void setSaleStart(LocalDateTime saleStart) { this.saleStart = saleStart; }
-
-    public LocalDateTime getSaleEnd() { return saleEnd; }
-    public void setSaleEnd(LocalDateTime saleEnd) { this.saleEnd = saleEnd; }
-
-    @Transient
-    public boolean isOnSaleNow() {
-        // Need a positive base price and sale price
-        if (getPrice() == null || getPrice().compareTo(BigDecimal.ZERO) <= 0) return false;
-        if (salePrice == null || salePrice.compareTo(BigDecimal.ZERO) <= 0) return false;
-
-        // Sale price must be lower than base price
-        if (salePrice.compareTo(getPrice()) >= 0) return false;
-
-        LocalDateTime now = LocalDateTime.now();
-
-        if (saleStart != null && now.isBefore(saleStart)) return false;
-        if (saleEnd != null && now.isAfter(saleEnd)) return false;
-
-        return true;
-    }
-
-    @Transient
-    public BigDecimal getEffectivePrice() {
-        if (isOnSaleNow()) {
-            return salePrice;
-        }
-        return getPrice();
-    }
 
     public BigDecimal getWeightKg() { return weightKg; }
     public void setWeightKg(BigDecimal weightKg) { this.weightKg = weightKg; }

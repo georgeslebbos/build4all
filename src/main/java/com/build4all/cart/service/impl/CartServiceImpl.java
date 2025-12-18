@@ -239,7 +239,8 @@ public class CartServiceImpl implements CartService {
 
             // Capture unit price at time of adding to cart
             // (in ecommerce you may later want to use "effective price" if item is Product with discount)
-            ci.setUnitPrice(item.getPrice() == null ? BigDecimal.ZERO : item.getPrice());
+            //ci.setUnitPrice(item.getPrice() == null ? BigDecimal.ZERO : item.getPrice());
+            ci.setUnitPrice(item.getEffectivePrice() == null ? BigDecimal.ZERO : item.getEffectivePrice());
 
             ci.setCurrency(item.getCurrency());
             ci.setCreatedAt(LocalDateTime.now());
