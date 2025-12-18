@@ -1,6 +1,6 @@
-package com.build4all.homebanner.repository;
+package com.build4all.home.repository;
 
-import com.build4all.homebanner.domain.HomeBanner;
+import com.build4all.home.domain.HomeBanner;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;

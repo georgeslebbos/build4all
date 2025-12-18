@@ -1,4 +1,4 @@
-package com.build4all.homebanner.domain;
+package com.build4all.home.domain;
 
 import com.build4all.admin.domain.AdminUserProject;
 import com.fasterxml.jackson.annotation.JsonIgnore;

@@ -1,4 +1,4 @@
-package com.build4all.homebanner.service;
+package com.build4all.home.service;
 
 import com.build4all.admin.domain.AdminUserProject;
 import org.springframework.web.multipart.MultipartFile;
@@ -8,10 +8,10 @@ import java.nio.file.*;
 import java.util.UUID;
 
 import com.build4all.admin.repository.AdminUserProjectRepository;
-import com.build4all.homebanner.domain.HomeBanner;
-import com.build4all.homebanner.dto.HomeBannerRequest;
-import com.build4all.homebanner.dto.HomeBannerResponse;
-import com.build4all.homebanner.repository.HomeBannerRepository;
+import com.build4all.home.domain.HomeBanner;
+import com.build4all.home.dto.HomeBannerRequest;
+import com.build4all.home.dto.HomeBannerResponse;
+import com.build4all.home.repository.HomeBannerRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
