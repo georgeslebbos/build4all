@@ -1,11 +1,11 @@
-package com.build4all.home.web;
+package com.build4all.home.banner.web;
 
-import com.build4all.home.dto.HomeBannerRequest;
+import com.build4all.home.banner.dto.HomeBannerRequest;
 import org.springframework.http.MediaType;
 import org.springframework.web.multipart.MultipartFile;
 
-import com.build4all.home.dto.HomeBannerResponse;
-import com.build4all.home.service.HomeBannerService;
+import com.build4all.home.banner.dto.HomeBannerResponse;
+import com.build4all.home.banner.service.HomeBannerService;
 import com.build4all.security.JwtUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import org.springframework.http.HttpStatus;
