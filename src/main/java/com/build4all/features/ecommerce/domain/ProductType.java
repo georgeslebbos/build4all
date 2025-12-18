@@ -1,4 +1,5 @@
 package com.build4all.features.ecommerce.domain;
+
 /*
 🟢 SIMPLE
 
