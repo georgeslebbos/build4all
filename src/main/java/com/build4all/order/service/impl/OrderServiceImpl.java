@@ -54,6 +54,11 @@ import java.util.stream.Collectors;
  * Notes:
  * - @Transactional ensures that creating order header + order items is atomic.
  * - The new checkout flow is: create order -> start payment -> return payment info to client.
+ *
+ * Multi-tenant note:
+ * - ownerProjectId is the tenant/app scope.
+ * - Stripe publishableKey MUST be tenant-scoped (loaded from DB configJson),
+ *   NOT compiled into Env or build-time variables.
  */
 @Service
 @Transactional
@@ -91,25 +96,49 @@ public class OrderServiceImpl implements OrderService {
     private final CartItemRepository cartItemRepo;
 
     // Pricing engine: shipping + taxes + coupons
-    /** Central pricing engine that calculates: items subtotal + shipping + tax + coupon discount */
+    /**
+     * Central pricing engine that calculates:
+     * - items subtotal
+     * - shipping cost (based on shipping method + address)
+     * - taxes (items + shipping)
+     * - coupon discount
+     * - grand total
+     *
+     * Important:
+     * - Pricing should be trusted ONLY from server side (never from client inputs).
+     * - This protects against price tampering.
+     */
     private final CheckoutPricingService checkoutPricingService;
 
-    /** Cart repository (to fetch active cart and mark it converted) */
+    /**
+     * Cart repository:
+     * - Used to fetch the ACTIVE cart for the user
+     * - Used to mark it as CONVERTED after we successfully start a payment
+     */
     private final CartRepository cartRepo;
 
-    // ✅ NEW: Payment module orchestrator (Stripe/Cash/PayPal...)
+    // ===============================
+    // Payment module integration
+    // ===============================
+
     /**
-     * Orchestrates payment:
-     * - Creates a PaymentTransaction
-     * - Calls the correct provider (Stripe now, others later)
-     * - Returns clientSecret / providerPaymentId / redirectUrl depending on provider
+     * PaymentOrchestratorService:
+     * - Provider-agnostic payment engine
+     * - Creates internal PaymentTransaction record
+     * - Delegates to provider plugin (Stripe/Cash/PayPal...)
+     * - Returns bootstrap info for client (clientSecret, publishableKey, redirectUrl...)
+     *
+     * Stripe-specific:
+     * - clientSecret is per-payment-attempt (per order) and is safe to send to client
+     * - publishableKey is required to initialize Stripe SDK on client
+     * - secretKey must NEVER be sent to client (stays server-side in configJson)
      */
     private final PaymentOrchestratorService paymentOrchestrator;
 
-    // ✅ NEW: To attach PaymentMethod entity to Order header
     /**
-     * Used to resolve the PaymentMethod entity (STRIPE, CASH, ...)
-     * and store it on the order header as a reference.
+     * PaymentMethod repository:
+     * - Used to load PaymentMethod entity by code (STRIPE/CASH/...)
+     * - We store it on Order header for reporting + later reconciliation
      */
     private final PaymentMethodRepository paymentMethodRepo;
 
@@ -152,6 +181,10 @@ public class OrderServiceImpl implements OrderService {
     /**
      * Ensures a status exists in DB (order_status table).
      * Example inputs: "PENDING", "COMPLETED", "CANCELED", "REFUNDED"...
+     *
+     * Why this helper exists:
+     * - Keeps code readable: requireStatus("PENDING") is clearer than repository calls everywhere
+     * - Centralizes the exception message when a status is missing in DB
      */
     private OrderStatus requireStatus(String code) {
         return orderStatusRepo.findByNameIgnoreCase(code)
@@ -160,7 +193,13 @@ public class OrderServiceImpl implements OrderService {
 
     /**
      * Returns the current order status code as uppercase string.
-     * Used to compare quickly in business rules (COMPLETED? CANCELED? etc.)
+     *
+     * Used for business rule checks such as:
+     * - if COMPLETED => cannot cancel
+     * - if CANCELED => no-op
+     *
+     * Safe-guards:
+     * - Returns empty string if status is missing to avoid NullPointerException.
      */
     private String currentStatusCode(Order header) {
         if (header == null || header.getStatus() == null || header.getStatus().getName() == null)
@@ -172,8 +211,13 @@ public class OrderServiceImpl implements OrderService {
      * Changes status of an order (via OrderItem -> Order header),
      * and updates timestamps. Saves both header and item.
      *
-     * Why it takes OrderItem?
-     * - Because many business operations are triggered on orderItemId.
+     * Why it takes OrderItem (and not orderId):
+     * - Many actions in the system are triggered by orderItemId
+     * - OrderItem provides access to the header and avoids re-loading twice
+     *
+     * Side effects:
+     * - Updates Order.orderDate to "now" (you are using it as "last update" timeline)
+     * - Updates OrderItem.updatedAt
      */
     private void flipStatus(OrderItem oi, String newStatusUpper) {
         Order header = oi.getOrder();
@@ -197,9 +241,15 @@ public class OrderServiceImpl implements OrderService {
 
     /**
      * Resolves the unit price used in checkout/order items.
-     * - For ecommerce Product: uses effective price (discount applied)
-     * - Otherwise: uses Item.price
-     * - If missing: returns 0
+     *
+     * Design goal:
+     * - All verticals (ecommerce, activities, services...) share the same checkout pipeline
+     * - But price fields might differ by type
+     *
+     * Rules:
+     * - If Item is an ecommerce Product -> use effective price (discount applied)
+     * - Otherwise -> use Item.price
+     * - If missing -> return 0 (avoid NPE and let pricing engine decide final behavior)
      */
     private BigDecimal resolveUnitPrice(Item item) {
         if (item == null) return BigDecimal.ZERO;
@@ -226,9 +276,17 @@ public class OrderServiceImpl implements OrderService {
      *  - getStock (ecommerce)
      *  - getSeats, getCapacity, ...
      *
+     * Why reflection:
+     * - Avoids forcing a single interface across unrelated domains
+     * - Keeps checkout generic for different item types
+     *
      * Returns:
      * - Integer if found
-     * - null if this item doesn't have capacity concept
+     * - null if this item doesn't have a capacity/stock concept
+     *
+     * Performance:
+     * - Reflection is used only during checkout (not in listing endpoints),
+     *   so overhead is acceptable.
      */
     private Integer tryCapacity(Item item) {
         String[] names = {"getMaxParticipants", "getCapacity", "getSeats", "getQuantityLimit", "getStock"};
@@ -244,8 +302,14 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * Ensures the orderItem belongs to the current user
-     * (used for user operations: cancel, request cancel, etc.)
+     * Ensures the orderItem belongs to the current user.
+     *
+     * Why:
+     * - Prevents user from mutating someone else’s order item
+     * - Used in user operations (cancel, request cancel, reset...)
+     *
+     * IMPORTANT security note:
+     * - This must be called with userId derived from JWT/session, NOT user input.
      */
     private OrderItem requireUserOwned(Long orderItemId, Long userId) {
         return orderItemRepo.findByIdAndUser(orderItemId, userId)
@@ -253,8 +317,15 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * Ensures the orderItem belongs to the current business
-     * (used for business operations: approve cancel, reject, etc.)
+     * Ensures the orderItem belongs to the current business.
+     *
+     * Used in business operations:
+     * - approve cancel
+     * - reject cancel
+     * - mark paid/refunded
+     *
+     * IMPORTANT security note:
+     * - businessId must be derived from authenticated business principal.
      */
     private OrderItem requireBusinessOwned(Long orderItemId, Long businessId) {
         return orderItemRepo.findByIdAndBusiness(orderItemId, businessId)
@@ -272,7 +343,14 @@ public class OrderServiceImpl implements OrderService {
      * - Server validates PaymentIntent status == succeeded
      * - Then server creates Order + OrderItem
      *
-     * NOTE: New flow uses paymentOrchestrator.startPayment() inside checkout().
+     * Why it's "legacy":
+     * - Payment is done BEFORE order creation (client-driven)
+     * - New flow is server-driven: create order -> start payment -> return clientSecret
+     *
+     * Note:
+     * - This code uses Stripe secret key from server env (Stripe SDK).
+     * - In multi-tenant mode you should eventually validate using tenant config,
+     *   but it's OK to keep as-is for now until fully migrated.
      */
     @Override
     public OrderItem createBookItem(Long userId, Long itemId, int quantity,
@@ -355,7 +433,12 @@ public class OrderServiceImpl implements OrderService {
      * - No payment provider validation
      * - Creates PENDING order + item line
      *
-     * NOTE: In new system, you can also support CASH in checkout() + paymentOrchestrator.
+     * Why it exists:
+     * - Some businesses operate offline or want manual reconciliation
+     *
+     * Note:
+     * - In the NEW generic checkout flow, CASH can be supported by:
+     *   paymentOrchestrator.startPayment(...) returning OFFLINE_PENDING
      */
     @Override
     public OrderItem createCashorderByBusiness(Long itemId, Long businessUserId,
@@ -421,23 +504,34 @@ public class OrderServiceImpl implements OrderService {
        =============================== */
 
     /**
-     * Used to prevent double-booking (same user booking same item).
-     * (Today it checks any order, you may later want to limit to COMPLETED only)
+     * Prevents double-booking (same user booking same item).
+     *
+     * Current behavior:
+     * - Checks existence of any orderItem with same (itemId, userId)
+     *
+     * Possible future improvement:
+     * - Restrict to "COMPLETED" only if you want to allow re-try for failed payments.
      */
     @Override
     public boolean hasUserAlreadyBooked(Long itemId, Long userId) {
         return orderItemRepo.existsByItem_IdAndUser_Id(itemId, userId);
     }
 
-    /** Returns user orders ordered by creation date desc */
+    /**
+     * Returns current user's orders (order items) sorted by creation time descending.
+     * Useful for "My Orders" screen.
+     */
     @Override
     public List<OrderItem> getMyorders(Long userId) {
         return orderItemRepo.findByUser_IdOrderByCreatedAtDesc(userId);
     }
 
     /**
-     * Filters user orders by status string (PENDING/COMPLETED/...).
-     * Note: we load list then filter; you can optimize with repository query later.
+     * Returns user's orders filtered by a status code (PENDING/COMPLETED/...).
+     *
+     * Implementation note:
+     * - This loads then filters in memory.
+     * - You can optimize later with a repository query (status join filtering).
      */
     @Override
     public List<OrderItem> getMyordersByStatus(Long userId, String status) {
@@ -457,10 +551,16 @@ public class OrderServiceImpl implements OrderService {
        =============================== */
 
     /**
-     * User cancels an order item (as long as it is not completed).
-     * - If COMPLETED -> reject
-     * - If already canceled -> no-op
+     * User cancels an order item as long as it is not completed.
+     *
+     * Rules:
+     * - If COMPLETED -> reject (cannot cancel completed order)
+     * - If already CANCELED -> no-op
      * - Else -> set status to CANCELED
+     *
+     * Note:
+     * - If you want to handle Stripe refunds automatically, this method should
+     *   eventually call payment module to initiate refund (future).
      */
     @Override
     public void cancelorder(Long orderItemId, Long actorId) {
@@ -477,8 +577,8 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * User resets an order back to PENDING (if not completed).
-     * Useful when cancel flows are reversible in some scenarios.
+     * User restores an order back to PENDING (if not completed).
+     * Useful if you support "undo cancel" before business processes it.
      */
     @Override
     public void resetToPending(Long orderItemId, Long actorId) {
@@ -493,12 +593,14 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * Deletes order item:
-     * - First tries to ensure user owns it
-     * - If not found, it tries to find by id (admin-style behavior)
-     * - Then deletes
+     * Deletes order item.
      *
-     * Note: be careful with this logic in production (security).
+     * Current behavior:
+     * - Tries user-owned deletion first
+     * - If not found, falls back to findById (admin-like behavior)
+     *
+     * ⚠️ Security caution:
+     * - This is permissive. In production, restrict fallback path to Admin role only.
      */
     @Override
     public void deleteorder(Long orderItemId, Long actorId) {
@@ -514,6 +616,10 @@ public class OrderServiceImpl implements OrderService {
      * - If already CANCELED -> mark REFUNDED
      * - If COMPLETED -> not refundable (your current rule)
      * - If PENDING or CANCEL_REQUESTED -> cancel then refund
+     *
+     * Note:
+     * - This is status-only logic (no provider refund).
+     * - For Stripe refunds: integrate with Payment module later (recommended).
      */
     @Override
     public void refundIfEligible(Long orderItemId, Long actorId) {
@@ -535,7 +641,9 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * User requests cancel (soft cancel) so business can approve/reject.
+     * User requests cancellation (soft cancel) so business can approve/reject.
+     *
+     * Rules:
      * - If COMPLETED -> not allowed
      * - If already CANCELED -> no-op
      * - Else -> status becomes CANCEL_REQUESTED
@@ -554,10 +662,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * Business approves cancel request.
-     * - If COMPLETED -> not allowed
-     * - If already canceled -> no-op
-     * - Else -> status becomes CANCELED
+     * Business approves cancel request and sets order to CANCELED.
      */
     @Override
     public void approveCancel(Long orderItemId, Long businessId) {
@@ -573,10 +678,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * Business rejects cancel request.
-     * - If already canceled -> reject
-     * - If completed -> ignore (or return)
-     * - Else -> back to PENDING
+     * Business rejects cancel request and restores order to PENDING.
      */
     @Override
     public void rejectCancel(Long orderItemId, Long businessId) {
@@ -591,14 +693,19 @@ public class OrderServiceImpl implements OrderService {
         flipStatus(oi, "PENDING");
     }
 
-    /** Business marks a canceled order as refunded */
+    /**
+     * Business marks a canceled order as refunded (status-only).
+     */
     @Override
     public void markRefunded(Long orderItemId, Long businessId) {
         var oi = requireBusinessOwned(orderItemId, businessId);
         flipStatus(oi, "REFUNDED");
     }
 
-    /** Returns business orders (rich query with joins is in repository) */
+    /**
+     * Returns business orders.
+     * Repository method likely performs joins for "rich" results.
+     */
     @Override
     public List<OrderItem> getordersByBusiness(Long businessId) {
         return orderItemRepo.findRichByBusinessId(businessId);
@@ -606,12 +713,14 @@ public class OrderServiceImpl implements OrderService {
 
     /**
      * Business marks order as paid (COMPLETED).
-     * This is typically used for:
-     * - Cash payments
+     *
+     * Typical usage:
+     * - CASH payments
      * - Manual reconciliation
      * - Admin overrides
      *
-     * Note: In Stripe flow, this should be done by webhook in Payment module.
+     * Stripe note:
+     * - In Stripe flow, you should prefer webhook to mark paid automatically.
      */
     @Override
     public void markPaid(Long orderItemId, Long businessId) {
@@ -631,17 +740,17 @@ public class OrderServiceImpl implements OrderService {
         orderItemRepo.save(oi);
     }
 
-    /** Deletes all orderItems for a specific item (used when deleting item/product/activity) */
+    /**
+     * Deletes all orderItems for a specific item.
+     * Used when deleting an item/product/activity from catalog.
+     */
     @Override
     public void deleteordersByItemId(Long itemId) {
         orderItemRepo.deleteByItem_Id(itemId);
     }
 
     /**
-     * Business rejects an order (custom rule):
-     * - If COMPLETED -> cannot reject
-     * - If already REJECTED -> no-op
-     * - Else -> set status REJECTED
+     * Business rejects an order (custom rule).
      */
     @Override
     public void rejectorder(Long orderItemId, Long businessId) {
@@ -657,8 +766,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * Business restores rejected order back to PENDING
-     * (only if not completed).
+     * Business restores rejected order back to PENDING (only if not completed).
      */
     @Override
     public void unrejectorder(Long orderItemId, Long businessId) {
@@ -686,8 +794,13 @@ public class OrderServiceImpl implements OrderService {
      * 3) Run pricing engine (shipping + tax + coupon)
      * 4) Create order header + order items (PENDING)
      * 5) Start payment using PaymentOrchestratorService
-     * 6) Return CheckoutSummaryResponse with payment info (clientSecret, ...)
+     * 6) Return CheckoutSummaryResponse with payment info (clientSecret, publishableKey, ...)
      * 7) Clear/convert cart AFTER payment start succeeds
+     *
+     * Stripe important note:
+     * - Client needs BOTH:
+     *   (1) publishableKey (pk_...) to initialize Stripe SDK
+     *   (2) clientSecret (pi_..._secret_...) to confirm the payment
      */
     @Override
     public CheckoutSummaryResponse checkout(Long userId, CheckoutRequest request) {
@@ -702,25 +815,29 @@ public class OrderServiceImpl implements OrderService {
             throw new IllegalArgumentException("paymentMethod is required");
 
         // Normalize payment method code (STRIPE/CASH/PAYPAL...)
+        // We store codes in DB and process them in uppercase consistently.
         String paymentMethodCode = request.getPaymentMethod().trim().toUpperCase(Locale.ROOT);
 
-        // ✅ NEW: We DO NOT require stripePaymentId here anymore.
-        // Payment is started by our payment module AFTER order is created.
-        // Old "stripePaymentId required" flow was: pay first -> create order.
-        // New flow is: create order -> start payment -> client pays using clientSecret.
-
-        // Load user
+        // Load user (the buyer)
+        // Must come from authenticated session/JWT in controller.
         Users user = usersRepo.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
-        // Load currency
+        // Load currency entity (USD/LBP/SAR...)
         Currency currency = currencyRepo.findById(request.getCurrencyId())
                 .orElseThrow(() -> new IllegalArgumentException("Currency not found"));
 
+        // Lines represent cart items coming from client UI.
+        // Server must still validate everything (existence, ownership, stock, prices).
         List<CartLine> lines = request.getLines();
 
         // ---- Load items once, compute unitPrice/lineSubtotal, check capacity
+        // itemCache avoids hitting DB again when creating OrderItems.
         Map<Long, Item> itemCache = new HashMap<>();
+
+        // ownerProjectId (tenant) is derived from items to ensure:
+        // - All lines belong to the same generated app
+        // - We price and pay using the correct tenant configurations
         Long ownerProjectId = null;
 
         for (CartLine line : lines) {
@@ -734,8 +851,9 @@ public class OrderServiceImpl implements OrderService {
                     .orElseThrow(() -> new IllegalArgumentException("Item not found: " + line.getItemId()));
             itemCache.put(item.getId(), item);
 
-            // ownerProject consistency (single app per checkout)
-            // This ensures the cart belongs to a single generated app (tenant)
+            // Tenant check:
+            // Each item belongs to an ownerProject (generated app).
+            // Checkout MUST be single-tenant; mixing items across apps is not allowed.
             if (item.getOwnerProject() == null || item.getOwnerProject().getId() == null)
                 throw new IllegalStateException("Item " + item.getId() + " has no ownerProject");
 
@@ -744,9 +862,10 @@ public class OrderServiceImpl implements OrderService {
             else if (!ownerProjectId.equals(opId))
                 throw new IllegalArgumentException("All cart items must belong to the same app (ownerProjectId)");
 
-            // capacity / stock check
-            // For activities: seats/participants
-            // For ecommerce: stock
+            // capacity / stock check:
+            // - activities: seats/participants
+            // - ecommerce: stock
+            // We check COMPLETED orders only (current rule).
             Integer capacity = tryCapacity(item);
             if (capacity != null) {
                 int already = orderItemRepo.sumQuantityByItemIdAndStatusNames(
@@ -757,7 +876,9 @@ public class OrderServiceImpl implements OrderService {
                     throw new IllegalStateException("Not enough quantity available for itemId = " + item.getId());
             }
 
-            // compute and store prices in CartLine (pricing service uses them)
+            // Price calculation on server:
+            // - We set unitPrice + lineSubtotal on the line object
+            // - Pricing service uses these fields to compute totals safely
             BigDecimal unit = resolveUnitPrice(item);
             BigDecimal lineTotal = unit.multiply(BigDecimal.valueOf(line.getQuantity()));
             line.setUnitPrice(unit);
@@ -768,12 +889,12 @@ public class OrderServiceImpl implements OrderService {
             throw new IllegalArgumentException("Could not resolve ownerProjectId from cart items");
 
         // ---- Prepare shipping address entities (for persisting on Order)
+        // The request includes DTO ids (countryId/regionId); we translate them into entities.
         ShippingAddressDTO addr = request.getShippingAddress();
         Country shippingCountry = null;
         Region shippingRegion = null;
 
         if (addr != null) {
-            // Convert ids in DTO into entities for persistence
             if (addr.getCountryId() != null) {
                 shippingCountry = countryRepo.findById(addr.getCountryId())
                         .orElseThrow(() -> new IllegalArgumentException("Shipping country not found"));
@@ -785,28 +906,35 @@ public class OrderServiceImpl implements OrderService {
         }
 
         // ---- Delegate full pricing (shipping + tax + coupon) to CheckoutPricingService
-        // This returns totals (itemsSubtotal, shippingTotal, tax totals, coupon discount, grandTotal)
+        // This is the single place where totals are computed consistently.
         CheckoutSummaryResponse priced = checkoutPricingService.priceCheckout(
                 ownerProjectId,
                 request.getCurrencyId(),
                 request
         );
 
-        // ✅ Attach PaymentMethod entity on order header
-        // Ensures order header stores which method the user selected
+        // Attach PaymentMethod entity on order header
+        // Ensures order stores which payment method was selected in checkout UI.
         PaymentMethod pmEntity = paymentMethodRepo.findByNameIgnoreCase(paymentMethodCode)
                 .orElseThrow(() -> new IllegalArgumentException("Payment method not found in platform: " + paymentMethodCode));
 
         // ---- Create Order header using priced totals ----
+        // We always create the order BEFORE payment (server-driven flow).
         Order order = new Order();
         order.setUser(user);
-        order.setStatus(requireStatus("PENDING")); // initial status
+        order.setStatus(requireStatus("PENDING"));
         order.setOrderDate(LocalDateTime.now());
         order.setCurrency(currency);
-        order.setTotalPrice(priced.getGrandTotal());
-        order.setPaymentMethod(pmEntity); // ✅ important: order has method (STRIPE/CASH...)
 
-        // Shipping fields (persist shipping selection & address)
+        // Important:
+        // - totalPrice MUST come from server pricing
+        // - never trust totals from client
+        order.setTotalPrice(priced.getGrandTotal());
+
+        // Link selected payment method
+        order.setPaymentMethod(pmEntity);
+
+        // Shipping fields (persist selection & address)
         if (addr != null) {
             order.setShippingCountry(shippingCountry);
             order.setShippingRegion(shippingRegion);
@@ -816,22 +944,23 @@ public class OrderServiceImpl implements OrderService {
             order.setShippingMethodName(addr.getShippingMethodName());
         }
 
-        // Pricing totals (shipping/tax/coupon) saved on header for reporting/auditing
+        // Pricing totals saved on header (auditing/reporting)
         order.setShippingTotal(priced.getShippingTotal());
         order.setItemTaxTotal(priced.getItemTaxTotal());
         order.setShippingTaxTotal(priced.getShippingTaxTotal());
         order.setCouponCode(priced.getCouponCode());
         order.setCouponDiscount(priced.getCouponDiscount());
 
-        // Save order header first (we need orderId for PaymentTransaction)
+        // Save order header first:
+        // - We need orderId to create PaymentTransaction (foreign key / reference)
         order = orderRepo.save(order);
 
         // ---- Create OrderItem lines ----
-        // Each CartLine becomes an OrderItem with quantity & unit price
+        // Each CartLine becomes an OrderItem row in DB.
         for (CartLine line : lines) {
             Item item = itemCache.get(line.getItemId());
             if (item == null) {
-                // Should not happen, but safe-guard
+                // Safety fallback (should not happen due to caching earlier)
                 item = itemRepo.findById(line.getItemId())
                         .orElseThrow(() -> new IllegalArgumentException("Item not found: " + line.getItemId()));
             }
@@ -842,47 +971,67 @@ public class OrderServiceImpl implements OrderService {
             oi.setUser(user);
             oi.setCurrency(currency);
             oi.setQuantity(line.getQuantity());
-            oi.setPrice(line.getUnitPrice()); // must match pricing
+
+            // Price must match what we computed for checkout pricing
+            oi.setPrice(line.getUnitPrice());
+
+            // Timestamps
             oi.setCreatedAt(LocalDateTime.now());
             oi.setUpdatedAt(LocalDateTime.now());
+
             orderItemRepo.save(oi);
         }
 
         // ✅ NEW: Start payment using PaymentOrchestratorService
-        // - STRIPE: returns clientSecret + pi_...
-        // - CASH: returns offline reference, no clientSecret
-        // - PAYPAL (later): can return redirectUrl
+        // For Stripe:
+        // - Creates PaymentIntent on Stripe
+        // - Returns clientSecret for the client to confirm payment
+        // - Returns publishableKey (pk_...) from tenant configJson so client can init Stripe SDK
         StartPaymentResponse pay = paymentOrchestrator.startPayment(
                 ownerProjectId,
                 order.getId(),
                 paymentMethodCode,
                 priced.getGrandTotal(),
                 currency.getCode(),
-                request.getDestinationAccountId() // MUST be acct_... if using Stripe Connect, otherwise null
+                request.getDestinationAccountId()
         );
 
         // Put payment info into checkout response (Flutter uses it)
-        // (These setters must exist in CheckoutSummaryResponse)
         priced.setPaymentTransactionId(pay.getTransactionId());
         priced.setPaymentProviderCode(pay.getProviderCode());
         priced.setProviderPaymentId(pay.getProviderPaymentId());
         priced.setClientSecret(pay.getClientSecret());
+
+        // ✅ IMPORTANT:
+        // Stripe SDK cannot confirm payment unless it is initialized with publishableKey.
+        // Since Build4All is multi-tenant, we must return the tenant key from DB configJson.
+        priced.setPublishableKey(pay.getPublishableKey());
+
         priced.setRedirectUrl(pay.getRedirectUrl());
         priced.setPaymentStatus(pay.getStatus());
 
-        // Attach order id/date to response
+        // Attach order id/date to response (UI shows order number and creation timestamp)
         priced.setOrderId(order.getId());
         priced.setOrderDate(order.getOrderDate());
 
         // ✅ Clear cart ONLY AFTER payment start succeeded
-        // This prevents losing the cart if payment initiation fails.
+        // This prevents losing the cart if:
+        // - Stripe call fails
+        // - config is missing
+        // - provider returns error
         Cart cart = cartRepo.findByUser_IdAndStatus(userId, CartStatus.ACTIVE)
                 .orElseThrow(() -> new IllegalStateException("No active cart"));
 
         cart.setStatus(CartStatus.CONVERTED);
+
+        // Remove cart items:
+        // - delete rows
+        // - clear in-memory collection
+        // - recalc totals
         cartItemRepo.deleteByCart_Id(cart.getId());
         cart.getItems().clear();
         recalcTotals(cart);
+
         cartRepo.save(cart);
 
         return priced;
@@ -890,7 +1039,13 @@ public class OrderServiceImpl implements OrderService {
 
     /**
      * Recomputes cart totals after removing items.
-     * Used during checkout when converting cart to order.
+     *
+     * Why this exists:
+     * - Cart entity stores a denormalized totalPrice for fast rendering
+     * - After deleting items, we re-sync totals to 0
+     *
+     * Note:
+     * - During checkout we delete cart items, so total should become 0
      */
     private void recalcTotals(Cart cart) {
         if (cart == null) return;

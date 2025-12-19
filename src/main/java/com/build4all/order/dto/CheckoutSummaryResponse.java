@@ -164,6 +164,17 @@ public class CheckoutSummaryResponse {
     private String clientSecret;
 
     /**
+     * Stripe-only (PUBLIC, safe):
+     * Needed by mobile/web to initialize Stripe SDK dynamically per ownerProject.
+     * Comes from the same payment config JSON in DB (PaymentMethodConfig.configJson).
+     *
+     * SECURITY:
+     * - Must be pk_... only
+     * - Never expose sk_... (secret key)
+     */
+    private String publishableKey;
+
+    /**
      * Redirect-based providers (PayPal-like) can return a URL to complete payment.
      * Client opens it in a browser/webview and then returns to the app.
      */
@@ -265,6 +276,9 @@ public class CheckoutSummaryResponse {
 
     public String getClientSecret() { return clientSecret; }
     public void setClientSecret(String clientSecret) { this.clientSecret = clientSecret; }
+
+    public String getPublishableKey() { return publishableKey; }
+    public void setPublishableKey(String publishableKey) { this.publishableKey = publishableKey; }
 
     public String getRedirectUrl() { return redirectUrl; }
     public void setRedirectUrl(String redirectUrl) { this.redirectUrl = redirectUrl; }

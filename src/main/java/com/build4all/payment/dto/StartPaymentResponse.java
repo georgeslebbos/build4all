@@ -68,6 +68,20 @@ public class StartPaymentResponse {
      */
     private String status;
 
+    /**
+     * Stripe-only (PUBLIC, safe to return to client):
+     * Publishable key "pk_..." loaded from the SAME DB config JSON as secret key.
+     *
+     * Why needed:
+     * - Stripe SDK requires publishableKey to be set before presenting PaymentSheet.
+     * - In multi-tenant Build4All, each ownerProject may have its own Stripe account/config.
+     *
+     * Security note:
+     * - NEVER return secretKey "sk_..." to client.
+     * - publishableKey "pk_..." is safe to return.
+     */
+    private String publishableKey;
+
     // ---- Getters / Setters ----
 
     public Long getTransactionId() { return transactionId; }
@@ -87,4 +101,7 @@ public class StartPaymentResponse {
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+
+    public String getPublishableKey() { return publishableKey; }
+    public void setPublishableKey(String publishableKey) { this.publishableKey = publishableKey; }
 }

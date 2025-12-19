@@ -5,12 +5,18 @@ import com.build4all.payment.domain.PaymentTransaction;
 import com.build4all.payment.dto.StartPaymentResponse;
 import com.build4all.payment.gateway.PaymentGateway;
 import com.build4all.payment.gateway.PaymentGatewayRegistry;
-import com.build4all.payment.gateway.dto.*;
+import com.build4all.payment.gateway.dto.CreatePaymentCommand;
+import com.build4all.payment.gateway.dto.CreatePaymentResult;
+import com.build4all.payment.gateway.dto.GatewayConfig;
 import com.build4all.payment.repository.PaymentTransactionRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Locale;
+import java.util.Map;
 
 @Service
 // This service orchestrates payment creation in a provider-agnostic way.
@@ -22,6 +28,9 @@ public class PaymentOrchestratorService {
     private final PaymentGatewayRegistry registry;
     private final PaymentConfigService configService;
     private final PaymentTransactionRepository txRepo;
+
+    // Used only to parse configJson safely when we need publishableKey
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public PaymentOrchestratorService(PaymentGatewayRegistry registry,
                                       PaymentConfigService configService,
@@ -64,7 +73,7 @@ public class PaymentOrchestratorService {
         tx.setOrderId(orderId);
         tx.setProviderCode(gateway.code()); // normalized official plugin code
         tx.setAmount(amount);
-        tx.setCurrency(currencyCode.toLowerCase()); // normalize
+        tx.setCurrency(currencyCode.toLowerCase(Locale.ROOT)); // normalize
         tx.setStatus("CREATED"); // your internal initial status
         tx = txRepo.save(tx);
 
@@ -74,7 +83,7 @@ public class PaymentOrchestratorService {
         cmd.setOwnerProjectId(ownerProjectId);
         cmd.setOrderId(orderId);
         cmd.setAmount(amount);
-        cmd.setCurrency(currencyCode.toLowerCase());
+        cmd.setCurrency(currencyCode.toLowerCase(Locale.ROOT));
         cmd.setDestinationAccountId(destinationAccountId); // used only by gateways that support it (Stripe Connect)
 
         // 6) Delegate to the gateway plugin.
@@ -92,7 +101,7 @@ public class PaymentOrchestratorService {
         // - webhook reconciliation (find by providerPaymentId)
         // - UI status tracking
         tx.setProviderPaymentId(r.getProviderPaymentId());
-        tx.setStatus(r.getStatus() == null ? "CREATED" : r.getStatus().toUpperCase());
+        tx.setStatus(r.getStatus() == null ? "CREATED" : r.getStatus().toUpperCase(Locale.ROOT));
         txRepo.save(tx);
 
         // 8) Build response for the client checkout.
@@ -106,6 +115,67 @@ public class PaymentOrchestratorService {
         out.setClientSecret(r.getClientSecret());
         out.setRedirectUrl(r.getRedirectUrl());
         out.setStatus(tx.getStatus());
+
+        // ✅ NEW (Stripe-only): return publishableKey (pk_...) from the SAME configJson stored in DB.
+        // Important: NEVER return secretKey (sk_...) to client.
+        if ("STRIPE".equalsIgnoreCase(tx.getProviderCode())) {
+            String pk = extractPublishableKeyFromConfigJson(cfgEntity.getConfigJson());
+            if (pk != null && !pk.isBlank()) {
+                pk = pk.trim();
+
+                // Safety guard: if someone accidentally stored secret key in publishableKey field
+                if (pk.startsWith("sk_")) {
+                    throw new IllegalStateException(
+                            "Invalid Stripe publishableKey in configJson (secret key detected). " +
+                                    "Please store pk_... under publishableKey."
+                    );
+                }
+
+                out.setPublishableKey(pk);
+            }
+        }
+
         return out;
+    }
+
+    /**
+     * Extract Stripe publishableKey from the same configJson used by Stripe gateway.
+     *
+     * Why this helper exists:
+     * - Your Stripe gateway needs secretKey to create PaymentIntent (server side).
+     * - Your mobile client needs publishableKey to initialize Stripe SDK (client side).
+     * - Both keys are stored in the same JSON config in DB.
+     *
+     * We try common key names to be resilient across versions:
+     * - publishableKey
+     * - stripePublishableKey
+     * - stripe_publishable_key
+     * - publishable_key
+     */
+    private String extractPublishableKeyFromConfigJson(String configJson) {
+        if (configJson == null || configJson.isBlank()) return null;
+
+        try {
+            Map<String, Object> m = objectMapper.readValue(
+                    configJson,
+                    new TypeReference<Map<String, Object>>() {}
+            );
+
+            Object v =
+                    m.get("publishableKey") != null ? m.get("publishableKey") :
+                            m.get("stripePublishableKey") != null ? m.get("stripePublishableKey") :
+                                    m.get("stripe_publishable_key") != null ? m.get("stripe_publishable_key") :
+                                            m.get("publishable_key");
+
+            if (v == null) return null;
+
+            String s = v.toString().trim();
+            return s.isEmpty() ? null : s;
+        } catch (Exception ignored) {
+            // We don't want checkout to fail only because pk couldn't be read.
+            // Client will later fail with "paymentConfiguration not initialized"
+            // which signals configJson is missing publishableKey.
+            return null;
+        }
     }
 }
