@@ -213,6 +213,33 @@ public class JwtUtil {
     }
 
     /**
+     * ✅ New helper used by JwtAuthenticationFilter
+     *
+     * Validates that:
+     * - token is parseable
+     * - signature matches
+     * - token is not expired
+     *
+     * If any of these fails, returns false.
+     */
+    public boolean validateToken(String token) {
+        try {
+            String jwt = normalize(token);
+            if (jwt == null || jwt.isBlank()) return false;
+
+            // parseClaimsJws will throw if signature invalid OR expired OR malformed
+            Jwts.parserBuilder()
+                    .setSigningKey(key)
+                    .build()
+                    .parseClaimsJws(jwt);
+
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
      * Checks if token role == BUSINESS (case-insensitive).
      * This relies on extractRole(...) which returns null if token invalid.
      */

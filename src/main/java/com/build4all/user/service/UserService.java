@@ -223,6 +223,63 @@ public class UserService {
 
         return true;
     }
+    
+    
+ // src/main/java/com/build4all/user/service/UserService.java
+
+    @Transactional
+    public Users updateUserProfile(
+            Long userId,
+            Long ownerProjectLinkId,
+            String tokenContact,
+            String username,
+            String firstName,
+            String lastName,
+            Boolean isPublicProfile,
+            MultipartFile profileImage,
+            Boolean imageRemoved
+    ) throws IOException {
+
+        if (userId == null || ownerProjectLinkId == null)
+            throw new IllegalArgumentException("userId and ownerProjectLinkId are required");
+
+        Users user = getUserById(userId, ownerProjectLinkId); // tenant-safe
+
+        // ✅ self-only security (tenant-scoped)
+        boolean matchesEmail = user.getEmail() != null && user.getEmail().equalsIgnoreCase(tokenContact);
+        boolean matchesPhone = user.getPhoneNumber() != null && user.getPhoneNumber().equals(tokenContact);
+        if (!matchesEmail && !matchesPhone) throw new RuntimeException("Access denied");
+
+        // ✅ username uniqueness per tenant (only if changed)
+        if (username != null && !username.isBlank()) {
+            String newU = username.trim();
+            if (!newU.equalsIgnoreCase(user.getUsername())
+                    && userRepository.existsByUsernameIgnoreCaseAndOwnerProject_Id(newU, ownerProjectLinkId)) {
+                throw new RuntimeException("Username already in use in this app.");
+            }
+            user.setUsername(newU);
+        }
+
+        user.setFirstName(firstName);
+        user.setLastName(lastName);
+
+        if (isPublicProfile != null) user.setIsPublicProfile(isPublicProfile);
+
+        // ✅ image remove
+        if (Boolean.TRUE.equals(imageRemoved)) {
+            user.setProfilePictureUrl(null);
+        }
+
+        // ✅ image upload overrides
+        if (profileImage != null && !profileImage.isEmpty()) {
+            String url = saveProfileImage(profileImage); // you already have this helper
+            user.setProfilePictureUrl(url);
+        }
+
+        user.setUpdatedAt(LocalDateTime.now());
+        return userRepository.save(user);
+    }
+
 
     /**
      * Resend verification code (email or phone).

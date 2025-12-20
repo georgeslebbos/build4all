@@ -6,6 +6,8 @@ import com.build4all.business.repository.BusinessesRepository;  // 👈 NEW
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -130,6 +132,22 @@ public class SecurityConfig implements WebMvcConfigurer {
                         sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
 
+                // ✅ IMPORTANT: return clear JSON responses for 401/403 instead of empty bodies.
+                .exceptionHandling(ex -> ex
+                        // 401 → not authenticated (missing/invalid token)
+                        .authenticationEntryPoint((req, res, e) -> {
+                            res.setStatus(HttpStatus.UNAUTHORIZED.value());
+                            res.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                            res.getWriter().write("{\"error\":\"Unauthorized - missing or invalid token\"}");
+                        })
+                        // 403 → authenticated, but not allowed
+                        .accessDeniedHandler((req, res, e) -> {
+                            res.setStatus(HttpStatus.FORBIDDEN.value());
+                            res.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                            res.getWriter().write("{\"error\":\"Forbidden - access denied\"}");
+                        })
+                )
+
                 // Authorization rules: decide which endpoints need authentication.
                 .authorizeHttpRequests(auth -> auth
                         // Public endpoints (no token required)
@@ -138,7 +156,8 @@ public class SecurityConfig implements WebMvcConfigurer {
                                 "/api/public/**", // any public APIs (catalog browsing, etc.)
                                 "/api/ci/**",     // CI callbacks or build webhooks
                                 "/uploads/**",    // serve uploaded images/files
-                                "/ws-chat/**"     // websocket endpoint (handshake might be public)
+                                "/ws-chat/**",    // websocket endpoint (handshake might be public)
+                                "/error"          // Spring default error endpoint (avoids weird blocking)
                         ).permitAll()
 
                         // Any other endpoint requires authentication (JWT must be valid).

@@ -20,8 +20,10 @@ public class UserDto {
     // Basic profile info
     private String firstName;
     private String lastName;
+    private String username;
     private String email;
     private String phoneNumber;
+    
 
     // UI fields
     private String profileImageUrl;
@@ -63,6 +65,7 @@ public class UserDto {
         this.id = user.getId();
         this.firstName = user.getFirstName();
         this.lastName = user.getLastName();
+        this.username=user.getUsername();
         this.email = user.getEmail();
         this.phoneNumber = user.getPhoneNumber();
 
@@ -122,4 +125,11 @@ public class UserDto {
     public void setOwnerProjectLinkId(Long ownerProjectLinkId) { this.ownerProjectLinkId = ownerProjectLinkId; }
     public void setAdminId(Long adminId) { this.adminId = adminId; }
     public void setProjectId(Long projectId) { this.projectId = projectId; }
+    public String getUsername() { 
+        return username; 
+    }
+    public void setUsername(String username) { 
+        this.username = username; 
+    }
+
 }
