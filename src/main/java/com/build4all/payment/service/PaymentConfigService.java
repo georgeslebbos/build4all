@@ -6,6 +6,7 @@ import com.build4all.payment.repository.PaymentMethodConfigRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
 import java.util.Map;
@@ -23,10 +24,11 @@ public class PaymentConfigService {
     // ObjectMapper is used to parse/serialize the config JSON.
     // Note: creating a new ObjectMapper manually is okay,
     // but best practice is injecting Spring's shared ObjectMapper.
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper;
 
-    public PaymentConfigService(PaymentMethodConfigRepository configRepo) {
+    public PaymentConfigService(PaymentMethodConfigRepository configRepo, ObjectMapper mapper) {
         this.configRepo = configRepo;
+        this.mapper = mapper;
     }
 
     /**
@@ -38,6 +40,7 @@ public class PaymentConfigService {
      * Example:
      *   requireEnabled(100, "STRIPE") -> returns PaymentMethodConfig with Stripe keys
      */
+    @Transactional(readOnly = true) // ✅ important for @Lob reads in Postgres
     public PaymentMethodConfig requireEnabled(Long ownerProjectId, String methodName) {
 
         // Look for config row by (ownerProjectId + payment_methods.name)
@@ -52,6 +55,22 @@ public class PaymentConfigService {
             throw new IllegalStateException("Payment method disabled for project: " + methodName);
 
         return cfg;
+    }
+
+    /**
+     * ✅ Safe helper when using @Lob:
+     * Loads + parses configJson inside the same transaction.
+     *
+     * Use this instead of:
+     *   cfg = requireEnabled(...)
+     *   parse(cfg.getConfigJson())   // might happen outside tx -> LOB error
+     */
+    @Transactional(readOnly = true)
+    public GatewayConfig requireEnabledConfig(Long ownerProjectId, String methodName) {
+        PaymentMethodConfig cfg = requireEnabled(ownerProjectId, methodName);
+
+        // ✅ Reading cfg.getConfigJson() happens inside @Transactional
+        return parse(cfg.getConfigJson());
     }
 
     /**

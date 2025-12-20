@@ -10,7 +10,7 @@ import com.build4all.payment.service.PaymentConfigService;
 import com.build4all.security.JwtUtil;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
-
+import org.springframework.transaction.annotation.Transactional;
 import java.util.*;
 
 @RestController
@@ -70,6 +70,7 @@ public class OwnerPaymentConfigController {
      * This is used by the owner UI to render a settings page for all payment gateways.
      */
     @GetMapping("/methods")
+    @Transactional(readOnly = true)
     public ResponseEntity<?> list(@RequestHeader("Authorization") String auth,
                                   @PathVariable Long ownerProjectId) {
 

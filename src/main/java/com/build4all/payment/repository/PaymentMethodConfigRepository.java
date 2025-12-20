@@ -2,10 +2,14 @@ package com.build4all.payment.repository;
 
 import com.build4all.payment.domain.PaymentMethodConfig;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
 
+@Transactional(readOnly = true) // ✅ helps ensure @Lob reads happen in a real tx
 public interface PaymentMethodConfigRepository extends JpaRepository<PaymentMethodConfig, Long> {
 
     /**
@@ -41,4 +45,15 @@ public interface PaymentMethodConfigRepository extends JpaRepository<PaymentMeth
      *   so the mobile app shows only methods that the owner enabled.
      */
     List<PaymentMethodConfig> findByOwnerProjectIdAndEnabledTrue(Long ownerProjectId);
+
+    /**
+     * ✅ Returns all configs for a project in one query (better for owner checkbox list).
+     * join fetch paymentMethod to avoid lazy loading issues.
+     */
+    @Query("""
+        select c from PaymentMethodConfig c
+        join fetch c.paymentMethod pm
+        where c.ownerProjectId = :ownerProjectId
+    """)
+    List<PaymentMethodConfig> findAllByOwnerProjectIdWithMethod(@Param("ownerProjectId") Long ownerProjectId);
 }
