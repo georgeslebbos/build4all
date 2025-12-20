@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -245,6 +246,50 @@ public class UsersController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("message", "Unexpected error"));
         }
     }
+    
+    
+ // src/main/java/com/build4all/user/web/UsersController.java
+
+    @PutMapping(value = "/{id}/profile", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> updateUserProfile(
+            @PathVariable Long id,
+            @RequestParam Long ownerProjectLinkId,
+            @RequestParam String firstName,
+            @RequestParam String lastName,
+            @RequestParam(required = false) String username,
+            @RequestParam(required = false) Boolean isPublicProfile,
+            @RequestParam(required = false) Boolean imageRemoved,
+            @RequestPart(required = false) MultipartFile profileImage,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String token
+    ) {
+        try {
+            if (token == null || !token.startsWith("Bearer ")) {
+                return ResponseEntity.status(401).body(Map.of("error","Missing or invalid token"));
+            }
+
+            String jwt = token.substring(7).trim();
+            String contact = jwtUtil.extractUsername(jwt); // email or phone from token
+
+            Users updated = userService.updateUserProfile(
+                    id, ownerProjectLinkId, contact,
+                    username, firstName, lastName,
+                    isPublicProfile, profileImage,
+                    imageRemoved
+            );
+
+            return ResponseEntity.ok(Map.of(
+                    "message", "Profile updated successfully",
+                    "user", new UserDto(updated)
+            ));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", "Server error: " + e.getMessage()));
+        }
+    }
+
 
     @PostMapping("/verify-reset-code")
     public ResponseEntity<Map<String, String>> verifyCode(

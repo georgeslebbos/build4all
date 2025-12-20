@@ -88,6 +88,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // role = claim "role" inside JWT (e.g. USER, SUPER_ADMIN, BUSINESS, OWNER, MANAGER)
             String roleName = jwtUtil.extractRole(token);
 
+            // DEBUG: If you are getting 403, this print helps confirm if token is valid and parsed.
+            // NOTE: Keep it during dev only.
+            System.out.println("✅ JWT OK: " + request.getMethod() + " " + request.getRequestURI()
+                    + " | subject=" + subject + " | role=" + roleName);
+
             // If token parsing failed OR already authenticated earlier in the chain, do nothing.
             // Example: another filter already set authentication (rare here, but good safety check).
             if (subject == null || roleName == null ||
@@ -167,11 +172,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // - @AuthenticationPrincipal can resolve the principal object
             SecurityContextHolder.getContext().setAuthentication(auth);
 
-        } catch (Exception ignored) {
+        } catch (Exception e) {
             // Any parsing/validation exception:
             // - keep SecurityContext empty
             // - request continues as anonymous
-            // (You may log here if you want debugging, but don't expose token details.)
+            // BUT NOW we log it to stop the "silent 403" nightmare.
+            SecurityContextHolder.clearContext();
+
+            System.out.println("❌ JWT FAILED: " + request.getMethod() + " " + request.getRequestURI()
+                    + " | " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
 
         // Continue filter chain (controller execution happens after this)
