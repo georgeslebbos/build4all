@@ -17,22 +17,29 @@ import java.util.Optional;
  *
  * Repository for the Order *header* entity (table: orders).
  *
- * Important reminder in your model:
+ * Reminder:
  * - Order is the header (user, totals, status, shipping, payment method...)
  * - OrderItem is the line (item, qty, unit price...)
  *
- * This repository focuses on:
- * - User history (my orders)
- * - Time-based reporting
- * - Business reporting (orders that include items owned by a business)
+ * This repository supports:
+ * - USER history (my orders)
+ * - Date/time reporting
+ * - BUSINESS reporting (orders that include items owned by a business)
+ * - OWNER reporting (orders that include items owned by an application/tenant = ownerProject)
+ * - SUPER_ADMIN reporting (orders grouped by application/tenant)
  *
- * Notes about performance:
+ * Notes:
  * - Some queries use @EntityGraph / JOIN FETCH to avoid LazyInitialization errors
- *   and reduce N+1 queries when you need orderItems + item details.
- * - Other queries return aggregates (SUM/COUNT) for dashboards.
+ *   and reduce N+1 queries.
+ * - "Application scope" is derived from OrderItem -> Item -> ownerProject.id
+ *   because Order header does not store ownerProjectId directly.
  */
 @Repository
 public interface OrderRepository extends JpaRepository<Order, Long> {
+
+    /* =========================================================================================
+       USER (End-user) - header-level queries
+       ========================================================================================= */
 
     /**
      * Fetch all orders for a user (header only).
@@ -66,18 +73,54 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     /**
      * Fetch orders for a user filtered by status codes.
      *
-     * Important: status is a FK to OrderStatus, but you filter by status.name.
+     * status is a FK to OrderStatus, but you filter by status.name.
      * Example statuses: ["PENDING","COMPLETED"].
      */
     List<Order> findByUser_IdAndStatus_NameIn(Long userId, List<String> statuses);
 
     /**
      * Sum of totalPrice for all orders of a user.
-     * Returns Double because JPQL SUM on BigDecimal sometimes mapped that way here;
-     * you can also return BigDecimal if you want strict money type.
+     * Returns Double because JPQL SUM on BigDecimal sometimes mapped that way here.
      */
     @Query("SELECT COALESCE(SUM(o.totalPrice), 0) FROM Order o WHERE o.user.id = :userId")
     Double sumTotalPriceByUser(@Param("userId") Long userId);
+
+    /**
+     * "My Orders" (header + items + item details) with EntityGraph:
+     * - Loads orderItems and their item in one go (reduces N+1).
+     * - Ordered by most recent first.
+     */
+    @EntityGraph(attributePaths = {"orderItems", "orderItems.item"})
+    List<Order> findByUser_IdOrderByOrderDateDesc(Long userId);
+
+    /**
+     * Load a single order with its items and item entities.
+     * LEFT JOIN FETCH ensures orderItems and item are loaded even if some are null.
+     */
+    @Query("""
+           SELECT o
+           FROM Order o
+           LEFT JOIN FETCH o.orderItems oi
+           LEFT JOIN FETCH oi.item i
+           WHERE o.id = :id
+           """)
+    Optional<Order> findByIdWithItems(@Param("id") Long id);
+
+    /**
+     * Quick recent list (top 5) for a user.
+     */
+    List<Order> findTop5ByUser_IdOrderByOrderDateDesc(Long userId);
+
+    /**
+     * Feed-style orders after a date, with items + item loaded.
+     * Useful for "recent orders" dashboards.
+     */
+    @EntityGraph(attributePaths = {"orderItems", "orderItems.item"})
+    List<Order> findByOrderDateAfterOrderByOrderDateDesc(LocalDateTime after);
+
+    /* =========================================================================================
+       BUSINESS (Item owner) - header-level queries via items.business.id
+       ========================================================================================= */
 
     /**
      * Business dashboard: count distinct orders that include at least one item
@@ -98,10 +141,6 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     /**
      * Fetch all orders that contain items belonging to a business.
      * DISTINCT prevents duplicates when an order contains multiple items from same business.
-     *
-     * Note:
-     * - This returns Order headers (may still lazy-load orderItems unless you fetch them).
-     * - If you need items too, consider JOIN FETCH or an @EntityGraph version.
      */
     @Query("""
            SELECT DISTINCT o
@@ -112,55 +151,18 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
            """)
     List<Order> findAllByBusinessId(@Param("businessId") Long businessId);
 
-    /**
-     * "My Orders" (header + items + item details) with EntityGraph:
-     * - Loads orderItems and their item in one go (reduces N+1).
-     * - Ordered by most recent first.
-     *
-     * Use this when you want to display full order details to the user.
-     */
-    @EntityGraph(attributePaths = {"orderItems", "orderItems.item"})
-    List<Order> findByUser_IdOrderByOrderDateDesc(Long userId);
+    /* =========================================================================================
+       PUBLIC marketplace / discovery use case (existing)
+       ========================================================================================= */
 
     /**
-     * Load a single order with its items and item entities.
-     * LEFT JOIN FETCH ensures orderItems and item are loaded even if some are null.
-     *
-     * Use this for:
-     * - Order details screen
-     * - Admin view of a specific order
-     */
-    @Query("""
-           SELECT o
-           FROM Order o
-           LEFT JOIN FETCH o.orderItems oi
-           LEFT JOIN FETCH oi.item i
-           WHERE o.id = :id
-           """)
-    Optional<Order> findByIdWithItems(@Param("id") Long id);
-
-    /**
-     * Quick recent list (top 5) for a user.
-     * Typically used for dashboard preview cards.
-     */
-    List<Order> findTop5ByUser_IdOrderByOrderDateDesc(Long userId);
-
-    /**
-     * Feed-style orders after a date, with items + item loaded.
-     * Useful for "recent orders" admin dashboard.
-     */
-    @EntityGraph(attributePaths = {"orderItems", "orderItems.item"})
-    List<Order> findByOrderDateAfterOrderByOrderDateDesc(LocalDateTime after);
-
-    /**
-     * Public marketplace / discovery use case:
      * Returns orders associated with businesses that are:
      * - ACTIVE
      * - Public profile enabled
      *
      * NOTE:
-     * - This is unusual logically (orders are private); maybe used for "activity feed"
-     *   or "social proof" metrics. Make sure you are not exposing sensitive user data.
+     * - This is unusual logically (orders are private).
+     * - Be careful not to expose sensitive user data.
      */
     @Query("""
            SELECT DISTINCT o
@@ -172,4 +174,65 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
              AND biz.isPublicProfile = true
            """)
     List<Order> findAllForActivePublicBusinesses();
+
+    /* =========================================================================================
+       OWNER (Application admin) - header-level queries via items.ownerProject.id  ✅ NEW
+       ========================================================================================= */
+
+    /**
+     * OWNER: List all orders for one application (tenant) with items loaded.
+     *
+     * We scope by Item.ownerProject.id because the Order header does not store ownerProjectId.
+     * DISTINCT: avoids duplicating headers due to multiple lines.
+     */
+    @EntityGraph(attributePaths = {"orderItems", "orderItems.item"})
+    @Query("""
+           select distinct o
+           from Order o
+           join o.orderItems oi
+           join oi.item i
+           where i.ownerProject.id = :ownerProjectId
+           order by o.orderDate desc
+           """)
+    List<Order> findAllByOwnerProjectIdWithItems(@Param("ownerProjectId") Long ownerProjectId);
+
+    /**
+     * OWNER: List all orders for one application filtered by status list.
+     *
+     * Example statuses: ["PENDING","COMPLETED","CANCEL_REQUESTED"].
+     */
+    @EntityGraph(attributePaths = {"orderItems", "orderItems.item"})
+    @Query("""
+           select distinct o
+           from Order o
+           join o.orderItems oi
+           join oi.item i
+           where i.ownerProject.id = :ownerProjectId
+             and upper(o.status.name) in :statuses
+           order by o.orderDate desc
+           """)
+    List<Order> findAllByOwnerProjectIdWithItemsAndStatuses(@Param("ownerProjectId") Long ownerProjectId,
+                                                            @Param("statuses") List<String> statuses);
+
+    /* =========================================================================================
+       SUPER_ADMIN (Engine) - aggregation by application (ownerProjectId) ✅ NEW
+       ========================================================================================= */
+
+    /**
+     * SUPER_ADMIN:
+     * Count orders grouped by application (ownerProjectId).
+     *
+     * Returns rows: Object[] where:
+     * - row[0] = ownerProjectId (Long)
+     * - row[1] = ordersCount (Long)
+     */
+    @Query("""
+           select i.ownerProject.id, count(distinct o.id)
+           from Order o
+           join o.orderItems oi
+           join oi.item i
+           group by i.ownerProject.id
+           order by count(distinct o.id) desc
+           """)
+    List<Object[]> countOrdersGroupedByOwnerProject();
 }

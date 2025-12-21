@@ -328,6 +328,56 @@ public class JwtUtil {
         return extractId(jwt);
     }
 
+    // Add this method inside JwtUtil (same class), near extractBusinessId() for consistency.
+
+    /**
+     * Extracts ownerProjectId from token after asserting it's an OWNER (or ADMIN/OWNER) token.
+     *
+     * ✅ Why we need it:
+     * - OWNER (application admin) must be scoped to ONE application (tenant).
+     * - Controllers/services can use ownerProjectId to load orders/config safely for that tenant.
+     *
+     * ✅ Expected claim:
+     * - ownerProjectId : Long
+     *
+     * ⚠️ IMPORTANT:
+     * - This will only work if your OWNER token actually contains the claim "ownerProjectId".
+     * - If you don't add this claim when generating OWNER tokens, this method will throw.
+     *
+     * Recommended policy:
+     * - OWNER must always have ownerProjectId.
+     * - SUPER_ADMIN typically does NOT need ownerProjectId (they can query any application),
+     *   but you can still include it if you want (optional).
+     */
+    public Long extractOwnerProjectId(String token) {
+        String jwt = normalize(token);
+
+        // We allow OWNER tokens. Optionally allow SUPER_ADMIN/MANAGER to use it too.
+        // If you want ONLY OWNER, replace the condition with: if (!isOwnerToken(jwt)) ...
+        if (!(isOwnerToken(jwt) || isAdminToken(jwt))) {
+            throw new RuntimeException("Invalid token: Not an OWNER/ADMIN token");
+        }
+
+        try {
+            Long ownerProjectId = Jwts.parserBuilder()
+                    .setSigningKey(key)
+                    .build()
+                    .parseClaimsJws(jwt)
+                    .getBody()
+                    .get("ownerProjectId", Long.class);
+
+            if (ownerProjectId == null) {
+                throw new RuntimeException("Token does not contain ownerProjectId claim");
+            }
+
+            return ownerProjectId;
+        } catch (Exception e) {
+            // Keep consistent with your existing behavior (RuntimeException for controller flow stop)
+            throw new RuntimeException("Invalid token: cannot extract ownerProjectId");
+        }
+    }
+
+
     /**
      * Helper to read Authorization header and return the raw JWT (without "Bearer ").
      * Throws if header is missing or not bearer.

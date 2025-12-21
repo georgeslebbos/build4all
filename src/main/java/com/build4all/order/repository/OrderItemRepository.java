@@ -11,10 +11,36 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * OrderItemRepository
+ *
+ * Repository for the OrderItem *line* entity (table: order_items).
+ *
+ * Reminder:
+ * - Order is the header (user, totals, status, shipping, payment method...)
+ * - OrderItem is the line (item, qty, unit price...)
+ *
+ * This repository supports:
+ * - USER "my orders" list (cards)
+ * - BUSINESS dashboards (items owned by a business)
+ * - OWNER dashboards (application/tenant scope via Item.ownerProject.id)
+ * - SUPER_ADMIN reporting (cross-application)
+ *
+ * Performance notes:
+ * - Many methods use @EntityGraph or JOIN FETCH to avoid lazy-loading problems.
+ * - Projections (new map(...)) are used for lightweight Flutter card responses.
+ */
 @Repository
 public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
 
-    // Prefetch item & order to avoid lazy problems
+    /* =========================================================================================
+       USER - history / direct lookups
+       ========================================================================================= */
+
+    /**
+     * Prefetch item & order to avoid lazy problems.
+     * Useful for user "order history" pages.
+     */
     @EntityGraph(attributePaths = {"item", "order"})
     List<OrderItem> findByUser_IdOrderByCreatedAtDesc(Long userId);
 
@@ -22,13 +48,17 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     List<OrderItem> findByItem_Id(Long itemId);
 
     boolean existsByItem_IdAndUser_Id(Long itemId, Long userId);
+
     List<OrderItem> findByItem_IdAndUser_Id(Long itemId, Long userId);
 
     long countByItem_Id(Long itemId);
 
     List<OrderItem> findByCreatedAtAfter(LocalDateTime after);
 
-    // ---- Business-scoped via Item ----
+    /* =========================================================================================
+       BUSINESS-SCOPED via Item.business.id
+       ========================================================================================= */
+
     @Query("""
            SELECT oi
            FROM OrderItem oi
@@ -45,7 +75,10 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
            """)
     long countOrdersByBusinessId(@Param("businessId") Long businessId);
 
-    // ---- Aggregates (quantity) ----
+    /* =========================================================================================
+       AGGREGATES (quantity) / capacity / booking counts
+       ========================================================================================= */
+
     @Query("""
            SELECT COALESCE(SUM(oi.quantity), 0)
            FROM OrderItem oi
@@ -70,7 +103,10 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
            """)
     int sumParticipantsCompletedForItem(@Param("itemId") Long itemId);
 
-    // ---- Deletes ----
+    /* =========================================================================================
+       DELETES (maintenance)
+       ========================================================================================= */
+
     @Modifying
     @Query("DELETE FROM OrderItem oi WHERE oi.item.id = :itemId")
     void deleteByItem_Id(@Param("itemId") Long itemId);
@@ -78,7 +114,10 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     @Modifying
     void deleteByUser_Id(Long userId);
 
-    // ---- “Completed order” gates ----
+    /* =========================================================================================
+       "COMPLETED order" gates (access control for content / prevent double purchase)
+       ========================================================================================= */
+
     @Query("""
            SELECT CASE WHEN COUNT(oi) > 0 THEN true ELSE false END
            FROM OrderItem oi
@@ -97,6 +136,10 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
              AND UPPER(oi.order.status.name) = 'COMPLETED'
            """)
     List<Long> findCompletedItemIdsByUser(@Param("userId") Long userId);
+
+    /* =========================================================================================
+       BUSINESS analytics (existing)
+       ========================================================================================= */
 
     @Query("""
            SELECT COUNT(oi)
@@ -166,13 +209,23 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
            """)
     long countByOrderDatetimeAfter(@Param("fromDate") LocalDateTime fromDate);
 
+    /* =========================================================================================
+       EntityGraph helpers (existing)
+       ========================================================================================= */
+
     @EntityGraph(attributePaths = {"order", "item"})
     List<OrderItem> findByUser_Id(Long userId);
 
     @EntityGraph(attributePaths = {"order", "item"})
     List<OrderItem> findTop5ByUser_IdOrderByCreatedAtDesc(Long userId);
 
-    // Secure lookup: business owns the item
+    /* =========================================================================================
+       Secure lookups (existing)
+       ========================================================================================= */
+
+    /**
+     * Secure lookup: business owns the item.
+     */
     @Query("""
            select oi
            from OrderItem oi
@@ -182,7 +235,9 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     Optional<OrderItem> findByIdAndBusiness(@Param("id") Long id,
                                             @Param("businessId") Long businessId);
 
-    // Secure lookup: user owns the order header
+    /**
+     * Secure lookup: user owns the order header.
+     */
     @Query("""
            select oi
            from OrderItem oi
@@ -192,7 +247,14 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     Optional<OrderItem> findByIdAndUser(@Param("id") Long id,
                                         @Param("userId") Long userId);
 
-    // Projection for Flutter order card
+    /* =========================================================================================
+       Flutter card projections (existing)
+       ========================================================================================= */
+
+    /**
+     * Projection for Flutter "order card" list.
+     * Keep it lightweight: returns Map rows.
+     */
     @Query("""
            select new map(
                oi.id as id,
@@ -231,6 +293,10 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
             @Param("statuses") List<String> statuses
     );
 
+    /* =========================================================================================
+       Rich business view (existing) - loads order+item+currency+user for dashboard rows
+       ========================================================================================= */
+
     @EntityGraph(attributePaths = {"order","item","currency","user"})
     @Query("""
            select oi
@@ -243,6 +309,10 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
            order by oi.createdAt desc
            """)
     List<OrderItem> findRichByBusinessId(@Param("businessId") Long businessId);
+
+    /* =========================================================================================
+       OwnerProject (application/tenant) reports (existing + NEW)
+       ========================================================================================= */
 
     /**
      * Best-selling items for one app (ownerProjectId).
@@ -257,4 +327,82 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
            ORDER BY totalQty DESC
            """)
     List<Object[]> findBestSellingItemsByOwnerProject(@Param("ownerProjectId") Long ownerProjectId);
+
+    /**
+     * OWNER:
+     * List all order items in one application (tenant/app) with rich graph.
+     * Useful for OWNER dashboard screens without businessId (application-level).
+     */
+    @EntityGraph(attributePaths = {"order","item","currency","user"})
+    @Query("""
+           select oi
+           from OrderItem oi
+           join oi.item i
+           where i.ownerProject.id = :ownerProjectId
+           order by oi.createdAt desc
+           """)
+    List<OrderItem> findRichByOwnerProjectId(@Param("ownerProjectId") Long ownerProjectId);
+
+    /**
+     * OWNER:
+     * List order items in one application filtered by order header statuses.
+     * Example statuses: ["PENDING","COMPLETED","CANCEL_REQUESTED"].
+     */
+    @EntityGraph(attributePaths = {"order","item","currency","user"})
+    @Query("""
+           select oi
+           from OrderItem oi
+           join oi.order o
+           join oi.item i
+           where i.ownerProject.id = :ownerProjectId
+             and upper(o.status.name) in :statuses
+           order by oi.createdAt desc
+           """)
+    List<OrderItem> findRichByOwnerProjectIdAndStatuses(@Param("ownerProjectId") Long ownerProjectId,
+                                                        @Param("statuses") List<String> statuses);
+
+    /**
+     * SUPER_ADMIN:
+     * List order items for a specific application (ownerProjectId).
+     * This is basically the same as OWNER view, but SUPER_ADMIN can do it for any app.
+     * (You may choose to reuse the OWNER method above; keeping this name is clarity.)
+     */
+    @EntityGraph(attributePaths = {"order","item","currency","user"})
+    @Query("""
+           select oi
+           from OrderItem oi
+           join oi.item i
+           where i.ownerProject.id = :ownerProjectId
+           order by oi.createdAt desc
+           """)
+    List<OrderItem> findRichByApplication(@Param("ownerProjectId") Long ownerProjectId);
+
+    /**
+     * SUPER_ADMIN:
+     * Aggregate: count distinct orders grouped by application (ownerProjectId).
+     *
+     * Returns rows: Object[] where:
+     * - row[0] = ownerProjectId (Long)
+     * - row[1] = ordersCount (Long)
+     */
+    @Query("""
+           select i.ownerProject.id, count(distinct o.id)
+           from OrderItem oi
+           join oi.order o
+           join oi.item i
+           group by i.ownerProject.id
+           order by count(distinct o.id) desc
+           """)
+    List<Object[]> countOrdersGroupedByOwnerProject();
+
+    /**
+     * OWNER tenant isolation helper:
+     * Checks whether this order header belongs to this application (ownerProjectId),
+     * based on at least one line item in the order.
+     *
+     * Used by:
+     * - GET /api/orders/owner/orders/{orderId}
+     * - PUT /api/orders/owner/orders/{orderId}/status
+     */
+    boolean existsByOrder_IdAndItem_OwnerProject_Id(Long orderId, Long ownerProjectId);
 }
