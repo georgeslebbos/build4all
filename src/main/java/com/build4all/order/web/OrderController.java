@@ -8,6 +8,7 @@ import com.build4all.order.dto.CheckoutSummaryResponse;
 import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.order.repository.OrderRepository;
 import com.build4all.order.repository.OrderStatusRepository;
+import com.build4all.payment.service.OrderPaymentReadService;
 import com.build4all.security.JwtUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
@@ -57,6 +58,12 @@ import java.util.*;
  * - Order.status is NOT a string; it is a FK to order_status table.
  * - Therefore, updating status means:
  *      statusRepo.findByNameIgnoreCase(code) -> order.setStatus(entity) -> save order
+ *
+ * ✅ NEW PAYMENT NOTE (important):
+ * - "Was paid" (or fully paid) should not be inferred from order.status.
+ * - Source of truth is payment_transactions ledger:
+ *      paidAmount = SUM(tx.amount) where tx.status == 'PAID'
+ *      fullyPaid  = paidAmount >= order.totalPrice
  */
 @RestController
 @RequestMapping("/api/orders")
@@ -77,16 +84,32 @@ public class OrderController {
     /** FK lookup repository (order_status table) used to load OrderStatus entities by name */
     private final OrderStatusRepository statusRepo;
 
+    /**
+     * ✅ NEW:
+     * Payment read helper that computes:
+     * - paidAmount (sum of PAID transactions)
+     * - remainingAmount
+     * - fullyPaid
+     * from payment_transactions table.
+     *
+     * IMPORTANT:
+     * - This is "read model", no changes to DB.
+     * - We use batch mode in list endpoints to avoid N+1 queries.
+     */
+    private final OrderPaymentReadService paymentRead;
+
     public OrderController(com.build4all.order.service.OrderService orderService,
                            JwtUtil jwt,
                            OrderItemRepository orderItemRepo,
                            OrderRepository orderRepo,
-                           OrderStatusRepository statusRepo) {
+                           OrderStatusRepository statusRepo,
+                           OrderPaymentReadService paymentRead) {
         this.orderService = orderService;
         this.jwt = jwt;
         this.orderItemRepo = orderItemRepo;
         this.orderRepo = orderRepo;
         this.statusRepo = statusRepo;
+        this.paymentRead = paymentRead;
     }
 
     /**
@@ -141,6 +164,55 @@ public class OrderController {
     }
 
     /**
+     * ✅ NEW helper:
+     * Parses statuses from query params safely.
+     *
+     * Supports:
+     * - ?statuses=PENDING,COMPLETED
+     * - ?statuses=PENDING&statuses=COMPLETED
+     * - spaces are trimmed automatically
+     */
+    private static List<String> normalizeStatuses(List<String> statuses) {
+        if (statuses == null) return List.of();
+
+        List<String> out = new ArrayList<>();
+        for (String s : statuses) {
+            if (s == null) continue;
+            String[] parts = s.split(",");
+            for (String p : parts) {
+                if (p == null) continue;
+                String x = p.trim();
+                if (!x.isBlank()) out.add(x.toUpperCase());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * ✅ NEW helper:
+     * Shapes payment summary into safe JSON map (no provider secrets).
+     */
+    private static Map<String, Object> paymentToMap(OrderPaymentReadService.PaymentSummary ps) {
+        if (ps == null) {
+            return Map.of(
+                    "orderTotal", BigDecimal.ZERO,
+                    "paidAmount", BigDecimal.ZERO,
+                    "remainingAmount", BigDecimal.ZERO,
+                    "fullyPaid", false,
+                    "paymentState", "UNPAID"
+            );
+        }
+
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("orderTotal", ps.getOrderTotal());
+        m.put("paidAmount", ps.getPaidAmount());
+        m.put("remainingAmount", ps.getRemainingAmount());
+        m.put("fullyPaid", ps.isFullyPaid());
+        m.put("paymentState", ps.getPaymentState());
+        return m;
+    }
+
+    /**
      * Shapes a DB projection row (Map) into the exact structure the Flutter “order card” expects.
      *
      * Input row keys come from OrderItemRepository.findUserOrderCards() projection.
@@ -181,6 +253,21 @@ public class OrderController {
      * - computed totalPrice
      * - status/wasPaid
      * - paymentMethod (if present on order header)
+     *
+     * ✅ NEW PAYMENT RULE:
+     * - wasPaid should be derived from payment_transactions, not from status.
+     *
+     * Notes:
+     * - This method shapes ONE OrderItem row. If you want "wasPaid" accurate here,
+     *   you can:
+     *   (A) Keep legacy behavior (status == COMPLETED) OR
+     *   (B) Enhance by calling paymentRead.summaryForOrder(orderId,...)
+     *
+     * For performance, the best practice is to batch compute payment info in list endpoints.
+     * This method is used for BUSINESS endpoints that list OrderItems, not Orders.
+     * We keep legacy "COMPLETED" logic here to avoid DB calls per row.
+     *
+     * If you want, I can provide a batch payment-aware version for BUSINESS dashboards too.
      */
     private Map<String, Object> toDashboardOrderShape(OrderItem oi) {
         var o = oi.getOrder();
@@ -237,6 +324,10 @@ public class OrderController {
         String statusName = (o != null && o.getStatus() != null) ? o.getStatus().getName() : null;
 
         String orderStatus = titleCaseStatus(statusName);
+
+        // Legacy behavior (kept):
+        // wasPaid == COMPLETED (status workflow)
+        // If you want strict money-based "paid", apply paymentRead in batch in the endpoint.
         boolean wasPaid = "COMPLETED".equalsIgnoreCase(statusName);
 
         // Payment method (FK entity: PaymentMethod) - we return either code/name/id (best effort)
@@ -271,6 +362,10 @@ public class OrderController {
      * - who (clientName)
      * - what (itemName)
      * - paid or not (wasPaid)
+     *
+     * NOTE:
+     * - This keeps legacy "COMPLETED" logic for wasPaid.
+     * - If you want ledger-accurate payments here too, we can batch compute by orderId.
      */
     private Map<String, Object> toInsightShape(OrderItem oi) {
         var u = oi.getUser();
@@ -343,6 +438,9 @@ public class OrderController {
      * Why we shape it:
      * - avoid lazy-loading JSON issues
      * - provide a stable response to the frontend
+     *
+     * ✅ NEW:
+     * - Add payment summary (paidAmount/remaining/fullyPaid) computed from payment_transactions.
      */
     private Map<String, Object> toOwnerOrderDetailsResponse(Order order) {
         Map<String, Object> out = new HashMap<>();
@@ -386,6 +484,12 @@ public class OrderController {
         header.put("shippingTaxTotal", order.getShippingTaxTotal());
         header.put("couponCode", order.getCouponCode());
         header.put("couponDiscount", order.getCouponDiscount());
+
+        // ✅ NEW: payment summary (ledger-based)
+        OrderPaymentReadService.PaymentSummary ps =
+                paymentRead.summaryForOrder(order.getId(), order.getTotalPrice());
+        header.put("fullyPaid", ps.isFullyPaid());
+        header.put("payment", paymentToMap(ps));
 
         out.put("order", header);
 
@@ -506,10 +610,6 @@ public class OrderController {
 
     /* ----------------------------------- USER actions ------------------------------------ */
 
-    /**
-     * PUT /api/orders/cancel/{orderItemId}
-     * User cancels their own order item (service enforces ownership rules).
-     */
     @PutMapping("/cancel/{orderItemId}")
     @Operation(summary = "USER: Cancel my order item")
     public ResponseEntity<?> cancel(@RequestHeader("Authorization") String auth,
@@ -519,10 +619,6 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
-    /**
-     * PUT /api/orders/pending/{orderItemId}
-     * Reset order status back to PENDING (allowed only if not completed).
-     */
     @PutMapping("/pending/{orderItemId}")
     @Operation(summary = "USER: Reset my order item to PENDING")
     public ResponseEntity<?> resetToPending(@RequestHeader("Authorization") String auth,
@@ -532,10 +628,6 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
-    /**
-     * DELETE /api/orders/delete/{orderItemId}
-     * Deletes an order item (service validates ownership/permissions).
-     */
     @DeleteMapping("/delete/{orderItemId}")
     @Operation(summary = "USER: Delete my order item")
     public ResponseEntity<?> delete(@RequestHeader("Authorization") String auth,
@@ -545,10 +637,6 @@ public class OrderController {
         return ResponseEntity.noContent().build();
     }
 
-    /**
-     * PUT /api/orders/refund/{orderItemId}
-     * Requests or performs refund logic (service decides eligibility and status transitions).
-     */
     @PutMapping("/refund/{orderItemId}")
     @Operation(summary = "USER: Refund my order item (if eligible)")
     public ResponseEntity<?> refund(@RequestHeader("Authorization") String auth,
@@ -558,10 +646,6 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
-    /**
-     * PUT /api/orders/cancel/request/{orderItemId}
-     * User requests cancellation (business will approve/reject).
-     */
     @PutMapping("/cancel/request/{orderItemId}")
     @Operation(summary = "USER: Request cancellation (status => CANCEL_REQUESTED)")
     public ResponseEntity<?> requestCancel(@RequestHeader("Authorization") String auth,
@@ -575,13 +659,6 @@ public class OrderController {
        BUSINESS APIs (Merchant dashboards)
        ========================================================================================= */
 
-    /**
-     * GET /api/orders/mybusinessorders
-     * Returns business orders list (shaped for dashboard).
-     *
-     * Scope:
-     * - items owned by this businessId
-     */
     @GetMapping("/mybusinessorders")
     @Operation(summary = "BUSINESS: List orders for my business items")
     public ResponseEntity<?> myBusinessOrders(@RequestHeader("Authorization") String auth) {
@@ -591,13 +668,6 @@ public class OrderController {
         return ResponseEntity.ok(list);
     }
 
-    /**
-     * GET /api/orders/insights/orders
-     * Returns lightweight insights rows (clientName, itemName, wasPaid).
-     *
-     * Scope:
-     * - items owned by this businessId
-     */
     @GetMapping("/insights/orders")
     @Operation(summary = "BUSINESS: Lightweight insights rows")
     public ResponseEntity<?> insights(@RequestHeader("Authorization") String auth) {
@@ -607,10 +677,6 @@ public class OrderController {
         return ResponseEntity.ok(list);
     }
 
-    /**
-     * PUT /api/orders/cancel/approve/{orderItemId}
-     * Business approves the cancel request (ownership enforced by service).
-     */
     @PutMapping("/cancel/approve/{orderItemId}")
     @Operation(summary = "BUSINESS: Approve cancellation request (CANCEL_REQUESTED => CANCELED)")
     public ResponseEntity<?> approveCancel(@RequestHeader("Authorization") String auth,
@@ -620,10 +686,6 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
-    /**
-     * PUT /api/orders/cancel/reject/{orderItemId}
-     * Business rejects cancel request (back to PENDING).
-     */
     @PutMapping("/cancel/reject/{orderItemId}")
     @Operation(summary = "BUSINESS: Reject cancellation request (CANCEL_REQUESTED => PENDING)")
     public ResponseEntity<?> rejectCancel(@RequestHeader("Authorization") String auth,
@@ -633,10 +695,6 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
-    /**
-     * PUT /api/orders/cancel/mark-refunded/{orderItemId}
-     * Business marks canceled order as refunded (status => REFUNDED).
-     */
     @PutMapping("/cancel/mark-refunded/{orderItemId}")
     @Operation(summary = "BUSINESS: Mark refunded (CANCELED => REFUNDED)")
     public ResponseEntity<?> markRefunded(@RequestHeader("Authorization") String auth,
@@ -646,11 +704,6 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
-    /**
-     * PUT /api/orders/mark-paid/{orderItemId}
-     * Business manually marks an order as paid/completed.
-     * (Useful for cash payments, bank transfer, etc.)
-     */
     @PutMapping("/mark-paid/{orderItemId}")
     @Operation(summary = "BUSINESS: Mark order paid (manual; useful for CASH)")
     public ResponseEntity<?> markPaid(@RequestHeader("Authorization") String auth,
@@ -660,10 +713,6 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
-    /**
-     * PUT /api/orders/order/reject/{orderItemId}
-     * Business rejects an order (status => REJECTED).
-     */
     @PutMapping("/order/reject/{orderItemId}")
     @Operation(summary = "BUSINESS: Reject order (=> REJECTED)")
     public ResponseEntity<?> rejectOrder(@RequestHeader("Authorization") String auth,
@@ -673,10 +722,6 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
-    /**
-     * PUT /api/orders/order/unreject/{orderItemId}
-     * Business restores rejected order back to PENDING.
-     */
     @PutMapping("/order/unreject/{orderItemId}")
     @Operation(summary = "BUSINESS: Unreject order (REJECTED => PENDING)")
     public ResponseEntity<?> unrejectOrder(@RequestHeader("Authorization") String auth,
@@ -688,23 +733,8 @@ public class OrderController {
 
     /* =========================================================================================
        OWNER APIs (Application Admin / Tenant owner)
-       =========================================================================================
-       Owner should see:
-       - all orders in their application (tenant/app)
-       - filter by status
-       - open one specific order and see ALL items
-       - change order header status (FK) (delivered workflow etc.)
-       Scope is ownerProjectId, derived from Item.ownerProject.id
        ========================================================================================= */
 
-    /**
-     * GET /api/orders/owner/orders
-     * OWNER: list all orders (headers) in my application (tenant) with items loaded.
-     *
-     * NOTE:
-     * - Uses OrderRepository because this is header-level listing.
-     * - Query scopes by OrderItem -> Item -> ownerProjectId.
-     */
     @GetMapping("/owner/orders")
     @Operation(summary = "OWNER: List all orders (headers) in my application with items")
     public ResponseEntity<?> ownerAllOrders(@RequestHeader("Authorization") String auth) {
@@ -712,10 +742,20 @@ public class OrderController {
 
         var list = orderRepo.findAllByOwnerProjectIdWithItems(ownerProjectId);
 
+        // ✅ NEW:
+        // Batch compute payment summary for all returned orders (avoid N+1 queries).
+        Map<Long, BigDecimal> totalsByOrderId = new HashMap<>();
+        for (Order o : list) {
+            totalsByOrderId.put(o.getId(), o.getTotalPrice());
+        }
+        Map<Long, OrderPaymentReadService.PaymentSummary> payByOrderId =
+                paymentRead.summariesForOrders(totalsByOrderId);
+
         // For consistency with dashboards, we shape each order into a lightweight map:
         // - header fields
         // - itemsCount
         // - status name + UI case
+        // ✅ NEW: also add payment fields (paidAmount, remainingAmount, fullyPaid, paymentState)
         var out = list.stream().map(o -> {
             Map<String, Object> m = new HashMap<>();
             m.put("id", o.getId());
@@ -725,24 +765,17 @@ public class OrderController {
             m.put("status", st);
             m.put("statusUi", titleCaseStatus(st));
             m.put("itemsCount", (o.getOrderItems() == null) ? 0 : o.getOrderItems().size());
+
+            OrderPaymentReadService.PaymentSummary ps = payByOrderId.get(o.getId());
+            m.put("fullyPaid", ps != null && ps.isFullyPaid());
+            m.put("payment", paymentToMap(ps));
+
             return m;
         }).toList();
 
         return ResponseEntity.ok(out);
     }
 
-    /**
-     * GET /api/orders/owner/orders/status/{status}
-     * OWNER: list all orders in my application filtered by status.
-     *
-     * Examples:
-     * - PENDING
-     * - COMPLETED
-     * - CANCEL_REQUESTED
-     * - CANCELED
-     * - REFUNDED
-     * - REJECTED
-     */
     @GetMapping("/owner/orders/status/{status}")
     @Operation(summary = "OWNER: List orders in my application filtered by status (header list)")
     public ResponseEntity<?> ownerOrdersByStatus(@RequestHeader("Authorization") String auth,
@@ -752,6 +785,12 @@ public class OrderController {
 
         var list = orderRepo.findAllByOwnerProjectIdWithItemsAndStatuses(ownerProjectId, List.of(normalized));
 
+        // ✅ NEW: batch payment summary
+        Map<Long, BigDecimal> totalsByOrderId = new HashMap<>();
+        for (Order o : list) totalsByOrderId.put(o.getId(), o.getTotalPrice());
+        Map<Long, OrderPaymentReadService.PaymentSummary> payByOrderId =
+                paymentRead.summariesForOrders(totalsByOrderId);
+
         var out = list.stream().map(o -> {
             Map<String, Object> m = new HashMap<>();
             m.put("id", o.getId());
@@ -761,31 +800,33 @@ public class OrderController {
             m.put("status", st);
             m.put("statusUi", titleCaseStatus(st));
             m.put("itemsCount", (o.getOrderItems() == null) ? 0 : o.getOrderItems().size());
+
+            OrderPaymentReadService.PaymentSummary ps = payByOrderId.get(o.getId());
+            m.put("fullyPaid", ps != null && ps.isFullyPaid());
+            m.put("payment", paymentToMap(ps));
+
             return m;
         }).toList();
 
         return ResponseEntity.ok(out);
     }
 
-    /**
-     * GET /api/orders/owner/orders/status
-     * OWNER: list all orders filtered by multiple statuses.
-     * Example:
-     *   /api/orders/owner/orders/status?statuses=PENDING,COMPLETED
-     */
     @GetMapping("/owner/orders/status")
     @Operation(summary = "OWNER: List orders in my application filtered by multiple statuses (header list)")
     public ResponseEntity<?> ownerOrdersByStatuses(@RequestHeader("Authorization") String auth,
                                                    @RequestParam(name = "statuses") List<String> statuses) {
         Long ownerProjectId = jwt.extractOwnerProjectId(strip(auth));
 
-        List<String> normalized = (statuses == null) ? List.of() :
-                statuses.stream()
-                        .filter(s -> s != null && !s.isBlank())
-                        .map(s -> s.trim().toUpperCase())
-                        .toList();
+        // ✅ NEW: robust parsing (supports comma-separated and repeated params)
+        List<String> normalized = normalizeStatuses(statuses);
 
         var list = orderRepo.findAllByOwnerProjectIdWithItemsAndStatuses(ownerProjectId, normalized);
+
+        // ✅ NEW: batch payment summary
+        Map<Long, BigDecimal> totalsByOrderId = new HashMap<>();
+        for (Order o : list) totalsByOrderId.put(o.getId(), o.getTotalPrice());
+        Map<Long, OrderPaymentReadService.PaymentSummary> payByOrderId =
+                paymentRead.summariesForOrders(totalsByOrderId);
 
         var out = list.stream().map(o -> {
             Map<String, Object> m = new HashMap<>();
@@ -796,22 +837,17 @@ public class OrderController {
             m.put("status", st);
             m.put("statusUi", titleCaseStatus(st));
             m.put("itemsCount", (o.getOrderItems() == null) ? 0 : o.getOrderItems().size());
+
+            OrderPaymentReadService.PaymentSummary ps = payByOrderId.get(o.getId());
+            m.put("fullyPaid", ps != null && ps.isFullyPaid());
+            m.put("payment", paymentToMap(ps));
+
             return m;
         }).toList();
 
         return ResponseEntity.ok(out);
     }
 
-    /**
-     * ✅ NEW
-     * GET /api/orders/owner/orders/{orderId}
-     * OWNER: open one specific order and see header + ALL items.
-     *
-     * Security:
-     * - We first validate that the order is inside the ownerProject scope
-     *   using OrderItemRepository.existsByOrder_IdAndItem_OwnerProject_Id(...)
-     * - Then we load the order with items using OrderRepository.findByIdWithItems(...)
-     */
     @GetMapping("/owner/orders/{orderId}")
     @Operation(summary = "OWNER: Get order details (header + all items)")
     public ResponseEntity<?> ownerOrderDetails(@RequestHeader("Authorization") String auth,
@@ -827,29 +863,6 @@ public class OrderController {
         return ResponseEntity.ok(toOwnerOrderDetailsResponse(order));
     }
 
-    /**
-     * ✅ NEW
-     * PUT /api/orders/owner/orders/{orderId}/status
-     * OWNER: Change order HEADER status (FK to order_status table).
-     *
-     * Body example:
-     * { "status": "COMPLETED" }
-     * { "status": "CANCELED" }
-     * { "status": "REFUNDED" }
-     *
-     * Notes:
-     * - This updates the Order header (orders.status_id).
-     * - Because it is FK, we load OrderStatus entity and assign it.
-     * - For WooCommerce-like lifecycle, you can allow:
-     *      PENDING -> COMPLETED (delivered)
-     *      PENDING -> CANCELED
-     *      CANCELED -> REFUNDED
-     *   and later add rules (cannot go backwards, etc.) in service layer.
-     *
-     * Best practice:
-     * - Put advanced transition rules into OrderServiceImpl (not controller),
-     *   but we keep it here minimal and safe.
-     */
     @PutMapping("/owner/orders/{orderId}/status")
     @Operation(summary = "OWNER: Update order header status (FK)")
     public ResponseEntity<?> ownerUpdateOrderStatus(@RequestHeader("Authorization") String auth,
@@ -866,6 +879,30 @@ public class OrderController {
         // Load order with items (optional, but safe)
         Order order = orderRepo.findById(orderId)
                 .orElseThrow(() -> new NoSuchElementException("Order not found"));
+
+        /**
+         * ✅ NEW (optional safety):
+         * If the owner sets COMPLETED, we can enforce "fully paid" based on ledger.
+         *
+         * Why:
+         * - Prevents a common bug: status updated but no money received.
+         *
+         * If you want to allow "cash on delivery" completion without online payment,
+         * then in markPaid(...) you should create a PAID payment transaction (ledger),
+         * and this rule will still pass.
+         *
+         * If you do NOT want to enforce this rule, comment the block below.
+         */
+        if ("COMPLETED".equalsIgnoreCase(newStatus.getName())) {
+            OrderPaymentReadService.PaymentSummary ps =
+                    paymentRead.summaryForOrder(order.getId(), order.getTotalPrice());
+            if (!ps.isFullyPaid()) {
+                throw new IllegalArgumentException(
+                        "Cannot set status COMPLETED لأن الطلب غير مدفوع بالكامل. " +
+                                "paid=" + ps.getPaidAmount() + " total=" + ps.getOrderTotal()
+                );
+            }
+        }
 
         // FK update
         order.setStatus(newStatus);
@@ -886,22 +923,8 @@ public class OrderController {
 
     /* =========================================================================================
        SUPER_ADMIN APIs (Engine-level)
-       =========================================================================================
-       Super admin should see:
-       - all orders grouped by applications (ownerProjectId)
-       - ability to drill-down: view orders for a specific application
        ========================================================================================= */
 
-    /**
-     * GET /api/orders/superadmin/applications
-     * SUPER_ADMIN: returns list of applications with order counts.
-     *
-     * Output example:
-     * [
-     *   { "ownerProjectId": 10, "ordersCount": 52 },
-     *   { "ownerProjectId": 12, "ordersCount": 31 }
-     * ]
-     */
     @GetMapping("/superadmin/applications")
     @Operation(summary = "SUPER_ADMIN: Count orders grouped by application (ownerProjectId)")
     public ResponseEntity<?> superAdminApplicationsOrdersCount(@RequestHeader("Authorization") String auth) {
@@ -917,19 +940,19 @@ public class OrderController {
         return ResponseEntity.ok(out);
     }
 
-    /**
-     * GET /api/orders/superadmin/applications/{ownerProjectId}/orders
-     * SUPER_ADMIN: drill-down view for a specific application.
-     *
-     * Note:
-     * - We use OrderRepository here because it's header + items in one tenant scope.
-     */
     @GetMapping("/superadmin/applications/{ownerProjectId}/orders")
     @Operation(summary = "SUPER_ADMIN: List all orders for a specific application")
     public ResponseEntity<?> superAdminOrdersByApplication(@RequestHeader("Authorization") String auth,
                                                            @PathVariable Long ownerProjectId) {
 
         var list = orderRepo.findAllByOwnerProjectIdWithItems(ownerProjectId);
+
+        // ✅ NEW:
+        // Add payment summary here too (optional but very useful for Super Admin dashboards).
+        Map<Long, BigDecimal> totalsByOrderId = new HashMap<>();
+        for (Order o : list) totalsByOrderId.put(o.getId(), o.getTotalPrice());
+        Map<Long, OrderPaymentReadService.PaymentSummary> payByOrderId =
+                paymentRead.summariesForOrders(totalsByOrderId);
 
         var out = list.stream().map(o -> {
             Map<String, Object> m = new HashMap<>();
@@ -940,16 +963,17 @@ public class OrderController {
             m.put("status", st);
             m.put("statusUi", titleCaseStatus(st));
             m.put("itemsCount", (o.getOrderItems() == null) ? 0 : o.getOrderItems().size());
+
+            OrderPaymentReadService.PaymentSummary ps = payByOrderId.get(o.getId());
+            m.put("fullyPaid", ps != null && ps.isFullyPaid());
+            m.put("payment", paymentToMap(ps));
+
             return m;
         }).toList();
 
         return ResponseEntity.ok(out);
     }
 
-    /**
-     * GET /api/orders/superadmin/applications/{ownerProjectId}/orders/status/{status}
-     * SUPER_ADMIN: drill-down by application and status.
-     */
     @GetMapping("/superadmin/applications/{ownerProjectId}/orders/status/{status}")
     @Operation(summary = "SUPER_ADMIN: List orders for a specific application filtered by status")
     public ResponseEntity<?> superAdminOrdersByApplicationAndStatus(@RequestHeader("Authorization") String auth,
@@ -959,6 +983,12 @@ public class OrderController {
 
         var list = orderRepo.findAllByOwnerProjectIdWithItemsAndStatuses(ownerProjectId, List.of(normalized));
 
+        // ✅ NEW: batch payment summary
+        Map<Long, BigDecimal> totalsByOrderId = new HashMap<>();
+        for (Order o : list) totalsByOrderId.put(o.getId(), o.getTotalPrice());
+        Map<Long, OrderPaymentReadService.PaymentSummary> payByOrderId =
+                paymentRead.summariesForOrders(totalsByOrderId);
+
         var out = list.stream().map(o -> {
             Map<String, Object> m = new HashMap<>();
             m.put("id", o.getId());
@@ -968,6 +998,11 @@ public class OrderController {
             m.put("status", st);
             m.put("statusUi", titleCaseStatus(st));
             m.put("itemsCount", (o.getOrderItems() == null) ? 0 : o.getOrderItems().size());
+
+            OrderPaymentReadService.PaymentSummary ps = payByOrderId.get(o.getId());
+            m.put("fullyPaid", ps != null && ps.isFullyPaid());
+            m.put("payment", paymentToMap(ps));
+
             return m;
         }).toList();
 
@@ -978,30 +1013,18 @@ public class OrderController {
        ERROR HANDLERS (keep same behavior)
        ========================================================================================= */
 
-    /**
-     * Converts IllegalArgumentException into HTTP 400 with JSON: { "error": "..." }
-     * Helpful for Flutter forms and validation errors.
-     */
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<?> badRequest(IllegalArgumentException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Map.of("error", ex.getMessage()));
     }
 
-    /**
-     * Converts NoSuchElementException into HTTP 404 with JSON: { "error": "..." }
-     * Useful for owner tenant-scope "not found" behavior.
-     */
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<?> notFound(NoSuchElementException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(Map.of("error", ex.getMessage()));
     }
 
-    /**
-     * Catch-all exception handler: HTTP 500 with JSON error message.
-     * (In production, consider logging ex + hiding internal error details.)
-     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<?> serverError(Exception ex) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
