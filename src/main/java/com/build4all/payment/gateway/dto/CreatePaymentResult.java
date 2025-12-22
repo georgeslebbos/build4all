@@ -79,6 +79,15 @@ public class CreatePaymentResult {
         return r;
     }
 
+    /** ✅ ADD THIS */
+    public static CreatePaymentResult paypal(String orderId, String approvalUrl, String status) {
+        CreatePaymentResult r = new CreatePaymentResult();
+        r.providerPaymentId = orderId;
+        r.redirectUrl = approvalUrl;
+        r.status = status;
+        return r;
+    }
+
     // ---- Getters ----
     public String getProviderPaymentId() { return providerPaymentId; }
     public String getClientSecret() { return clientSecret; }

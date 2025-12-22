@@ -33,6 +33,16 @@ import java.util.Optional;
  *   and reduce N+1 queries.
  * - "Application scope" is derived from OrderItem -> Item -> ownerProject.id
  *   because Order header does not store ownerProjectId directly.
+ *
+ * ✅ Important (based on your error):
+ * - Order.status is LAZY (ManyToOne). If a controller serializes order.status.name,
+ *   and the session is closed, Hibernate will throw:
+ *     "Could not initialize proxy [OrderStatus#X] - no session"
+ * - Therefore OWNER/SUPER_ADMIN list queries MUST fetch:
+ *   - status
+ *   - (and paymentMethod too, because it is LAZY and you may display it)
+ *   - currency (safe to fetch; avoids surprises)
+ *   - orderItems + orderItems.item (for counts / detail shaping)
  */
 @Repository
 public interface OrderRepository extends JpaRepository<Order, Long> {
@@ -89,17 +99,33 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      * "My Orders" (header + items + item details) with EntityGraph:
      * - Loads orderItems and their item in one go (reduces N+1).
      * - Ordered by most recent first.
+     *
+     * Note:
+     * - We keep it minimal for end-user use cases.
+     * - If you ever add "statusUi" or payment method on this response,
+     *   add "status" and "paymentMethod" to the graph.
      */
     @EntityGraph(attributePaths = {"orderItems", "orderItems.item"})
     List<Order> findByUser_IdOrderByOrderDateDesc(Long userId);
 
     /**
      * Load a single order with its items and item entities.
-     * LEFT JOIN FETCH ensures orderItems and item are loaded even if some are null.
+     *
+     * ✅ Updated:
+     * - We also fetch status + paymentMethod + currency
+     *   because your controllers/read-model code calls:
+     *     order.getStatus().getName()
+     *     order.getPaymentMethod()
+     *     order.getCurrency()
+     *
+     * LEFT JOIN FETCH ensures fields are loaded even if they are null.
      */
     @Query("""
            SELECT o
            FROM Order o
+           LEFT JOIN FETCH o.status s
+           LEFT JOIN FETCH o.paymentMethod pm
+           LEFT JOIN FETCH o.currency c
            LEFT JOIN FETCH o.orderItems oi
            LEFT JOIN FETCH oi.item i
            WHERE o.id = :id
@@ -141,6 +167,13 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     /**
      * Fetch all orders that contain items belonging to a business.
      * DISTINCT prevents duplicates when an order contains multiple items from same business.
+     *
+     * Note:
+     * - This returns headers only (no fetch graph).
+     * - If you later serialize status/paymentMethod for these orders,
+     *   either:
+     *   (A) add EntityGraph {"status","paymentMethod"}, or
+     *   (B) return DTO projections.
      */
     @Query("""
            SELECT DISTINCT o
@@ -176,7 +209,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     List<Order> findAllForActivePublicBusinesses();
 
     /* =========================================================================================
-       OWNER (Application admin) - header-level queries via items.ownerProject.id  ✅ NEW
+       OWNER (Application admin) - header-level queries via items.ownerProject.id  ✅ UPDATED
        ========================================================================================= */
 
     /**
@@ -184,8 +217,19 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      *
      * We scope by Item.ownerProject.id because the Order header does not store ownerProjectId.
      * DISTINCT: avoids duplicating headers due to multiple lines.
+     *
+     * ✅ Updated EntityGraph:
+     * - Fetches status (LAZY) to avoid LazyInitializationException when controller calls status.getName()
+     * - Fetches paymentMethod (LAZY) because owner dashboards often show it
+     * - Fetches currency to avoid surprises in serialization/shaping
      */
-    @EntityGraph(attributePaths = {"orderItems", "orderItems.item"})
+    @EntityGraph(attributePaths = {
+            "status",
+            "paymentMethod",
+            "currency",
+            "orderItems",
+            "orderItems.item"
+    })
     @Query("""
            select distinct o
            from Order o
@@ -200,8 +244,17 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      * OWNER: List all orders for one application filtered by status list.
      *
      * Example statuses: ["PENDING","COMPLETED","CANCEL_REQUESTED"].
+     *
+     * ✅ Updated EntityGraph:
+     * - Same as above to ensure status/payment/currency are loaded.
      */
-    @EntityGraph(attributePaths = {"orderItems", "orderItems.item"})
+    @EntityGraph(attributePaths = {
+            "status",
+            "paymentMethod",
+            "currency",
+            "orderItems",
+            "orderItems.item"
+    })
     @Query("""
            select distinct o
            from Order o

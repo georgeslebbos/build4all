@@ -2,6 +2,7 @@
 package com.build4all.authentication.web;
 
 import com.build4all.admin.domain.AdminUser;
+import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.authentication.dto.AdminLoginRequest;
 import com.build4all.admin.dto.AdminRegisterRequest;
 
@@ -81,6 +82,7 @@ public class AuthController {
 
     // Real OTP generator/validator for Owner email signup
     @Autowired private OwnerOtpService ownerOtpService;
+    @Autowired private AdminUserProjectRepository adminUserProjectRepo;
 
     /* =====================================================================================
      *  USER REGISTRATION (OWNER-LINKED / MULTI-TENANT)
@@ -681,7 +683,7 @@ public class AuthController {
             }
         }
 
-        String token = jwtUtil.generateToken(admin);
+        String token = jwtUtil.generateToken(admin,null);
 
         Map<String, Object> managerData = new HashMap<>();
         managerData.put("id", admin.getAdminId());
@@ -733,7 +735,7 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Access denied: Not a Super Admin"));
         }
 
-        String token = jwtUtil.generateToken(admin);
+        String token = jwtUtil.generateToken(admin, null);
 
         Map<String, Object> adminData = new HashMap<>();
         adminData.put("id", admin.getAdminId());
@@ -820,7 +822,20 @@ public class AuthController {
                     .body(Map.of("error", "Access denied for this role"));
         }
 
-        String token = jwtUtil.generateToken(admin);
+        Long ownerProjectId = null;
+
+            // pick the first app (AUP) for this owner
+            var links = adminUserProjectRepo.findByAdmin_AdminId(admin.getAdminId());
+
+            if (links == null || links.isEmpty()) {
+                // IMPORTANT: owner has no app/tenant link yet
+                // Either create one at registration time (recommended) OR fail clearly here
+                throw new IllegalArgumentException("Owner has no ownerProject link (AdminUserProject). Create an app first.");
+            }
+
+            ownerProjectId = links.get(0).getId(); // ✅ this is aup_id
+
+        String token = jwtUtil.generateToken(admin, ownerProjectId);
 
         Map<String, Object> adminData = new HashMap<>();
         adminData.put("id", admin.getAdminId());
@@ -834,6 +849,7 @@ public class AuthController {
                 "message", "Login successful",
                 "token", token,
                 "role", role,
+                "ownerProjectId", ownerProjectId,
                 "admin", adminData
         ));
     }
@@ -937,7 +953,7 @@ public class AuthController {
 
             adminUserService.save(owner);
 
-            String token = jwtUtil.generateToken(owner);
+            String token = jwtUtil.generateToken(owner, null);
 
             Map<String, Object> ownerData = new HashMap<>();
             ownerData.put("id", owner.getAdminId());

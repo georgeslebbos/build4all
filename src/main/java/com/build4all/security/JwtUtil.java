@@ -1,6 +1,7 @@
 // src/main/java/com/build4all/security/JwtUtil.java
 package com.build4all.security;
 
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
@@ -59,25 +60,22 @@ public class JwtUtil {
      * - "role" is taken from DB (user.getRole().getName()) and defaults to "USER" if null.
      */
     public String generateToken(Users user) {
-        String subject = user.getEmail() != null ? user.getEmail() : user.getPhoneNumber();
 
-        // 👇 read role from DB, default to USER if null
-        String roleName = "USER";
-        if (user.getRole() != null && user.getRole().getName() != null) {
-            roleName = user.getRole().getName();
+        var builder = Jwts.builder()
+                .setSubject(user.getEmail())
+                .claim("id", user.getId())
+                .claim("username", user.getUsername())
+                .claim("role", "USER");
+
+        // ✅ include tenant from DB
+        if (user.getOwnerProject() != null && user.getOwnerProject().getId() != null) {
+            builder.claim("ownerProjectId", user.getOwnerProject().getId());
         }
 
-        return Jwts.builder()
-                .setSubject(subject)
-                .claim("id", user.getId()) // used later by extractId()
-                .claim("username", user.getUsername())
-                .claim("firstName", user.getFirstName())
-                .claim("lastName", user.getLastName())
-                .claim("profileImageUrl", user.getProfilePictureUrl())
-                .claim("role", roleName)   // used later by extractRole() and isUserToken()
+        return builder
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
-                .signWith(key, SignatureAlgorithm.HS256) // HS256 = HMAC-SHA256 symmetric signing
+                .signWith(key, SignatureAlgorithm.HS256)
                 .compact();
     }
 
@@ -89,28 +87,25 @@ public class JwtUtil {
      * - claims: id, businessName, logoUrl, bannerUrl, role
      */
     public String generateToken(Businesses business) {
-        String subject = (business.getEmail() != null && !business.getEmail().isEmpty())
-                ? business.getEmail()
-                : business.getPhoneNumber();
 
-        // Business must have an identifier used as "subject" so later you can call extractUsername().
-        if (subject == null || subject.isEmpty()) {
-            throw new IllegalArgumentException("Business must have either email or phone number to generate token");
-        }
-
-        // 👇 read role from DB, default to USER if null
+        // 👇 role from DB, default to BUSINESS if null
         String roleName = "BUSINESS";
         if (business.getRole() != null && business.getRole().getName() != null) {
             roleName = business.getRole().getName();
         }
 
-        return Jwts.builder()
-                .setSubject(subject)
-                .claim("id", business.getId())
-                .claim("businessName", business.getBusinessName())
-                .claim("logoUrl", business.getBusinessLogoUrl())
-                .claim("bannerUrl", business.getBusinessBannerUrl())
-                .claim("role", roleName) // expected to be "BUSINESS"
+        var builder = Jwts.builder()
+                .setSubject(business.getEmail())         // Business principal is email (your getUsername returns email)
+                .claim("id", business.getId())           // Businesses primary key
+                .claim("username", business.getUsername())
+                .claim("role", roleName);
+
+        // ✅ tenant scope = aup_id (AdminUserProject link)
+        if (business.getOwnerProjectLink() != null && business.getOwnerProjectLink().getId() != null) {
+            builder.claim("ownerProjectId", business.getOwnerProjectLink().getId());
+        }
+
+        return builder
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
                 .signWith(key, SignatureAlgorithm.HS256)
@@ -128,25 +123,38 @@ public class JwtUtil {
      * - The default roleName="USER" is just a fallback; usually adminUser.role is never null.
      * - extractAdminId() simply delegates to extractId() (same claim name "id").
      */
-    public String generateToken(AdminUser adminUser) {
+    public String generateToken(AdminUser adminUser, Long ownerProjectId) {
 
-        // 👇 read role from DB, default to USER if null
         String roleName = "USER";
         if (adminUser.getRole() != null && adminUser.getRole().getName() != null) {
             roleName = adminUser.getRole().getName();
         }
 
-        return Jwts.builder()
+        var builder = Jwts.builder()
                 .setSubject(adminUser.getEmail())
                 .claim("id", adminUser.getAdminId())
                 .claim("username", adminUser.getUsername())
-                .claim("role", roleName)
+                .claim("role", roleName);
+
+        // ✅ optional
+        if (ownerProjectId != null) {
+            builder.claim("ownerProjectId", ownerProjectId);
+        }
+
+        return builder
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
                 .signWith(key, SignatureAlgorithm.HS256)
                 .compact();
     }
 
+    public Claims extractAllClaims(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(key)          // your Key field in JwtUtil (Keys.hmacShaKeyFor(...))
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+    }
     /* ======================== EXTRACTION HELPERS ======================== */
 
     /**
