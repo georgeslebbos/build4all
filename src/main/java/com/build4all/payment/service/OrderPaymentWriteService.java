@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.Locale;
+import java.util.NoSuchElementException;
 
 @Service
 public class OrderPaymentWriteService {
@@ -40,6 +41,33 @@ public class OrderPaymentWriteService {
         tx.setAmount(amount);
         tx.setCurrency(currencyCode.trim().toLowerCase(Locale.ROOT));
         tx.setStatus("PAID"); // ✅ THIS is what your read service sums
+        return txRepo.save(tx);
+    }
+
+    /**
+     * CASH flow:
+     * - Transaction is created at checkout with status = OFFLINE_PENDING
+     * - After money is collected, owner/business calls this to set status = PAID
+     *
+     * This makes your existing rule work:
+     * paidAmount = SUM(amount) where status='PAID'
+     */
+    @Transactional
+    public PaymentTransaction markCashAsPaid(Long orderId, BigDecimal orderTotal) {
+
+        PaymentTransaction tx = txRepo
+                .findFirstByOrderIdAndProviderCodeIgnoreCaseOrderByCreatedAtDesc(orderId, "CASH")
+                .orElseThrow(() -> new NoSuchElementException(
+                        "No CASH transaction found for orderId=" + orderId
+                ));
+
+        // If amount is missing or zero, fill it from order total
+        if (tx.getAmount() == null || tx.getAmount().signum() <= 0) {
+            tx.setAmount(orderTotal == null ? BigDecimal.ZERO : orderTotal);
+        }
+
+        tx.setStatus("PAID");
+
         return txRepo.save(tx);
     }
 }

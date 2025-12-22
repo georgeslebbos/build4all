@@ -9,6 +9,7 @@ import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.order.repository.OrderRepository;
 import com.build4all.order.repository.OrderStatusRepository;
 import com.build4all.payment.service.OrderPaymentReadService;
+import com.build4all.payment.service.OrderPaymentWriteService;
 import com.build4all.security.JwtUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
@@ -84,6 +85,7 @@ public class OrderController {
     /** FK lookup repository (order_status table) used to load OrderStatus entities by name */
     private final OrderStatusRepository statusRepo;
 
+    private final OrderPaymentWriteService paymentWrite;
     /**
      * ✅ NEW:
      * Payment read helper that computes:
@@ -103,13 +105,15 @@ public class OrderController {
                            OrderItemRepository orderItemRepo,
                            OrderRepository orderRepo,
                            OrderStatusRepository statusRepo,
-                           OrderPaymentReadService paymentRead) {
+                           OrderPaymentReadService paymentRead,
+                           OrderPaymentWriteService paymentWrite) {
         this.orderService = orderService;
         this.jwt = jwt;
         this.orderItemRepo = orderItemRepo;
         this.orderRepo = orderRepo;
         this.statusRepo = statusRepo;
         this.paymentRead = paymentRead;
+        this.paymentWrite = paymentWrite;
     }
 
     /**
@@ -920,7 +924,29 @@ public class OrderController {
                 "statusUi", titleCaseStatus(newStatus.getName())
         ));
     }
+    @PutMapping("/owner/orders/{orderId}/cash/mark-paid")
+    @Operation(summary = "OWNER: Mark CASH payment as PAID (money collected)")
+    public ResponseEntity<?> ownerMarkCashPaid(@RequestHeader("Authorization") String auth,
+                                               @PathVariable Long orderId) {
 
+        Long ownerProjectId = jwt.extractOwnerProjectId(strip(auth));
+
+        // tenant isolation
+        assertOwnerCanAccessOrder(orderId, ownerProjectId);
+
+        Order order = orderRepo.findById(orderId)
+                .orElseThrow(() -> new NoSuchElementException("Order not found"));
+
+        var tx = paymentWrite.markCashAsPaid(orderId, order.getTotalPrice());
+
+        return ResponseEntity.ok(Map.of(
+                "orderId", orderId,
+                "provider", tx.getProviderCode(),
+                "status", tx.getStatus(),
+                "amount", tx.getAmount(),
+                "currency", tx.getCurrency()
+        ));
+    }
     /* =========================================================================================
        SUPER_ADMIN APIs (Engine-level)
        ========================================================================================= */

@@ -36,6 +36,16 @@ public interface PaymentTransactionRepository extends JpaRepository<PaymentTrans
      */
     Optional<PaymentTransaction> findFirstByOrderIdOrderByCreatedAtDesc(Long orderId);
 
+    /**
+     * For CASH flow, we need to locate the latest CASH transaction for an order
+     * so the owner/business can mark it as PAID after collecting money.
+     */
+    Optional<PaymentTransaction> findFirstByOrderIdAndProviderCodeIgnoreCaseOrderByCreatedAtDesc(
+            Long orderId,
+            String providerCode
+    );
+
+
     /* =========================================================================================
        ✅ NEW: Payment sums (for fully-paid computation)
        ========================================================================================= */
