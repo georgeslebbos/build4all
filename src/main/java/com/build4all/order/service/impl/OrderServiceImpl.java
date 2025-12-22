@@ -35,6 +35,9 @@ import com.build4all.payment.service.PaymentOrchestratorService;
 import com.build4all.payment.repository.PaymentMethodRepository;
 import com.build4all.payment.domain.PaymentMethod;
 
+import com.build4all.payment.service.OrderPaymentReadService;
+import com.build4all.payment.service.OrderPaymentWriteService;
+
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -85,6 +88,9 @@ public class OrderServiceImpl implements OrderService {
 
     /** Status lookup (PENDING/COMPLETED/CANCELED/...) */
     private final OrderStatusRepository orderStatusRepo;
+
+    private final OrderPaymentReadService paymentRead;
+    private final OrderPaymentWriteService paymentWrite;
 
     /** Country lookup (shipping address) */
     private final CountryRepository countryRepo;
@@ -158,7 +164,9 @@ public class OrderServiceImpl implements OrderService {
                             CartRepository cartRepo,
                             CartItemRepository cartItemRepo,
                             PaymentOrchestratorService paymentOrchestrator,
-                            PaymentMethodRepository paymentMethodRepo) {
+                            PaymentMethodRepository paymentMethodRepo,
+                            OrderPaymentReadService paymentRead,
+                            OrderPaymentWriteService paymentWrite) {
         this.orderItemRepo = orderItemRepo;
         this.orderRepo = orderRepo;
         this.usersRepo = usersRepo;
@@ -172,6 +180,8 @@ public class OrderServiceImpl implements OrderService {
         this.cartItemRepo = cartItemRepo;
         this.paymentOrchestrator = paymentOrchestrator;
         this.paymentMethodRepo = paymentMethodRepo;
+        this.paymentRead = paymentRead;
+        this.paymentWrite = paymentWrite;
     }
 
     /* ===============================
@@ -724,20 +734,47 @@ public class OrderServiceImpl implements OrderService {
      */
     @Override
     public void markPaid(Long orderItemId, Long businessId) {
-        var oi = orderItemRepo.findByIdAndBusiness(orderItemId, businessId)
-                .orElseThrow(() -> new IllegalArgumentException("Order item not found or not yours"));
 
-        var header = oi.getOrder();
-        String curr = currentStatusCode(header);
+        OrderItem oi = orderItemRepo.findByIdAndBusiness(orderItemId, businessId)
+                .orElseThrow(() -> new IllegalArgumentException("Order item not found"));
 
-        if ("COMPLETED".equals(curr)) return;
+        Order order = oi.getOrder();
+        if (order == null) throw new IllegalStateException("Missing order");
 
-        header.setStatus(requireStatus("COMPLETED"));
-        header.setOrderDate(LocalDateTime.now());
-        oi.setUpdatedAt(LocalDateTime.now());
+        // Resolve tenant
+        Long ownerProjectId = oi.getItem().getOwnerProject().getId();
 
-        orderRepo.save(header);
-        orderItemRepo.save(oi);
+        BigDecimal orderTotal = order.getTotalPrice();
+
+        // 🔎 Check current payment summary
+        var summary = paymentRead.summaryForOrder(order.getId(), orderTotal);
+        BigDecimal remaining = summary.getRemainingAmount();
+
+        // 💰 Write PAID transaction if needed
+        if (remaining.signum() > 0) {
+            paymentWrite.recordManualPaid(
+                    ownerProjectId,
+                    order.getId(),
+                    remaining,
+                    order.getCurrency().getCode(),
+                    "CASH",
+                    "CASH_ORDER_" + order.getId()
+            );
+        }
+
+        // 🔁 Re-check AFTER ledger update
+        var after = paymentRead.summaryForOrder(order.getId(), orderTotal);
+        if (!after.isFullyPaid()) {
+            throw new IllegalStateException(
+                    "Cannot complete order: still not fully paid"
+            );
+        }
+
+        // ✅ Now COMPLETED is allowed
+        order.setStatus(requireStatus("COMPLETED"));
+        order.setOrderDate(LocalDateTime.now());
+
+        orderRepo.save(order);
     }
 
     /**

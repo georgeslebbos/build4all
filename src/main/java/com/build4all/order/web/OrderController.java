@@ -514,12 +514,12 @@ public class OrderController {
 
                 // Minimal user info (owner sees who ordered)
                 if (oi.getUser() != null) {
-                    row.put("user", Map.of(
-                            "id", tryGet(oi.getUser(), "getId"),
-                            "username", tryGet(oi.getUser(), "getUsername"),
-                            "firstName", tryGet(oi.getUser(), "getFirstName"),
-                            "lastName", tryGet(oi.getUser(), "getLastName")
-                    ));
+                    Map<String, Object> u = new HashMap<>();
+                    u.put("id", tryGet(oi.getUser(), "getId"));
+                    u.put("username", tryGet(oi.getUser(), "getUsername"));
+                    u.put("firstName", tryGet(oi.getUser(), "getFirstName"));
+                    u.put("lastName", tryGet(oi.getUser(), "getLastName"));
+                    row.put("user", u);
                 } else {
                     row.put("user", null);
                 }
