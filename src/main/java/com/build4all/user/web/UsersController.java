@@ -268,14 +268,15 @@ public class UsersController {
             }
 
             String jwt = token.substring(7).trim();
-            String contact = jwtUtil.extractUsername(jwt); // email or phone from token
+            Long tokenUserId = jwtUtil.extractId(jwt); // ✅ userId from claim
 
             Users updated = userService.updateUserProfile(
-                    id, ownerProjectLinkId, contact,
+                    id, ownerProjectLinkId, tokenUserId,
                     username, firstName, lastName,
                     isPublicProfile, profileImage,
                     imageRemoved
             );
+
 
             return ResponseEntity.ok(Map.of(
                     "message", "Profile updated successfully",
@@ -284,8 +285,12 @@ public class UsersController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (RuntimeException e) {
+            // ✅ Access denied => 403 (مش 404)
+            if ("Access denied".equalsIgnoreCase(e.getMessage())) {
+                return ResponseEntity.status(403).body(Map.of("error", e.getMessage()));
+            }
             return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
-        } catch (Exception e) {
+        }catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", "Server error: " + e.getMessage()));
         }
     }

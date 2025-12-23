@@ -231,7 +231,7 @@ public class UserService {
     public Users updateUserProfile(
             Long userId,
             Long ownerProjectLinkId,
-            String tokenContact,
+            Long tokenUserId,            
             String username,
             String firstName,
             String lastName,
@@ -240,15 +240,17 @@ public class UserService {
             Boolean imageRemoved
     ) throws IOException {
 
+
         if (userId == null || ownerProjectLinkId == null)
             throw new IllegalArgumentException("userId and ownerProjectLinkId are required");
 
         Users user = getUserById(userId, ownerProjectLinkId); // tenant-safe
 
-        // ✅ self-only security (tenant-scoped)
-        boolean matchesEmail = user.getEmail() != null && user.getEmail().equalsIgnoreCase(tokenContact);
-        boolean matchesPhone = user.getPhoneNumber() != null && user.getPhoneNumber().equals(tokenContact);
-        if (!matchesEmail && !matchesPhone) throw new RuntimeException("Access denied");
+     // ✅ self-only security by token id
+        if (tokenUserId == null || !userId.equals(tokenUserId)) {
+            throw new RuntimeException("Access denied");
+        }
+
 
         // ✅ username uniqueness per tenant (only if changed)
         if (username != null && !username.isBlank()) {
