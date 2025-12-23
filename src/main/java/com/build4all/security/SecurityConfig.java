@@ -152,16 +152,12 @@ public class SecurityConfig implements WebMvcConfigurer {
                 .authorizeHttpRequests(auth -> auth
                         // Public endpoints (no token required)
                         .requestMatchers(
-                                "/api/auth/**",   // login, register, OTP, etc.
-                                "/api/public/**", // any public APIs (catalog browsing, etc.)
+                                "/api/auth/**",
+                                "/api/auth/user/login-phone", // login, register, OTP, etc.
                                 "/api/ci/**",     // CI callbacks or build webhooks
                                 "/uploads/**",    // serve uploaded images/files
                                 "/ws-chat/**",    // websocket endpoint (handshake might be public)
-                                "/error",
-                                "/api/user/login-phone",
-                                "/api/user/login",
-                                "/api/user/register",
-                                "/api/user/**/otp/**"// Spring default error endpoint (avoids weird blocking)
+                                "/error"// Spring default error endpoint (avoids weird blocking)
                         ).permitAll()
 
                         // Any other endpoint requires authentication (JWT must be valid).

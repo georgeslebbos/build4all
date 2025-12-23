@@ -322,7 +322,8 @@ public class AuthController {
                     "message", "Your account is inactive. Confirm reactivation.",
                     "token", tempToken,
                     "user", inactiveUserData,
-                    "userType", "user"
+                    "userType", "user",
+                    "ownerProjectLinkId", ownerProjectLinkId
             ));
         }
 

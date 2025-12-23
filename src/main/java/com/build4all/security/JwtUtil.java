@@ -62,7 +62,8 @@ public class JwtUtil {
     public String generateToken(Users user) {
 
         var builder = Jwts.builder()
-                .setSubject(user.getEmail())
+                .setSubject(String.valueOf(user.getId()))
+                //.setSubject(user.getEmail())
                 .claim("id", user.getId())
                 .claim("username", user.getUsername())
                 .claim("role", "USER");
