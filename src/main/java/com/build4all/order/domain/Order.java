@@ -140,6 +140,14 @@ public class Order {
     @Column(name = "shipping_method_name")
     private String shippingMethodName;
 
+    /** Full address line (street/building/apartment, etc.) */
+    @Column(name = "shipping_address", length = 500)
+    private String shippingAddress;
+
+    /** Phone number used for delivery contact */
+    @Column(name = "shipping_phone", length = 50)
+    private String shippingPhone;
+
     /** Shipping total amount (without taxes if you separate them) */
     @Column(name = "shipping_total", precision = 10, scale = 2)
     private BigDecimal shippingTotal = BigDecimal.ZERO;
@@ -265,6 +273,12 @@ public class Order {
     public void setShippingMethodName(String shippingMethodName) {
         this.shippingMethodName = shippingMethodName;
     }
+
+    public String getShippingAddress() { return shippingAddress; }
+    public void setShippingAddress(String shippingAddress) { this.shippingAddress = shippingAddress; }
+
+    public String getShippingPhone() { return shippingPhone; }
+    public void setShippingPhone(String shippingPhone) { this.shippingPhone = shippingPhone; }
 
     public BigDecimal getShippingTotal() {
         return shippingTotal;

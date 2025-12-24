@@ -551,6 +551,7 @@ public class AuthController {
                     "message", "Business login successful",
                     "token", token,
                     "business", businessData,
+                    "ownerProjectLinkId", ownerProjectLinkId,
                     "wasInactive", false
             ));
         } catch (RuntimeException e) {

@@ -483,6 +483,8 @@ public class OrderController {
         header.put("shippingPostalCode", order.getShippingPostalCode());
         header.put("shippingMethodId", order.getShippingMethodId());
         header.put("shippingMethodName", order.getShippingMethodName());
+        header.put("shippingAddress", order.getShippingAddress());
+        header.put("shippingPhone", order.getShippingPhone());
         header.put("shippingTotal", order.getShippingTotal());
         header.put("itemTaxTotal", order.getItemTaxTotal());
         header.put("shippingTaxTotal", order.getShippingTaxTotal());

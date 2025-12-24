@@ -96,7 +96,8 @@ public class JwtUtil {
         }
 
         var builder = Jwts.builder()
-                .setSubject(business.getEmail())         // Business principal is email (your getUsername returns email)
+                //.setSubject(business.getEmail())         // Business principal is email (your getUsername returns email)
+                .setSubject(String.valueOf(business.getId()))
                 .claim("id", business.getId())           // Businesses primary key
                 .claim("username", business.getUsername())
                 .claim("role", roleName);
