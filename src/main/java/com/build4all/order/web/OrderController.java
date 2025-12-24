@@ -661,6 +661,73 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 
+    /**
+     * GET /api/orders/myorders/last-shipping
+     *
+     * Purpose:
+     * - Prefill the checkout shipping form using the user's most recent order.
+     * - This helps the user avoid re-entering shipping details every time.
+     *
+     * What it returns (scalars only, no entities):
+     * - countryId, countryName
+     * - regionId, regionName
+     * - city, postalCode
+     * - address (addressLine)
+     * - phone
+     *
+     * Why scalars only?
+     * - shippingCountry / shippingRegion are often LAZY @ManyToOne entities (Country/Region).
+     * - Returning entities can cause: "Could not initialize proxy ... no session".
+     * - Therefore we extract id/name and return safe primitives.
+     *
+     * Response when no previous order exists:
+     * - All fields are returned as null (client shows empty form).
+     */
+    @GetMapping("/myorders/last-shipping-address")
+    @Operation(summary = "USER: Get last used shipping address for prefilling checkout")
+    public ResponseEntity<?> myLastShippingAddress(@RequestHeader("Authorization") String auth) {
+
+        // 1) Identify the current user from JWT
+        Long userId = jwt.extractId(strip(auth));
+
+        // 2) Load the most recent order (recommended: repository fetches shippingCountry/shippingRegion eagerly)
+        Order last = orderRepo.findTopByUser_IdOrderByOrderDateDesc(userId).orElse(null);
+
+        // 3) Build response map (NOT Map.of, because Map.of does not allow null values)
+        Map<String, Object> res = new LinkedHashMap<>();
+
+        // 4) No previous order => return all fields as null
+        if (last == null) {
+            res.put("countryId", null);
+            res.put("countryName", null);
+            res.put("regionId", null);
+            res.put("regionName", null);
+            res.put("city", null);
+            res.put("postalCode", null);
+            res.put("address", null);
+            res.put("phone", null);
+            return ResponseEntity.ok(res);
+        }
+
+        // 5) Extract scalars from LAZY entities safely (avoid serializing proxies)
+        Object country = last.getShippingCountry(); // Country entity or null
+        Object region  = last.getShippingRegion();  // Region entity or null
+
+        // NOTE: tryGet(...) is your controller reflection helper (already defined above)
+        res.put("countryId",   country == null ? null : tryGet(country, "getId"));
+        res.put("countryName", country == null ? null : tryGet(country, "getName", "getTitle"));
+        res.put("regionId",    region == null ? null : tryGet(region, "getId"));
+        res.put("regionName",  region == null ? null : tryGet(region, "getName", "getTitle"));
+
+        // 6) Simple string fields stored on order header
+        res.put("city", last.getShippingCity());
+        res.put("postalCode", last.getShippingPostalCode());
+        res.put("address", last.getShippingAddress());
+        res.put("phone", last.getShippingPhone());
+
+        return ResponseEntity.ok(res);
+    }
+
     /* =========================================================================================
        BUSINESS APIs (Merchant dashboards)
        ========================================================================================= */
