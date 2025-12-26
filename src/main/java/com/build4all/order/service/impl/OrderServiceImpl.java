@@ -979,6 +979,8 @@ public class OrderServiceImpl implements OrderService {
             order.setShippingPostalCode(addr.getPostalCode());
             order.setShippingMethodId(addr.getShippingMethodId());
             order.setShippingMethodName(addr.getShippingMethodName());
+            order.setShippingAddress(addr.getAddressLine());
+            order.setShippingPhone(addr.getPhone());
         }
 
         // Pricing totals saved on header (auditing/reporting)

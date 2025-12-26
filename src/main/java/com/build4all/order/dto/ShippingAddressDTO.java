@@ -78,6 +78,18 @@ public class ShippingAddressDTO {
      */
     private String shippingMethodName;
 
+    /**
+     * Full address line (street/building/apartment, etc.)
+     * - Saved on Order.shippingAddress
+     */
+    private String addressLine;
+
+    /**
+     * Delivery contact phone
+     * - Saved on Order.shippingPhone
+     */
+    private String phone;
+
     /** No-arg constructor (needed by Jackson) */
     public ShippingAddressDTO() { }
 
@@ -100,4 +112,10 @@ public class ShippingAddressDTO {
 
     public String getShippingMethodName() { return shippingMethodName; }
     public void setShippingMethodName(String shippingMethodName) { this.shippingMethodName = shippingMethodName; }
+
+    public String getAddressLine() { return addressLine; }
+    public void setAddressLine(String addressLine) { this.addressLine = addressLine; }
+
+    public String getPhone() { return phone; }
+    public void setPhone(String phone) { this.phone = phone; }
 }

@@ -288,4 +288,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
            order by count(distinct o.id) desc
            """)
     List<Object[]> countOrdersGroupedByOwnerProject();
+
+   @EntityGraph(attributePaths = { "shippingCountry", "shippingRegion" })
+    Optional<Order> findTopByUser_IdOrderByOrderDateDesc(Long userId);
 }
