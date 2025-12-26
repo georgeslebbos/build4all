@@ -22,6 +22,11 @@ public class Project {
 
     @Column(name = "is_active")
     private boolean active = true;
+    
+    @Enumerated(EnumType.STRING)
+    @Column(name = "project_type", nullable = false)
+    private ProjectType projectType = ProjectType.ECOMMERCE;
+
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
@@ -55,6 +60,14 @@ public class Project {
 
     public Set<AdminUserProject> getAdminLinks() { return adminLinks; }
     public void setAdminLinks(Set<AdminUserProject> adminLinks) { this.adminLinks = adminLinks; }
+
+    public ProjectType getProjectType() { 
+        return projectType; 
+    }
+
+    public void setProjectType(ProjectType projectType) { 
+        this.projectType = projectType; 
+    }
 
     @PrePersist
     public void prePersist() {

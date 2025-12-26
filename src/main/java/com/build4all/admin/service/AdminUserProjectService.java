@@ -6,6 +6,8 @@ import com.build4all.admin.dto.AdminAppAssignmentRequest;
 import com.build4all.admin.dto.AdminAppAssignmentResponse;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.admin.repository.AdminUsersRepository;
+import com.build4all.app.domain.AppRuntimeConfig;
+import com.build4all.app.repository.AppRuntimeConfigRepository;
 import com.build4all.catalog.domain.Currency;
 import com.build4all.catalog.repository.CurrencyRepository;
 import com.build4all.project.domain.Project;
@@ -17,7 +19,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths; // <-- IMPORTANT: java.nio.file.Paths (no swagger Paths!)
+import java.nio.file.Paths; // ✅ java.nio.file.Paths
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -34,12 +36,9 @@ import java.util.UUID;
  * and stores metadata such as:
  *   slug, appName, license validity, build artifact URLs, themeId, currency, logoUrl, ...
  *
- * This service provides:
- * - listing apps for an admin
- * - creating/updating (assign) an app row keyed by slug
- * - updating logo file & storing URL
- * - updating license dates
- * - removing an app row
+ * Option A:
+ *   Store runtime config JSON (nav/home/features/branding/apiBaseUrlOverride) in AppRuntimeConfig table
+ *   linked by app_id -> AdminUserProject.
  */
 public class AdminUserProjectService {
 
@@ -47,23 +46,23 @@ public class AdminUserProjectService {
     private final ProjectRepository projectRepo;
     private final AdminUserProjectRepository linkRepo;
     private final CurrencyRepository currencyRepository;
+    private final AppRuntimeConfigRepository runtimeRepo;
 
     public AdminUserProjectService(AdminUsersRepository adminRepo,
                                    ProjectRepository projectRepo,
                                    AdminUserProjectRepository linkRepo,
-                                   CurrencyRepository currencyRepository) {
+                                   CurrencyRepository currencyRepository,
+                                   AppRuntimeConfigRepository runtimeRepo) {
         this.adminRepo = adminRepo;
         this.projectRepo = projectRepo;
         this.linkRepo = linkRepo;
         this.currencyRepository = currencyRepository;
+        this.runtimeRepo = runtimeRepo;
     }
 
     /** List all apps (rows) for an owner (adminId). */
     @Transactional(readOnly = true)
     public List<AdminAppAssignmentResponse> list(Long adminId) {
-        // Loads all AdminUserProject links for the admin, then maps each link to a response DTO.
-        // Note: l.getProject() is LAZY in the entity, but inside a @Transactional(readOnly=true)
-        // the persistence context is open, so accessing project fields works.
         return linkRepo.findByAdmin_AdminId(adminId).stream()
                 .map(l -> new AdminAppAssignmentResponse(
                         l.getProject().getId(),
@@ -79,7 +78,6 @@ public class AdminUserProjectService {
                         nz(l.getIpaUrl()),
                         nz(l.getBundleUrl()),
                         nz(l.getLogoUrl()),
-                        // Currency is optional; if set, include code and symbol
                         l.getCurrency() != null ? l.getCurrency().getCode() : null,
                         l.getCurrency() != null ? l.getCurrency().getSymbol() : null
                 ))
@@ -89,7 +87,6 @@ public class AdminUserProjectService {
     /** Get one app row (owner+project+slug). */
     @Transactional(readOnly = true)
     public AdminUserProject get(Long adminId, Long projectId, String slug) {
-        // Normalizes slug (slugify) then queries for the exact row.
         return linkRepo.findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slugify(slug))
                 .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
     }
@@ -98,31 +95,29 @@ public class AdminUserProjectService {
      * Create or update a single APP under (owner, project) keyed by slug.
      * - If slug omitted: derive from appName (slugify)
      * - Ensure uniqueness per (owner, project) by appending -2, -3...
+     *
+     * Also upserts runtime config (Option A) in AppRuntimeConfig table.
      */
     @Transactional
     public void assign(Long adminId, AdminAppAssignmentRequest req) {
 
-        // 1) Load the AdminUser who owns/manages the app assignment.
+        // 1) Load owner/admin
         AdminUser admin = adminRepo.findByAdminId(adminId)
                 .orElseThrow(() -> new IllegalArgumentException("Admin not found"));
 
-        // 2) Load the Project to be linked.
+        // 2) Load project
         Project project = projectRepo.findById(req.getProjectId())
                 .orElseThrow(() -> new IllegalArgumentException("Project not found"));
 
-        // 3) Build the base slug:
-        //    - use req.slug if provided
-        //    - otherwise derive it from req.appName
+        // 3) Base slug
         String baseSlug = (req.getSlug() != null && !req.getSlug().isBlank())
                 ? slugify(req.getSlug())
                 : slugify(req.getAppName());
 
-        // 4) Ensure slug uniqueness within the scope (adminId, projectId).
-        //    If base slug is taken, it returns base-2, base-3, ...
+        // 4) Ensure uniqueness
         String uniqueSlug = ensureUniqueSlug(admin.getAdminId(), project.getId(), baseSlug);
 
-        // 5) Try to find an existing link row with that unique slug.
-        //    If found => update; if not found => create.
+        // 5) Find existing link row
         AdminUserProject link = linkRepo
                 .findByAdmin_AdminIdAndProject_IdAndSlug(admin.getAdminId(), project.getId(), uniqueSlug)
                 .orElse(null);
@@ -130,7 +125,6 @@ public class AdminUserProjectService {
         LocalDate now = LocalDate.now();
 
         if (link == null) {
-            // CREATE: build a new association row, with default validity dates if not provided.
             link = new AdminUserProject(
                     admin,
                     project,
@@ -141,13 +135,12 @@ public class AdminUserProjectService {
             link.setStatus("ACTIVE");
             link.setSlug(uniqueSlug);
         } else {
-            // UPDATE: only overwrite fields that are present in the request.
             if (req.getLicenseId() != null) link.setLicenseId(req.getLicenseId());
             if (req.getValidFrom() != null) link.setValidFrom(req.getValidFrom());
             if (req.getEndTo() != null) link.setEndTo(req.getEndTo());
         }
 
-        // Optional updates for app metadata.
+        // App metadata
         if (req.getAppName() != null && !req.getAppName().isBlank()) {
             link.setAppName(req.getAppName());
         }
@@ -155,61 +148,66 @@ public class AdminUserProjectService {
             link.setThemeId(req.getThemeId());
         }
 
-        // 👇 NEW – set currency per app
-        // If currencyCode is provided, it loads the Currency entity and assigns it to this AUP link.
+        // Currency per app
         if (req.getCurrencyCode() != null && !req.getCurrencyCode().isBlank()) {
             Currency currency = currencyRepository.findByCodeIgnoreCase(req.getCurrencyCode())
                     .orElseThrow(() -> new IllegalArgumentException("Unknown currency code: " + req.getCurrencyCode()));
             link.setCurrency(currency);
         }
 
-        // If licenseId is still missing, generate a default unique-ish license identifier.
+        // License fallback
         if (link.getLicenseId() == null || link.getLicenseId().isBlank()) {
             link.setLicenseId("LIC-" + admin.getAdminId() + "-" + project.getId() + "-" + now + "-" + uniqueSlug);
         }
 
-        // Resets artifact URLs on assign (so a rebuild may be required after changes).
-        // apkUrl/bundleUrl become null; ipaUrl is not reset here (kept as-is).
+        // Reset build artifacts on assign
         link.setApkUrl(null);
         link.setBundleUrl(null);
 
-        // Persist create/update.
-        linkRepo.save(link);
+        // ✅ SAVE FIRST, then use a stable variable (fixes "effectively final" issue)
+        AdminUserProject savedLink = linkRepo.save(link);
+
+        // ✅ Upsert runtime config (Option A)
+        AppRuntimeConfig cfg = runtimeRepo.findByApp_Id(savedLink.getId()).orElseGet(() -> {
+            AppRuntimeConfig c = new AppRuntimeConfig();
+            c.setApp(savedLink);
+            return c;
+        });
+
+        // Only overwrite when provided
+        if (req.getNavJson() != null) cfg.setNavJson(req.getNavJson());
+        if (req.getHomeJson() != null) cfg.setHomeJson(req.getHomeJson());
+        if (req.getEnabledFeaturesJson() != null) cfg.setEnabledFeaturesJson(req.getEnabledFeaturesJson());
+        if (req.getBrandingJson() != null) cfg.setBrandingJson(req.getBrandingJson());
+        if (req.getApiBaseUrlOverride() != null) cfg.setApiBaseUrlOverride(req.getApiBaseUrlOverride());
+
+        runtimeRepo.save(cfg);
     }
 
     /** Upload & save logo, return its public URL. */
     @Transactional
     public String updateAppLogo(Long adminId, Long projectId, String slug, MultipartFile file) throws IOException {
 
-        // Validate input file.
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("Logo file is empty");
         }
 
-        // Ensure the link exists for this owner+project+slug.
-        var link = linkRepo.findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slugify(slug))
+        AdminUserProject link = linkRepo.findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slugify(slug))
                 .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
 
-        // Build upload directory: uploads/owner/{adminId}/{projectId}/{slug}/
         Path uploadDir = Paths.get("uploads/owner", String.valueOf(adminId), String.valueOf(projectId), slugify(slug));
         if (!Files.exists(uploadDir)) Files.createDirectories(uploadDir);
 
-        // Determine original filename and extension (default to .png if missing).
         String original = file.getOriginalFilename() == null ? "logo.png" : file.getOriginalFilename();
         String ext = original.lastIndexOf('.') >= 0 ? original.substring(original.lastIndexOf('.')) : ".png";
 
-        // Add a timestamp and UUID to avoid collisions and make filenames unique.
         String stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         String safe = UUID.randomUUID() + "_" + stamp + ext;
 
-        // Save the file, overwriting if same name exists (unlikely due to UUID+timestamp).
         Files.copy(file.getInputStream(), uploadDir.resolve(safe), StandardCopyOption.REPLACE_EXISTING);
 
-        // Public URL used by the frontend to load the logo.
-        // This assumes your Spring server serves "/uploads/**" as static content or via a controller.
         String publicUrl = "/uploads/owner/" + adminId + "/" + projectId + "/" + slugify(slug) + "/" + safe;
 
-        // Store the URL in DB so the app assignment always points to the latest uploaded logo.
         link.setLogoUrl(publicUrl);
         linkRepo.save(link);
 
@@ -220,12 +218,10 @@ public class AdminUserProjectService {
     @Transactional
     public void updateLicense(Long adminId, Long projectId, String slug, AdminAppAssignmentRequest req) {
 
-        // Load the exact AUP link row.
         AdminUserProject link = linkRepo
                 .findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slugify(slug))
                 .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
 
-        // Update only provided fields.
         if (req.getLicenseId() != null) link.setLicenseId(req.getLicenseId());
         if (req.getValidFrom() != null) link.setValidFrom(req.getValidFrom());
         if (req.getEndTo() != null) link.setEndTo(req.getEndTo());
@@ -236,45 +232,35 @@ public class AdminUserProjectService {
     /** Delete one app (row) under owner+project by slug. */
     @Transactional
     public void remove(Long adminId, Long projectId, String slug) {
-        // If the row exists, delete it. If it doesn't exist, do nothing.
         linkRepo.findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slugify(slug))
                 .ifPresent(linkRepo::delete);
+
+        // Optional: also delete runtime config if you have cascade off
+        // runtimeRepo.deleteByApp_Id(linkId) ... (depends on your schema/repo)
     }
 
     // ---------- helpers ----------
 
     private static String slugify(String s) {
-        // Converts any string into a URL-friendly slug:
-        // - lowercase
-        // - replace non-alphanumeric sequences with "-"
-        // - trim leading/trailing "-"
         if (s == null) return "app";
         return s.trim().toLowerCase()
                 .replaceAll("[^a-z0-9]+", "-")
                 .replaceAll("(^-|-$)", "");
     }
 
-    /** Ensure uniqueness per (owner, project) by appending -2, -3, ... */
     private String ensureUniqueSlug(Long ownerId, Long projectId, String baseSlug) {
-        // If baseSlug is empty, fallback to "app".
         if (baseSlug == null || baseSlug.isBlank()) baseSlug = "app";
 
         String candidate = baseSlug;
         int i = 2;
 
-        // Loop until we find a slug that doesn't already exist in the database for this owner+project.
         while (linkRepo.existsByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, candidate)) {
             candidate = baseSlug + "-" + i;
             i++;
-
-            // Safety guard to avoid infinite loops in extreme cases.
-            if (i > 500) {
-                throw new IllegalStateException("Could not generate a unique slug");
-            }
+            if (i > 500) throw new IllegalStateException("Could not generate a unique slug");
         }
         return candidate;
     }
 
-    // Null-safe string helper used when building response DTOs (avoid returning null strings to clients).
     private static String nz(String s) { return s == null ? "" : s; }
 }

@@ -1,6 +1,7 @@
 package com.build4all.project.web;
 
 import com.build4all.project.domain.Project;
+import com.build4all.project.domain.ProjectType;
 import com.build4all.project.service.ProjectService;
 import com.build4all.security.JwtUtil;
 import io.swagger.v3.oas.annotations.Operation;
@@ -66,8 +67,9 @@ public class ProjectController {
             String name = (String) body.get("projectName");
             String description = (String) body.get("description");
             Boolean active = body.get("active") == null ? null : Boolean.valueOf(body.get("active").toString());
+            ProjectType projectType = parseProjectType(body.get("projectType"));
 
-            Project p = service.create(name, description, active);
+            Project p = service.create(name, description, active,projectType);
 
             // If Owner: link to self and force pending (inactive)
             if (isOwner(auth)) {
@@ -123,6 +125,7 @@ public class ProjectController {
             String name = (String) body.get("projectName");
             String description = (String) body.get("description");
             Boolean active = body.get("active") == null ? null : Boolean.valueOf(body.get("active").toString());
+            ProjectType projectType = parseProjectType(body.get("projectType"));
 
             // Optional safety: owners may edit only their projects and can't activate
             if (isOwner(auth)) {
@@ -135,7 +138,7 @@ public class ProjectController {
                 }
             }
 
-            return ResponseEntity.ok(service.update(id, name, description, active));
+            return ResponseEntity.ok(service.update(id, name, description, active,projectType));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
@@ -148,4 +151,16 @@ public class ProjectController {
         service.delete(id);
         return ResponseEntity.noContent().build();
     }
+    
+    private ProjectType parseProjectType(Object raw) {
+        if (raw == null) return null;
+        String v = raw.toString().trim().toUpperCase();
+        if (v.isBlank()) return null;
+        try {
+            return ProjectType.valueOf(v);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid projectType. Allowed: ECOMMERCE, SERVICES, ACTIVITIES");
+        }
+    }
+
 }

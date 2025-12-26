@@ -1,5 +1,7 @@
+// src/main/java/com/build4all/app/service/CiBuildService.java
 package com.build4all.app.service;
 
+import com.build4all.app.dto.CiDispatchResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -9,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -24,7 +27,7 @@ public class CiBuildService {
     @Value("${ci.webhook.url:}")
     private String webhookUrl;
 
-    /** GitHub PAT with "repo" scope (and usually "workflow"). */
+    /** GitHub PAT with repo access. */
     @Value("${ci.webhook.token:}")
     private String webhookToken;
 
@@ -38,7 +41,7 @@ public class CiBuildService {
     @Value("${ci.repo.branch:main}")
     private String repoBranch;
 
-    // Mobile runtime defaults (nested into RUNTIME to keep ≤10 top-level props)
+    // Mobile runtime defaults
     @Value("${mobile.apiBaseUrl:http://192.168.1.7:8080}")
     private String mobileApiBaseUrl;
 
@@ -65,10 +68,13 @@ public class CiBuildService {
     /**
      * Upload small logo bytes to GitHub (Contents API) to get a stable raw URL.
      * If appLogoUrl is already absolute (http/https), it’s returned as-is.
+     * (Currently not used; we rely on /uploads path + API_BASE_URL on CI side.)
      */
+    @SuppressWarnings("unused")
     private String ensureLogoRawUrl(String slug, String appName, String appLogoUrl, byte[] logoBytesOpt) {
         // Use given absolute URL if present
-        if (notBlank(appLogoUrl) && (appLogoUrl.startsWith("http://") || appLogoUrl.startsWith("https://"))) {
+        if (notBlank(appLogoUrl) &&
+                (appLogoUrl.startsWith("http://") || appLogoUrl.startsWith("https://"))) {
             return appLogoUrl;
         }
         // Nothing to upload
@@ -105,66 +111,132 @@ public class CiBuildService {
 
             int code = resp.statusCode().value();
             String respBody = resp.bodyToMono(String.class).blockOptional().orElse("");
+
             if (code < 200 || code >= 300) {
                 log.error("Contents API FAILED (HTTP {}): {}", code, respBody);
                 return "";
             }
 
-            // public raw URL
-            String rawUrl = "https://raw.githubusercontent.com/" + repoOwner + "/" + repoName + "/" + repoBranch + "/" + path;
+            String rawUrl = "https://raw.githubusercontent.com/"
+                    + repoOwner + "/" + repoName + "/" + repoBranch + "/" + path;
             log.info("Uploaded logo to repo path={} rawUrl={}", path, rawUrl);
             return rawUrl;
+
         } catch (Exception e) {
             log.error("Contents API error: {}", e.toString());
             return "";
         }
     }
 
+    private static String b64(String s) {
+        if (s == null || s.isBlank()) return "";
+        return Base64.getEncoder().encodeToString(s.getBytes(StandardCharsets.UTF_8));
+    }
+
     /**
-     * Dispatch the workflow with ≤10 top-level properties.
-     * We pass a small APP_LOGO_URL (public), theme JSON, and nest runtime values under RUNTIME.
-     * @param currencyIdForBuild 
+     * Dispatch repository_dispatch and return FULL result (HTTP code + response body).
      */
-    public boolean dispatchOwnerAndroidBuild(
+    public CiDispatchResult dispatchOwnerAndroidBuild(
             long ownerId,
             long projectId,
-            String ownerProjectLinkId,  // pass real link.getId().toString()
+            String ownerProjectLinkId,
             String slug,
             String appName,
+            String appType,
             Long themeId,
             String appLogoUrl,
             String themeJson,
             byte[] logoBytesOpt,
-            Long currencyIdForBuild
+            Long currencyIdForBuild,
+            String apiBaseUrlOverride,
+            String navJson,
+            String homeJson,
+            String enabledFeaturesJson,
+            String brandingJson
     ) {
         if (!isConfigured()) {
-            log.warn("CI DISPATCH SKIPPED: ci.webhook.url/token not configured.");
-            return false;
+            String msg = "CI DISPATCH SKIPPED: ci.webhook.url/token not configured.";
+            log.warn(msg);
+            return new CiDispatchResult(false, 0, msg, "");
         }
 
         final String buildId = UUID.randomUUID().toString();
         final String opl = notBlank(ownerProjectLinkId) ? ownerProjectLinkId : (ownerId + "-" + projectId);
 
-        // Resolve logo URL (upload when needed)
-        String resolvedLogoUrl = ensureLogoRawUrl(slug, appName, appLogoUrl, logoBytesOpt);
+        // ---- normalize strings ----
+        String themeJsonNorm    = nz(themeJson);
+        String navJsonNorm      = nz(navJson);
+        String homeJsonNorm     = nz(homeJson);
+        String enabledJsonNorm  = nz(enabledFeaturesJson);
+        String brandingJsonNorm = nz(brandingJson);
 
-        Map<String, Object> runtime = new LinkedHashMap<>();
-        runtime.put("API_BASE_URL", mobileApiBaseUrl);
-        runtime.put("WS_PATH", mobileWsPath);
-        runtime.put("OWNER_ATTACH_MODE", mobileOwnerAttachMode);
-        runtime.put("APP_ROLE", mobileAppRole);
+        // ---- API base URL (override wins) ----
+        String effectiveApiBaseUrl = notBlank(apiBaseUrlOverride)
+                ? apiBaseUrlOverride.trim()
+                : mobileApiBaseUrl;
 
+        // ---- encode JSONs to B64 for Flutter ----
+        String themeB64    = b64(themeJsonNorm);
+        String navB64      = b64(navJsonNorm);
+        String homeB64     = b64(homeJsonNorm);
+        String enabledB64  = b64(enabledJsonNorm);
+        String brandingB64 = b64(brandingJsonNorm);
+
+        // ---- logoPath (relative) for BRANDING.logoPath ----
+        // appLogoUrl is like "/uploads/owner/..."
+        String logoPath = nz(appLogoUrl);
+
+        // ================== CONFIG OBJECT (nested) ==================
+        Map<String, Object> config = new LinkedHashMap<>();
+
+        config.put("OWNER_ID", ownerId);
+        config.put("PROJECT_ID", projectId);
+        config.put("OWNER_PROJECT_LINK_ID", opl);
+        config.put("SLUG", nz(slug));
+
+        config.put("APP_NAME", nz(appName));
+        config.put("APP_TYPE", nz(appType));
+
+        config.put("THEME_ID", themeId);
+        config.put("THEME_JSON", themeJsonNorm);
+        config.put("THEME_JSON_B64", themeB64);
+
+        config.put("CURRENCY_ID", currencyIdForBuild);
+        config.put("CURRENCY_CODE", null);
+        config.put("CURRENCY_SYMBOL", null);
+
+        // API info
+        config.put("API_BASE_URL_OVERRIDE", nz(apiBaseUrlOverride));
+        config.put("API_BASE_URL", nz(effectiveApiBaseUrl));
+
+        // runtime JSONs (raw + B64)
+        config.put("NAV_JSON", navJsonNorm);
+        config.put("HOME_JSON", homeJsonNorm);
+        config.put("ENABLED_FEATURES_JSON", enabledJsonNorm);
+        config.put("BRANDING_JSON", brandingJsonNorm);
+
+        config.put("NAV_JSON_B64", navB64);
+        config.put("HOME_JSON_B64", homeB64);
+        config.put("ENABLED_FEATURES_JSON_B64", enabledB64);
+        config.put("BRANDING_JSON_B64", brandingB64);
+
+        // logo info
+        config.put("LOGO_PATH", logoPath);
+
+        Map<String, Object> brandingMap = new LinkedHashMap<>();
+        brandingMap.put("logoPath", logoPath);
+        brandingMap.put("splashColor", "#FFFFFF"); // يمكن نعملها configurable بعدين
+        config.put("BRANDING", brandingMap);
+
+        // extra runtime stuff if you ever need it from workflow
+        config.put("WS_PATH", nz(mobileWsPath));
+        config.put("OWNER_ATTACH_MODE", nz(mobileOwnerAttachMode));
+        config.put("APP_ROLE", nz(mobileAppRole));
+
+        // ================== client_payload (<= 10 top-level keys) ==================
         Map<String, Object> clientPayload = new LinkedHashMap<>();
         clientPayload.put("BUILD_ID", buildId);
-        clientPayload.put("OWNER_ID", ownerId);
-        clientPayload.put("PROJECT_ID", projectId);
-        clientPayload.put("OWNER_PROJECT_LINK_ID", opl);
-        clientPayload.put("SLUG", nz(slug));
-        clientPayload.put("APP_NAME", nz(appName));
-        if (themeId != null) clientPayload.put("THEME_ID", themeId);
-        clientPayload.put("RUNTIME", runtime);               // 1 property
-        clientPayload.put("APP_LOGO_URL", nz(resolvedLogoUrl));
-        clientPayload.put("APP_THEME_JSON", nz(themeJson));  // ✅ palette JSON for workflow
+        clientPayload.put("CONFIG", config); // كل شي جوّا CONFIG, so only 2 top-level keys
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("event_type", "owner_app_build");
@@ -180,25 +252,35 @@ public class CiBuildService {
                     .block();
 
             if (resp == null) {
-                log.error("repository_dispatch -> null response");
-                return false;
+                String msg = "repository_dispatch -> null response";
+                log.error(msg);
+                return new CiDispatchResult(false, -1, msg, buildId);
             }
 
             int code = resp.statusCode().value();
             String body = resp.bodyToMono(String.class).blockOptional().orElse("");
-            if (code >= 200 && code < 300) {
+
+            boolean ok = code >= 200 && code < 300;
+            if (ok) {
                 log.info("repository_dispatch OK (BUILD_ID={}, HTTP {})", buildId, code);
-                return true;
             } else {
-                log.error("repository_dispatch FAILED (HTTP {}): {}", code, body);
-                return false;
+                log.error("repository_dispatch FAILED (BUILD_ID={}, HTTP {}): {}", buildId, code, body);
             }
+
+            return new CiDispatchResult(ok, code, body, buildId);
+
         } catch (Exception ex) {
-            log.error("repository_dispatch error: {}", ex.toString());
-            return false;
+            String msg = "repository_dispatch error: " + ex;
+            log.error(msg);
+            return new CiDispatchResult(false, -2, msg, buildId);
         }
     }
 
-    private static boolean notBlank(String s) { return s != null && !s.isBlank(); }
-    private static String nz(String s) { return s == null ? "" : s; }
+    private static boolean notBlank(String s) {
+        return s != null && !s.isBlank();
+    }
+
+    private static String nz(String s) {
+        return s == null ? "" : s;
+    }
 }

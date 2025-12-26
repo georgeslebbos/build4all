@@ -62,12 +62,12 @@ public class AdminAppRequestController {
      * Returns a minimal response containing identifiers used by the frontend:
      * adminId, projectId, slug.
      */
-    @PostMapping("/app-requests/{id}/approve")
+   /* @PostMapping("/app-requests/{id}/approve")
     public ApproveResponseDto approve(@PathVariable Long id) {
         AdminUserProject link = service.approve(id);
         return new ApproveResponseDto(link.getAdminId(), link.getProjectId(), link.getSlug());
     }
-
+*/
     /**
      * Reject an app request.
      *
@@ -75,10 +75,10 @@ public class AdminAppRequestController {
      * - Validate request exists
      * - Mark request as REJECTED (or delete it depending on your implementation)
      */
-    @PostMapping("/app-requests/{id}/reject")
+ /*   @PostMapping("/app-requests/{id}/reject")
     public void reject(@PathVariable Long id) {
         service.reject(id);
-    }
+    }*/
 
     // ✅ now app-scoped (slug in path)
     /**

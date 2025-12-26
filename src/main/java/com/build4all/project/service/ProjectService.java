@@ -5,6 +5,7 @@ import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.repository.AdminUsersRepository;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.project.domain.Project;
+import com.build4all.project.domain.ProjectType;
 import com.build4all.project.repository.ProjectRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,7 +35,8 @@ public class ProjectService {
     public Project findById(Long id) { return repo.findById(id).orElse(null); }
 
     @Transactional
-    public Project create(String name, String description, Boolean active) {
+    public Project create(String name, String description, Boolean active, ProjectType projectType)
+    {
         if (name == null || name.isBlank())
             throw new IllegalArgumentException("projectName is required");
         if (repo.existsByProjectNameIgnoreCase(name))
@@ -44,11 +46,13 @@ public class ProjectService {
         p.setProjectName(name.trim());
         p.setDescription(description);
         if (active != null) p.setActive(active);
+        p.setProjectType(projectType != null ? projectType : ProjectType.ECOMMERCE);
         return repo.save(p);
     }
 
     @Transactional
-    public Project update(Long id, String name, String description, Boolean active) {
+    public Project update(Long id, String name, String description, Boolean active, ProjectType projectType)
+ {
         Project p = repo.findById(id).orElseThrow(() -> new IllegalArgumentException("Project not found"));
         if (name != null && !name.isBlank()) {
             if (!p.getProjectName().equalsIgnoreCase(name) && repo.existsByProjectNameIgnoreCase(name))
@@ -57,6 +61,8 @@ public class ProjectService {
         }
         if (description != null) p.setDescription(description);
         if (active != null) p.setActive(active);
+        
+        if (projectType != null) p.setProjectType(projectType);
         return repo.save(p);
     }
 

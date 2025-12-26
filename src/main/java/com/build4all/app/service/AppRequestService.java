@@ -1,13 +1,17 @@
+// src/main/java/com/build4all/app/service/AppRequestService.java
 package com.build4all.app.service;
 
-import com.build4all.app.domain.AppRequest;
-import com.build4all.app.repository.AppRequestRepository;
-import com.build4all.catalog.domain.Currency;
-import com.build4all.catalog.repository.CurrencyRepository;
 import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.admin.repository.AdminUsersRepository;
+import com.build4all.app.domain.AppRequest;
+import com.build4all.app.domain.AppRuntimeConfig;
+import com.build4all.app.dto.CiDispatchResult;
+import com.build4all.app.repository.AppRequestRepository;
+import com.build4all.app.repository.AppRuntimeConfigRepository;
+import com.build4all.catalog.domain.Currency;
+import com.build4all.catalog.repository.CurrencyRepository;
 import com.build4all.project.domain.Project;
 import com.build4all.project.repository.ProjectRepository;
 import com.build4all.theme.domain.Theme;
@@ -37,6 +41,7 @@ public class AppRequestService {
     private final ThemeRepository themeRepo;
     private final CiBuildService ciBuildService;
     private final CurrencyRepository currencyRepo;
+    private final AppRuntimeConfigRepository runtimeRepo;
 
     public AppRequestService(AppRequestRepository appRequestRepo,
                              AdminUserProjectRepository aupRepo,
@@ -44,7 +49,8 @@ public class AppRequestService {
                              ProjectRepository projectRepo,
                              ThemeRepository themeRepo,
                              CiBuildService ciBuildService,
-                             CurrencyRepository currencyRepo) {
+                             CurrencyRepository currencyRepo,
+                             AppRuntimeConfigRepository runtimeRepo) {
         this.appRequestRepo = appRequestRepo;
         this.aupRepo = aupRepo;
         this.adminRepo = adminRepo;
@@ -52,6 +58,7 @@ public class AppRequestService {
         this.themeRepo = themeRepo;
         this.ciBuildService = ciBuildService;
         this.currencyRepo = currencyRepo;
+        this.runtimeRepo = runtimeRepo;
     }
 
     /** Legacy JSON create (kept). */
@@ -72,24 +79,21 @@ public class AppRequestService {
         return appRequestRepo.save(r);
     }
 
-    /**
-     * Create AND auto-approve (multipart logo supported).
-     * - Enforces unique slug per (owner, project)
-     * - Saves logo to /uploads/owner/{owner}/{project}/{slug}/<uuid>_<stamp>.<ext>
-     * - Creates a Theme (if no themeId passed) and ties it to the app
-     * - Triggers CI with THEME_JSON loaded from Theme table
-     */
     @Transactional
     public AdminUserProject createAndAutoApprove(Long ownerId, Long projectId,
                                                  String appName, String slug,
                                                  MultipartFile logoFile,
                                                  Long themeId, String notes,
                                                  String themeJson,
-                                                 Long currencyId) throws IOException {
+                                                 Long currencyId,
+                                                 String navJson,
+                                                 String homeJson,
+                                                 String enabledFeaturesJson,
+                                                 String brandingJson,
+                                                 String apiBaseUrlOverride
+    ) throws IOException {
 
-        String base = (slug != null && !slug.isBlank())
-                ? slugify(slug)
-                : slugify(appName);
+        String base = (slug != null && !slug.isBlank()) ? slugify(slug) : slugify(appName);
         String uniqueSlug = ensureUniqueSlug(ownerId, projectId, base);
 
         String logoUrl = null;
@@ -99,9 +103,7 @@ public class AppRequestService {
             logoBytes = logoFile.getBytes();
         }
 
-        // ✅ RESOLVE THEME ID SAFELY (don’t trust raw themeId from client)
         Long chosenThemeId = resolveThemeIdFromRaw(themeId);
-
 
         AppRequest r = new AppRequest();
         r.setOwnerId(ownerId);
@@ -109,150 +111,41 @@ public class AppRequestService {
         r.setAppName(appName);
         r.setSlug(uniqueSlug);
         r.setLogoUrl(logoUrl);
-        r.setThemeId(chosenThemeId);   // ✅ always valid or null
+        r.setThemeId(chosenThemeId);
         r.setNotes(notes);
         r.setStatus("APPROVED");
         r.setThemeJson(themeJson);
-        r.setCurrencyId(currencyId);   // 🪙 currency per app
+        r.setCurrencyId(currencyId);
         r = appRequestRepo.save(r);
 
-        return provisionAndTrigger(r, logoBytes);
+        return provisionAndTrigger(
+                r,
+                logoBytes,
+                navJson,
+                homeJson,
+                enabledFeaturesJson,
+                brandingJson,
+                apiBaseUrlOverride
+        );
     }
 
-    @Transactional
-    public AdminUserProject approve(Long requestId) {
-        AppRequest req = appRequestRepo.findById(requestId)
-                .orElseThrow(() -> new IllegalArgumentException("Request not found"));
-        if (!"PENDING".equals(req.getStatus())) {
-            throw new IllegalStateException("Request already decided");
-        }
-        req.setStatus("APPROVED");
-        appRequestRepo.save(req);
+    // ---------------- internal ----------------
 
-  
-        Long ensuredThemeId = resolveThemeId(req);
-        req.setThemeId(ensuredThemeId);
-        appRequestRepo.save(req);
-
-        // no logo bytes here; only relative url (if any)
-        return provisionAndTrigger(req, null);
-    }
-
-    @Transactional
-    public void reject(Long requestId) {
-        AppRequest req = appRequestRepo.findById(requestId)
-                .orElseThrow(() -> new IllegalArgumentException("Request not found"));
-        if (!"PENDING".equals(req.getStatus())) {
-            throw new IllegalStateException("Request already decided");
-        }
-        req.setStatus("REJECTED");
-        appRequestRepo.save(req);
-    }
-
-    // ---------- Artifact setters (APK/AAB/IPA) ----------
-
-    @Transactional
-    public AdminUserProject setApkUrl(Long adminId, Long projectId, String slug, String apkUrl) {
-        AdminUserProject link = aupRepo
-                .findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slugify(slug))
-                .orElseThrow(() -> new IllegalArgumentException("OwnerProject app not found"));
-        link.setApkUrl(apkUrl);
-        log.info("Saved apkUrl via owner/project/slug: ownerId={}, projectId={}, slug={}, url={}", adminId, projectId, slug, apkUrl);
-        return aupRepo.save(link);
-    }
-
-    /** Direct by PK (used by CI callback). */
-    @Transactional
-    public void setApkUrlByLinkId(Long linkId, String apkUrl) {
-        AdminUserProject link = aupRepo.findById(linkId)
-                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
-        link.setApkUrl(apkUrl);
-        aupRepo.save(link);
-        log.info("Saved apkUrl (no-owner-check) linkId={} -> {}", linkId, apkUrl);
-    }
-
-    // --- Owner-checked variants for relative paths under /uploads (kept) ---
-
-    @Transactional
-    public void setApkUrlByLinkId(Long ownerId, Long linkId, String relUrl) {
-        AdminUserProject row = aupRepo.findById(linkId)
-                .orElseThrow(() -> new IllegalArgumentException("App link not found"));
-        if (row.getAdmin() == null || !ownerId.equals(row.getAdmin().getAdminId())) {
-            throw new SecurityException("Forbidden: link does not belong to this owner");
-        }
-        row.setApkUrl(normalizeRel(relUrl));
-        aupRepo.save(row);
-        log.info("Saved apkUrl (owner-checked) ownerId={} linkId={} -> {}", ownerId, linkId, relUrl);
-    }
-
-    /** Direct by PK for AAB/bundle (used by CI callback). */
-    @Transactional
-    public void setBundleUrlByLinkId(Long linkId, String bundleUrl) {
-        AdminUserProject link = aupRepo.findById(linkId)
-                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
-        link.setBundleUrl(bundleUrl);
-        aupRepo.save(link);
-        log.info("Saved bundleUrl (no-owner-check) linkId={} -> {}", linkId, bundleUrl);
-    }
-
-    @Transactional
-    public void setIpaUrlByLinkId(Long ownerId, Long linkId, String relUrl) {
-        AdminUserProject row = aupRepo.findById(linkId)
-                .orElseThrow(() -> new IllegalArgumentException("App link not found"));
-        if (row.getAdmin() == null || !ownerId.equals(row.getAdmin().getAdminId())) {
-            throw new SecurityException("Forbidden: link does not belong to this owner");
-        }
-        row.setIpaUrl(normalizeRel(relUrl));
-        aupRepo.save(row);
-    }
-
-    @Transactional
-    public void setIpaUrlByOwnerProjectSlug(Long ownerId, Long projectId, String slug, String relUrl) {
-        AdminUserProject row = aupRepo
-                .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slugify(slug))
-                .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
-        row.setIpaUrl(normalizeRel(relUrl));
-        aupRepo.save(row);
-    }
-
-    @Transactional
-    public void setApkUrlByOwnerProjectSlug(Long ownerId, Long projectId, String slug, String relUrl) {
-        AdminUserProject row = aupRepo
-                .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slugify(slug))
-                .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
-        row.setApkUrl(normalizeRel(relUrl));
-        aupRepo.save(row);
-    }
-
-    @Transactional
-    public void setBundleUrlByLinkId(Long ownerId, Long linkId, String relUrl) {
-        AdminUserProject row = aupRepo.findById(linkId)
-                .orElseThrow(() -> new IllegalArgumentException("App link not found"));
-        if (row.getAdmin() == null || !ownerId.equals(row.getAdmin().getAdminId())) {
-            throw new SecurityException("Forbidden: link does not belong to this owner");
-        }
-        row.setBundleUrl(normalizeRel(relUrl));
-        aupRepo.save(row);
-    }
-
-    @Transactional
-    public void setBundleUrlByOwnerProjectSlug(Long ownerId, Long projectId, String slug, String relUrl) {
-        AdminUserProject row = aupRepo
-                .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slugify(slug))
-                .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
-        row.setBundleUrl(normalizeRel(relUrl));
-        aupRepo.save(row);
-    }
-
-    // ---------- internal ----------
-
-    private AdminUserProject provisionAndTrigger(AppRequest req, byte[] logoBytesOpt) {
+    private AdminUserProject provisionAndTrigger(AppRequest req,
+                                                 byte[] logoBytesOpt,
+                                                 String navJson,
+                                                 String homeJson,
+                                                 String enabledFeaturesJson,
+                                                 String brandingJson,
+                                                 String apiBaseUrlOverride
+    ) {
         AdminUser owner = adminRepo.findById(req.getOwnerId())
                 .orElseThrow(() -> new IllegalArgumentException("Owner(admin) not found"));
         Project project = projectRepo.findById(req.getProjectId())
                 .orElseThrow(() -> new IllegalArgumentException("Project not found"));
 
         Long chosenThemeId = resolveThemeId(req);
+
         String desiredSlug = (req.getSlug() != null && !req.getSlug().isBlank())
                 ? req.getSlug().trim().toLowerCase()
                 : slugify(req.getAppName());
@@ -276,7 +169,6 @@ public class AppRequestService {
         link.setEndTo(end);
         link.setThemeId(chosenThemeId);
 
-        // 🪙 NEW: set currency per app if provided on request
         Long currencyId = req.getCurrencyId();
         if (currencyId != null) {
             Currency c = currencyRepo.findById(currencyId)
@@ -292,37 +184,87 @@ public class AppRequestService {
         link.setApkUrl(null);
         link.setIpaUrl(null);
         link.setBundleUrl(null);
+
         link = aupRepo.save(link);
 
-        String ownerProjectLinkId = String.valueOf(link.getId()); // REAL PK
+        // Save runtime JSON configs if provided
+        upsertRuntimeConfig(link, navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride);
+
+        String ownerProjectLinkId = String.valueOf(link.getId());
         Long currencyIdForBuild = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
 
-       
         String themeJson = resolveThemeJson(chosenThemeId, req.getThemeJson());
 
-        boolean ok = ciBuildService.dispatchOwnerAndroidBuild(
-                owner.getAdminId(),
-                project.getId(),
-                ownerProjectLinkId,
-                uniqueSlug,
-                req.getAppName(),
-                chosenThemeId,
-                req.getLogoUrl(),    // may be relative; service will upload logoBytesOpt to repo
-                themeJson,           // palette JSON to CI
-                logoBytesOpt,
-                currencyIdForBuild   // 🪙 send to CI
-        );
+        // ✅ APP_TYPE من الـ ProjectType (fallback لو null)
+        String appType = (project.getProjectType() != null)
+                ? project.getProjectType().name()
+                : "ECOMMERCE";
 
-        if (!ok) {
-            log.warn("CI dispatch failed or skipped; apkUrl remains null until a successful run.");
-        } else {
-            log.info("CI dispatch OK (ownerId={}, projectId={}, linkId={}, slug={})",
-                    owner.getAdminId(), project.getId(), link.getId(), uniqueSlug);
-        }
+        // ✅ dispatch with full config (CONFIG.* keys للـ --dart-define)
+      
+        		CiDispatchResult res = ciBuildService.dispatchOwnerAndroidBuild(
+        		        owner.getAdminId(),
+        		        project.getId(),
+        		        ownerProjectLinkId,
+        		        uniqueSlug,
+        		        req.getAppName(),
+        		        appType,
+        		        chosenThemeId,
+        		        req.getLogoUrl(),
+        		        themeJson,
+        		        logoBytesOpt,
+        		        currencyIdForBuild,
+        		        apiBaseUrlOverride,
+        		        navJson,
+        		        homeJson,
+        		        enabledFeaturesJson,
+        		        brandingJson
+        		);
+
+        		if (!res.ok()) {
+        		    String msg = "CI dispatch failed (HTTP " + res.httpCode() + "): " + res.responseBody();
+        		    log.error("{}", msg);
+        		    throw new IllegalStateException(msg);
+        		}
+
+    
+        log.info("CI dispatch OK (buildId={}, ownerId={}, projectId={}, linkId={}, slug={})",
+                res.buildId(), owner.getAdminId(), project.getId(), link.getId(), uniqueSlug);
+
         return link;
     }
 
-  
+    private void upsertRuntimeConfig(AdminUserProject link,
+                                     String navJson,
+                                     String homeJson,
+                                     String enabledFeaturesJson,
+                                     String brandingJson,
+                                     String apiBaseUrlOverride) {
+
+        boolean hasAny =
+                (navJson != null && !navJson.isBlank()) ||
+                        (homeJson != null && !homeJson.isBlank()) ||
+                        (enabledFeaturesJson != null && !enabledFeaturesJson.isBlank()) ||
+                        (brandingJson != null && !brandingJson.isBlank()) ||
+                        (apiBaseUrlOverride != null && !apiBaseUrlOverride.isBlank());
+
+        if (!hasAny) return;
+
+        AppRuntimeConfig cfg = runtimeRepo.findByApp_Id(link.getId()).orElseGet(() -> {
+            AppRuntimeConfig c = new AppRuntimeConfig();
+            c.setApp(link);
+            return c;
+        });
+
+        if (navJson != null) cfg.setNavJson(navJson);
+        if (homeJson != null) cfg.setHomeJson(homeJson);
+        if (enabledFeaturesJson != null) cfg.setEnabledFeaturesJson(enabledFeaturesJson);
+        if (brandingJson != null) cfg.setBrandingJson(brandingJson);
+        if (apiBaseUrlOverride != null) cfg.setApiBaseUrlOverride(apiBaseUrlOverride);
+
+        runtimeRepo.save(cfg);
+    }
+
     private Long resolveThemeId(AppRequest req) {
         Long requested = req.getThemeId();
         if (requested != null) {
@@ -348,13 +290,11 @@ public class AppRequestService {
             return t.getId();
         }
 
-        // fallback: active theme
         return themeRepo.findByIsActiveTrue()
                 .map(Theme::getId)
                 .orElse(null);
     }
 
-   
     private String resolveThemeJson(Long themeId, String fallbackJson) {
         if (themeId != null) {
             return themeRepo.findById(themeId)
@@ -368,27 +308,21 @@ public class AppRequestService {
                 .map(Theme::getThemeJson)
                 .orElse("{}");
     }
-    
- // Use this when you only have a raw themeId from the client (Postman / form)
+
     private Long resolveThemeIdFromRaw(Long requested) {
         if (requested != null) {
-            // If that theme exists, use it; otherwise fall back to active theme (or null)
             return themeRepo.findById(requested)
                     .map(Theme::getId)
                     .orElseGet(() ->
                             themeRepo.findByIsActiveTrue()
-                                     .map(Theme::getId)
-                                     .orElse(null));
+                                    .map(Theme::getId)
+                                    .orElse(null));
         }
-
-        // No themeId provided -> just use the active theme (if any)
         return themeRepo.findByIsActiveTrue()
                 .map(Theme::getId)
                 .orElse(null);
     }
 
-
-    /** Save under uploads/, return '/uploads/...' URL */
     private String saveOwnerAppLogoToUploads(Long ownerId, Long projectId, String slug, MultipartFile file)
             throws IOException {
         String cleanSlug = slugify(slug);
@@ -405,6 +339,47 @@ public class AppRequestService {
 
         return "/uploads/owner/" + ownerId + "/" + projectId + "/" + cleanSlug + "/" + safe;
     }
+
+    // ---------------- RESTORED METHODS (needed by CiCallbackController) ----------------
+
+    /** Save APK URL by (ownerId, projectId, slug). */
+    @Transactional
+    public AdminUserProject setApkUrl(Long adminId, Long projectId, String slug, String apkUrl) {
+        AdminUserProject link = aupRepo
+                .findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slugify(slug))
+                .orElseThrow(() -> new IllegalArgumentException("OwnerProject app not found"));
+        link.setApkUrl(apkUrl);
+        return aupRepo.save(link);
+    }
+
+    /** Save APK URL by AdminUserProject primary key (CI callback). */
+    @Transactional
+    public void setApkUrlByLinkId(Long linkId, String apkUrl) {
+        AdminUserProject link = aupRepo.findById(linkId)
+                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
+        link.setApkUrl(apkUrl);
+        aupRepo.save(link);
+    }
+
+    /** Save AAB URL by AdminUserProject primary key. */
+    @Transactional
+    public void setBundleUrlByLinkId(Long linkId, String bundleUrl) {
+        AdminUserProject link = aupRepo.findById(linkId)
+                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
+        link.setBundleUrl(bundleUrl);
+        aupRepo.save(link);
+    }
+
+    /** Save IPA URL by AdminUserProject primary key. */
+    @Transactional
+    public void setIpaUrlByLinkId(Long linkId, String ipaUrl) {
+        AdminUserProject link = aupRepo.findById(linkId)
+                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
+        link.setIpaUrl(ipaUrl);
+        aupRepo.save(link);
+    }
+
+    // ---------------- helpers ----------------
 
     private static String normalizeRel(String rel) {
         if (rel == null || rel.isBlank()) throw new IllegalArgumentException("Empty path");
@@ -434,52 +409,7 @@ public class AppRequestService {
     private static String slugify(String s) {
         if (s == null) return "app";
         return s.trim().toLowerCase()
-                .replaceAll("[^a-z0-9]+", "_")
+                .replaceAll("[^a-z0-9]+", "-")
                 .replaceAll("(^-|-$)", "");
-    }
-
-    @Transactional
-    public AdminUserProject prepareRebuildByLink(Long ownerId, Long linkId) {
-        AdminUserProject link = aupRepo.findByIdAndAdmin_AdminId(linkId, ownerId)
-                .orElseThrow(() -> new IllegalArgumentException("Link not found for this owner"));
-
-        link.setStatus("IN_PRODUCTION");
-        link.setApkUrl(null);
-        return aupRepo.save(link);
-    }
-
-    @Transactional(readOnly = true)
-    public String enqueueBuild(Long ownerId, Long projectId, AdminUserProject link) {
-        final Long themeId = link.getThemeId();
-        final String slug = (link.getSlug() == null) ? "app" : link.getSlug().trim().toLowerCase();
-        final String appName = (link.getAppName() == null) ? "My App" : link.getAppName().trim();
-        final String logoUrl = link.getLogoUrl();
-        final Long currencyId = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
-
-       
-        final String themeJson = resolveThemeJson(themeId, null);
-
-        boolean ok = ciBuildService.dispatchOwnerAndroidBuild(
-                ownerId,
-                projectId,
-                String.valueOf(link.getId()), // ownerProjectLinkId
-                slug,
-                appName,
-                themeId,
-                logoUrl,
-                themeJson,
-                null,        // no fresh bytes on rebuild; use existing URL in the CI service
-                currencyId   // 🪙 keep same currency on rebuild
-        );
-
-        if (!ok) {
-            log.warn("CI dispatch failed/was skipped (ownerId={}, projectId={}, linkId={}, slug={})",
-                    ownerId, projectId, link.getId(), slug);
-        } else {
-            log.info("CI dispatch OK (ownerId={}, projectId={}, linkId={}, slug={})",
-                    ownerId, projectId, link.getId(), slug);
-        }
-
-        return "job-" + link.getId() + "-" + System.currentTimeMillis();
     }
 }

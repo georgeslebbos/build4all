@@ -25,7 +25,6 @@ public class CiConfigController {
         this.themeRepo = themeRepo;
     }
 
-    // Static runtime values for the mobile app (pulled from application.properties)
     @Value("${mobile.apiBaseUrl:}")
     private String apiBaseUrl;
 
@@ -39,14 +38,11 @@ public class CiConfigController {
     private String appRole;
 
     @Value("${ci.callbackUrl:}")
-    private String callbackBase; // ends with /api/ci
-
-    @Value("${ci.callbackToken:}")
-    private String callbackToken;
+    private String callbackBase;
 
     @GetMapping(
-        value = "/owner-projects/{ownerId}/{projectId}/apps/{slug}",
-        produces = MediaType.APPLICATION_JSON_VALUE
+            value = "/owner-projects/{ownerId}/{projectId}/apps/{slug}",
+            produces = MediaType.APPLICATION_JSON_VALUE
     )
     public ResponseEntity<?> getConfigBySlug(
             @PathVariable Long ownerId,
@@ -54,10 +50,9 @@ public class CiConfigController {
             @PathVariable String slug) {
 
         AdminUserProject link = aupRepo
-            .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slug.toLowerCase())
-            .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
+                .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, slug.toLowerCase())
+                .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
 
-    
         String themeJson = "";
         Long themeId = link.getThemeId();
         if (themeId != null) {
@@ -74,19 +69,15 @@ public class CiConfigController {
         m.put("appName", n(link.getAppName()));
         m.put("appLogoUrl", n(link.getLogoUrl()));
         m.put("themeId", link.getThemeId());
-
-      
         m.put("themeJson", n(themeJson));
 
-        // runtime values consumed by the Flutter app at build-time
         m.put("apiBaseUrl", n(apiBaseUrl));
         m.put("wsPath", n(wsPath));
         m.put("appRole", n(appRole));
         m.put("ownerAttachMode", n(ownerAttachMode));
 
-        // callback details for the Action to PUT back apkUrl
+        // ✅ callbackBase only (token must NEVER be returned)
         m.put("callbackBase", n(callbackBase));
-        m.put("callbackToken", n(callbackToken));
 
         return ResponseEntity.ok(m);
     }

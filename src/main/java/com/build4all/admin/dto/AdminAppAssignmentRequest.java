@@ -39,6 +39,12 @@ public class AdminAppAssignmentRequest {
     // Optional: currency code to set the Currency relation for this app instance (e.g., "USD", "SAR", "LBP").
     // The service loads Currency by code and assigns it to AdminUserProject.currency.
     private String currencyCode;
+    
+    private String navJson;
+    private String homeJson;
+    private String enabledFeaturesJson;
+    private String brandingJson;
+    private String apiBaseUrlOverride;
 
     public String getCurrencyCode() { return currencyCode; }
     public void setCurrencyCode(String currencyCode) { this.currencyCode = currencyCode; }
@@ -63,4 +69,19 @@ public class AdminAppAssignmentRequest {
 
     public Long getThemeId() { return themeId; }
     public void setThemeId(Long themeId) { this.themeId = themeId; }
+    
+    public String getNavJson() { return navJson; }
+    public void setNavJson(String navJson) { this.navJson = navJson; }
+
+    public String getHomeJson() { return homeJson; }
+    public void setHomeJson(String homeJson) { this.homeJson = homeJson; }
+
+    public String getEnabledFeaturesJson() { return enabledFeaturesJson; }
+    public void setEnabledFeaturesJson(String enabledFeaturesJson) { this.enabledFeaturesJson = enabledFeaturesJson; }
+
+    public String getBrandingJson() { return brandingJson; }
+    public void setBrandingJson(String brandingJson) { this.brandingJson = brandingJson; }
+
+    public String getApiBaseUrlOverride() { return apiBaseUrlOverride; }
+    public void setApiBaseUrlOverride(String apiBaseUrlOverride) { this.apiBaseUrlOverride = apiBaseUrlOverride; }
 }
