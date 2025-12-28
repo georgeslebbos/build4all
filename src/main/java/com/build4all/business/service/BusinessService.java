@@ -1,16 +1,17 @@
+// src/main/java/com/build4all/business/service/BusinessService.java
 package com.build4all.business.service;
 
 import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.admin.repository.AdminUsersRepository;
-import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.business.domain.*;
 import com.build4all.business.dto.LowRatedBusinessDTO;
 import com.build4all.business.repository.*;
 import com.build4all.catalog.domain.Item;
 import com.build4all.catalog.repository.ItemRepository;
 import com.build4all.notifications.service.EmailService;
+import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.review.domain.Review;
 import com.build4all.review.repository.ReviewRepository;
 import com.build4all.role.domain.Role;
@@ -36,13 +37,12 @@ public class BusinessService {
     @Autowired private ItemRepository itemRepository;                        // Items owned by a business
     @Autowired private OrderItemRepository OrderItemRepository;              // OrderItem operations (delete by item, analytics, etc.)
     @Autowired private ReviewRepository reviewRepository;                    // Reviews linked to items/business
-    @Autowired private AdminUsersRepository adminUsersRepository;            // Admin/manager users table (used during business delete + manager registration)
+    @Autowired private AdminUsersRepository adminUsersRepository;            // Admin users table (used during business delete + invite registration)
     @Autowired private PendingBusinessRepository pendingBusinessRepository;  // Temporary table for business registration (step 1 verification)
-    @Autowired private PendingManagerRepository pendingManagerRepository;    // Temporary table for manager invite/registration
-    @Autowired private RoleRepository roleRepository;                        // Role table (BUSINESS, MANAGER, ...)
+    @Autowired private PendingManagerRepository pendingManagerRepository;    // Temporary table for staff invite/registration (kept name for backward compat)
+    @Autowired private RoleRepository roleRepository;                        // Role table (BUSINESS, OWNER, SUPER_ADMIN, USER)
     @Autowired private BusinessStatusRepository businessStatusRepository;    // BusinessStatus table (ACTIVE, INACTIVE, DELETED, ...)
     @Autowired private AdminUserProjectRepository adminUserProjectRepository;// Tenant link table (app/tenant context)
-
 
     private final EmailService emailService; // Email sending (verification codes, invites)
     public BusinessService(EmailService emailService) { this.emailService = emailService; }
@@ -57,34 +57,62 @@ public class BusinessService {
      */
     private final Map<String, String> resetCodes = new ConcurrentHashMap<>();
 
-    /* -------- tenant helper -------- */
+    /* =====================================================================
+     * Tenant helper
+     * ===================================================================== */
 
     /**
      * Ensures the tenant/app (AdminUserProject) exists.
      * Used as a guard before performing tenant-scoped operations.
+     *
+     * IMPORTANT:
+     * - Multi-tenant Build4All pattern:
+     *   Businesses.ownerProjectLink (ManyToOne AdminUserProject) -> stored physically in DB as aup_id.
+     * - We always validate the tenant link before tenant-scoped actions.
      */
     private AdminUserProject requireOwnerProject(Long ownerProjectLinkId) {
+        if (ownerProjectLinkId == null) throw new IllegalArgumentException("ownerProjectLinkId is required");
         return adminUserProjectRepository.findById(ownerProjectLinkId)
                 .orElseThrow(() -> new IllegalArgumentException("Invalid ownerProjectLinkId"));
     }
 
-    /* -------- tenant-aware finders -------- */
+    /* =====================================================================
+     * Tenant-aware finders (IMPORTANT for LOGIN/AUTH)
+     * ===================================================================== */
 
     /**
-     * Tenant-aware lookup by identifier.
+     * ✅ Tenant-aware lookup by identifier for AUTH (email OR phone).
+     *
+     * NOTE:
+     * - Always prefer these tenant-aware methods for login/authentication.
+     * - Avoid calling legacy/global finders for login because it breaks multi-tenancy.
+     *
+     * Email case-sensitivity note:
+     * - Emails should be treated as case-insensitive.
+     * - We use repository method findByOwnerProjectLink_IdAndEmailIgnoreCase(...)
+     *   to avoid duplicates like Test@x.com vs test@x.com for the same tenant.
+     *
      * - If identifier contains "@": treated as email
      * - Otherwise: treated as phone
      */
     public Optional<Businesses> findByEmailOptional(Long ownerProjectLinkId, String identifier) {
+        if (ownerProjectLinkId == null) return Optional.empty();
         if (identifier == null || identifier.isBlank()) return Optional.empty();
-        if (identifier.contains("@")) {
-            // SQL idea:
-            // SELECT * FROM businesses WHERE aup_id = :ownerProjectLinkId AND email = :identifier LIMIT 1;
-            return businessRepository.findByOwnerProjectLink_IdAndEmail(ownerProjectLinkId, identifier);
+
+        String id = identifier.trim();
+
+        if (id.contains("@")) {
+            // SQL idea (conceptual):
+            // SELECT * FROM businesses
+            // WHERE aup_id = :ownerProjectLinkId AND LOWER(email) = LOWER(:id)
+            // LIMIT 1;
+            return businessRepository.findByOwnerProjectLink_IdAndEmailIgnoreCase(ownerProjectLinkId, id);
         } else {
             // SQL idea:
-            // SELECT * FROM businesses WHERE aup_id = :ownerProjectLinkId AND phone_number = :identifier LIMIT 1;
-            return businessRepository.findByOwnerProjectLink_IdAndPhoneNumber(ownerProjectLinkId, identifier);
+            // SELECT * FROM businesses
+            // WHERE aup_id = :ownerProjectLinkId AND phone_number = :id
+            // LIMIT 1;
+            return businessRepository.findByOwnerProjectLink_IdAndPhoneNumber(ownerProjectLinkId, id);
         }
     }
 
@@ -92,65 +120,103 @@ public class BusinessService {
      * Tenant-aware lookup by identifier (throws if not found).
      */
     public Businesses findByEmail(Long ownerProjectLinkId, String identifier) {
+        if (ownerProjectLinkId == null) throw new IllegalArgumentException("ownerProjectLinkId is required");
         if (identifier == null || identifier.isBlank())
             throw new IllegalArgumentException("Identifier cannot be null or empty");
 
-        return identifier.contains("@")
-                ? businessRepository.findByOwnerProjectLink_IdAndEmail(ownerProjectLinkId, identifier)
-                .orElseThrow(() -> new RuntimeException("Business not found with email: " + identifier))
-                : businessRepository.findByOwnerProjectLink_IdAndPhoneNumber(ownerProjectLinkId, identifier)
-                .orElseThrow(() -> new RuntimeException("Business not found with phone: " + identifier));
+        String id = identifier.trim();
+
+        return id.contains("@")
+                ? businessRepository.findByOwnerProjectLink_IdAndEmailIgnoreCase(ownerProjectLinkId, id)
+                .orElseThrow(() -> new RuntimeException("Business not found with email: " + id))
+                : businessRepository.findByOwnerProjectLink_IdAndPhoneNumber(ownerProjectLinkId, id)
+                .orElseThrow(() -> new RuntimeException("Business not found with phone: " + id));
     }
 
     /**
      * Tenant-aware lookup strictly by email.
      */
     public Businesses getByEmailOrThrow(Long ownerProjectLinkId, String email) {
-        return businessRepository.findByOwnerProjectLink_IdAndEmail(ownerProjectLinkId, email)
-                .orElseThrow(() -> new RuntimeException("Business not found with email: " + email));
+        if (ownerProjectLinkId == null) throw new IllegalArgumentException("ownerProjectLinkId is required");
+        if (email == null || email.isBlank()) throw new IllegalArgumentException("email is required");
+
+        String e = email.trim();
+
+        return businessRepository.findByOwnerProjectLink_IdAndEmailIgnoreCase(ownerProjectLinkId, e)
+                .orElseThrow(() -> new RuntimeException("Business not found with email: " + e));
     }
 
-    /* -------- legacy global finders (keep for backward compat) -------- */
+    /* =====================================================================
+     * Legacy global finders (keep for backward compat)
+     * ===================================================================== */
 
     /**
      * Legacy/global lookup (NOT tenant-scoped).
      * Used to keep old endpoints working.
+     *
+     * ⚠️ WARNING:
+     * - Do NOT use this method for login/auth in a multi-tenant system.
+     * - Same email/phone may exist in different apps.
+     *
+     * Email case-sensitivity note:
+     * - We use findByEmailIgnoreCase here (if email is used) to reduce issues.
      */
     public Optional<Businesses> findByEmailOptional(String identifier) {
         if (identifier == null || identifier.isBlank()) return Optional.empty();
-        return identifier.contains("@")
-                ? businessRepository.findByEmail(identifier)          // SELECT * FROM businesses WHERE email = :identifier
-                : businessRepository.findByPhoneNumber(identifier);   // SELECT * FROM businesses WHERE phone_number = :identifier
+        String id = identifier.trim();
+
+        return id.contains("@")
+                ? businessRepository.findByEmailIgnoreCase(id)   // SELECT * FROM businesses WHERE LOWER(email)=LOWER(:id)
+                : businessRepository.findByPhoneNumber(id);      // SELECT * FROM businesses WHERE phone_number=:id
     }
 
     /**
      * Legacy/global lookup by identifier (throws if not found).
+     *
+     * ⚠️ WARNING:
+     * - Not tenant-safe.
      */
     public Businesses findByEmail(String identifier) {
         if (identifier == null || identifier.isBlank())
             throw new IllegalArgumentException("Identifier cannot be null or empty");
-        return identifier.contains("@")
-                ? businessRepository.findByEmail(identifier).orElseThrow(() -> new RuntimeException("Business not found with: " + identifier))
-                : businessRepository.findByPhoneNumber(identifier).orElseThrow(() -> new RuntimeException("Business not found with: " + identifier));
+        String id = identifier.trim();
+
+        return id.contains("@")
+                ? businessRepository.findByEmailIgnoreCase(id)
+                .orElseThrow(() -> new RuntimeException("Business not found with: " + id))
+                : businessRepository.findByPhoneNumber(id)
+                .orElseThrow(() -> new RuntimeException("Business not found with: " + id));
     }
 
     /**
      * Legacy/global lookup strictly by email (throws if not found).
+     *
+     * ⚠️ WARNING:
+     * - Not tenant-safe.
      */
     public Businesses findByEmailOrThrow(String email) {
-        return businessRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("Business not found with email: " + email));
+        if (email == null || email.isBlank()) throw new IllegalArgumentException("email is required");
+        String e = email.trim();
+
+        return businessRepository.findByEmailIgnoreCase(e)
+                .orElseThrow(() -> new RuntimeException("Business not found with email: " + e));
     }
 
-    /* -------- save (tenant-aware overload keeps legacy version intact) -------- */
+    /* =====================================================================
+     * Save (tenant-aware overload keeps legacy version intact)
+     * ===================================================================== */
 
     /**
      * Tenant-aware save:
      * - Attaches the business to the tenant (AdminUserProject)
      * - Enforces tenant-scoped uniqueness for:
      *   - business name
-     *   - email
+     *   - email (case-insensitive)
      *   - phone number
+     *
+     * Recommendation:
+     * - Emails should be normalized at save-time (lowercase) OR enforced with DB unique index on LOWER(email).
+     * - Here we at least enforce via IgnoreCase repository methods.
      */
     public Businesses save(Long ownerProjectLinkId, Businesses business) {
         AdminUserProject app = requireOwnerProject(ownerProjectLinkId);
@@ -159,37 +225,39 @@ public class BusinessService {
         // Scoped uniqueness: business name unique per tenant/app
         if (business.getBusinessName() != null) {
             boolean nameTaken = business.getId() == null
-                    ? businessRepository.existsByOwnerProjectLink_IdAndBusinessNameIgnoreCase(ownerProjectLinkId, business.getBusinessName())
-                    : businessRepository.existsByOwnerProjectLink_IdAndBusinessNameIgnoreCaseAndIdNot(ownerProjectLinkId, business.getBusinessName(), business.getId());
-            // SQL idea (create):
-            // SELECT CASE WHEN COUNT(*)>0 THEN true ELSE false END
-            // FROM businesses WHERE aup_id=:ownerProjectLinkId AND LOWER(business_name)=LOWER(:name);
-            // SQL idea (update):
-            // ... AND business_id <> :id
+                    ? businessRepository.existsByOwnerProjectLink_IdAndBusinessNameIgnoreCase(
+                    ownerProjectLinkId, business.getBusinessName())
+                    : businessRepository.existsByOwnerProjectLink_IdAndBusinessNameIgnoreCaseAndIdNot(
+                    ownerProjectLinkId, business.getBusinessName(), business.getId());
+
             if (nameTaken) throw new IllegalArgumentException("Business name already exists for this app!");
         }
 
-        // Scoped uniqueness: email unique per tenant/app (when provided)
+        // Scoped uniqueness: email unique per tenant/app (when provided) - CASE INSENSITIVE
         if (business.getEmail() != null) {
+            String email = business.getEmail().trim();
+            business.setEmail(email);
+
             boolean emailTaken = business.getId() == null
-                    ? businessRepository.existsByOwnerProjectLink_IdAndEmail(ownerProjectLinkId, business.getEmail())
-                    : businessRepository.findByOwnerProjectLink_IdAndEmail(ownerProjectLinkId, business.getEmail())
-                    .filter(b -> !Objects.equals(b.getId(), business.getId())).isPresent();
-            // SQL idea (create):
-            // SELECT CASE WHEN COUNT(*)>0 THEN true ELSE false END
-            // FROM businesses WHERE aup_id=:ownerProjectLinkId AND email=:email;
+                    ? businessRepository.existsByOwnerProjectLink_IdAndEmailIgnoreCase(ownerProjectLinkId, email)
+                    : businessRepository.findByOwnerProjectLink_IdAndEmailIgnoreCase(ownerProjectLinkId, email)
+                    .filter(b -> !Objects.equals(b.getId(), business.getId()))
+                    .isPresent();
+
             if (emailTaken) throw new IllegalArgumentException("Email already exists for this app!");
         }
 
         // Scoped uniqueness: phone unique per tenant/app (when provided)
         if (business.getPhoneNumber() != null) {
+            String phone = business.getPhoneNumber().trim();
+            business.setPhoneNumber(phone);
+
             boolean phoneTaken = business.getId() == null
-                    ? businessRepository.existsByOwnerProjectLink_IdAndPhoneNumber(ownerProjectLinkId, business.getPhoneNumber())
-                    : businessRepository.findByOwnerProjectLink_IdAndPhoneNumber(ownerProjectLinkId, business.getPhoneNumber())
-                    .filter(b -> !Objects.equals(b.getId(), business.getId())).isPresent();
-            // SQL idea (create):
-            // SELECT CASE WHEN COUNT(*)>0 THEN true ELSE false END
-            // FROM businesses WHERE aup_id=:ownerProjectLinkId AND phone_number=:phone;
+                    ? businessRepository.existsByOwnerProjectLink_IdAndPhoneNumber(ownerProjectLinkId, phone)
+                    : businessRepository.findByOwnerProjectLink_IdAndPhoneNumber(ownerProjectLinkId, phone)
+                    .filter(b -> !Objects.equals(b.getId(), business.getId()))
+                    .isPresent();
+
             if (phoneTaken) throw new IllegalArgumentException("Phone already exists for this app!");
         }
 
@@ -197,13 +265,22 @@ public class BusinessService {
         return businessRepository.save(business);
     }
 
-    // Legacy save (still available if you don’t pass ownerProjectLinkId anywhere)
+    /**
+     * Legacy save (still available if you don’t pass ownerProjectLinkId anywhere).
+     *
+     * ⚠️ WARNING:
+     * - Not tenant-safe uniqueness.
+     * - Kept to avoid breaking legacy code paths.
+     *
+     * Email note:
+     * - Uses findByEmailIgnoreCase to avoid duplicates across case.
+     */
     public Businesses save(Businesses business) {
-        // Keep old behavior: global email uniqueness check only when updating
-        if (business.getId() != null) {
-            Optional<Businesses> existing = businessRepository.findByEmail(business.getEmail());
-            // SQL idea:
-            // SELECT * FROM businesses WHERE email=:email LIMIT 1;
+        if (business.getId() != null && business.getEmail() != null) {
+            String email = business.getEmail().trim();
+            business.setEmail(email);
+
+            Optional<Businesses> existing = businessRepository.findByEmailIgnoreCase(email);
             if (existing.isPresent() && !existing.get().getId().equals(business.getId())) {
                 throw new IllegalArgumentException("Email already exists for another business!");
             }
@@ -214,7 +291,9 @@ public class BusinessService {
     public Businesses findById(Long id) { return businessRepository.findById(id).orElse(null); } // SELECT * FROM businesses WHERE business_id=:id
     public List<Businesses> findAll() { return businessRepository.findAll(); }                   // SELECT * FROM businesses
 
-    /* -------- delete with cleanup -------- */
+    /* =====================================================================
+     * Delete with cleanup
+     * ===================================================================== */
 
     /**
      * Deletes a business AND its dependent data.
@@ -234,50 +313,43 @@ public class BusinessService {
 
         // Delete items + dependent order_items/reviews
         List<Item> items = itemRepository.findByBusinessId(businessId);
-        // SQL idea:
-        // SELECT * FROM items WHERE business_id=:businessId;
         for (Item item : items) {
             Long itemId = item.getId();
 
             // Delete OrderItem rows linked to this item
-            // SQL idea:
-            // DELETE FROM order_item WHERE item_id=:itemId;
             OrderItemRepository.deleteByItem_Id(itemId);
 
             // Delete Review rows linked to this item
-            // SQL idea:
-            // DELETE FROM review WHERE item_id=:itemId;
             reviewRepository.deleteByItem_Id(itemId);
 
             // Delete the item itself
-            // SQL idea:
-            // DELETE FROM items WHERE item_id=:itemId;
             itemRepository.deleteById(itemId);
         }
 
-        // Join table removed — do NOT reference AdminUserBusinessRepository anymore.
         // If AdminUser has business_id FK and you don't rely on DB ON DELETE CASCADE, keep this:
-        // SQL idea:
-        // DELETE FROM admin_user WHERE business_id=:businessId;
         adminUsersRepository.deleteByBusiness_Id(businessId);
 
         // Finally delete the business
-        // SQL idea:
-        // DELETE FROM businesses WHERE business_id=:businessId;
         businessRepository.deleteById(businessId);
     }
 
-    /* -------- Registration / verification (pending stays global) -------- */
+    /* =====================================================================
+     * Registration / verification (pending stays global)
+     * ===================================================================== */
 
     /**
      * Step 1 of business registration:
      * - Validate tenant/app exists
      * - Validate identifier (email OR phone)
-     * - Ensure uniqueness INSIDE tenant
+     * - Ensure uniqueness INSIDE tenant (email case-insensitive)
      * - Create/update PendingBusiness record
      * - Send verification code (email) or log it (SMS dev path)
      *
      * Returns pendingBusinessId used later in completeBusinessProfile().
+     *
+     * NOTE:
+     * - PendingBusiness is currently GLOBAL (not tenant-scoped in DB).
+     * - If you want true multi-tenant pending registration, you should add aup_id to pending_businesses too.
      */
     public Long sendBusinessVerificationCode(Long ownerProjectLinkId, Map<String, String> data) {
         requireOwnerProject(ownerProjectLinkId);
@@ -288,11 +360,21 @@ public class BusinessService {
         String statusStr = data.get("status");
         String isPublicProfileStr = data.get("isPublicProfile");
 
+        if (password == null || password.trim().isEmpty()) {
+            throw new RuntimeException("Password is required");
+        }
+
         // Validate one identifier only
-        if ((email == null || email.isBlank()) && (phone == null || phone.isBlank()))
+        boolean emailProvided = email != null && !email.isBlank();
+        boolean phoneProvided = phone != null && !phone.isBlank();
+
+        if (!emailProvided && !phoneProvided)
             throw new RuntimeException("Provide either email or phone.");
-        if (email != null && phone != null)
+        if (emailProvided && phoneProvided)
             throw new RuntimeException("Only one of email or phone should be provided.");
+
+        if (emailProvided) email = email.trim();
+        if (phoneProvided) phone = phone.trim();
 
         // Resolve status entity (defaults to ACTIVE)
         BusinessStatus status = businessStatusRepository.findByNameIgnoreCase(
@@ -300,19 +382,18 @@ public class BusinessService {
         ).orElseThrow(() -> new RuntimeException("Invalid or missing status"));
 
         // App-scoped uniqueness (business table)
-        if (email != null && businessRepository.findByOwnerProjectLink_IdAndEmail(ownerProjectLinkId, email).isPresent())
+        // - email should be checked ignore-case
+        if (emailProvided && businessRepository.findByOwnerProjectLink_IdAndEmailIgnoreCase(ownerProjectLinkId, email).isPresent())
             throw new RuntimeException("Email already registered for this app.");
-        if (phone != null && businessRepository.findByOwnerProjectLink_IdAndPhoneNumber(ownerProjectLinkId, phone).isPresent())
+        if (phoneProvided && businessRepository.findByOwnerProjectLink_IdAndPhoneNumber(ownerProjectLinkId, phone).isPresent())
             throw new RuntimeException("Phone already registered for this app.");
 
         // Verification code: fixed for phone in dev, random for email
-        String code = (phone != null) ? "123456" : String.format("%06d", new Random().nextInt(999999));
+        String code = phoneProvided ? "123456" : String.format("%06d", new Random().nextInt(999999));
 
-        // PendingBusiness is currently GLOBAL (not tenant-scoped in DB).
-        // That means: findByEmail/findByPhoneNumber does not include ownerProjectLinkId.
-        // If you want true multi-tenant pending registration, you should add aup_id to pending_businesses too.
+        // PendingBusiness is GLOBAL by email/phone (no tenant)
         PendingBusiness pending;
-        if (email != null) {
+        if (emailProvided) {
             pending = pendingBusinessRepository.findByEmail(email);
             if (pending == null) { pending = new PendingBusiness(); pending.setEmail(email); }
         } else {
@@ -329,11 +410,10 @@ public class BusinessService {
         // Default: true if not provided (or parse boolean)
         pending.setIsPublicProfile(isPublicProfileStr == null || Boolean.parseBoolean(isPublicProfileStr));
 
-        // Persist pending
         PendingBusiness saved = pendingBusinessRepository.save(pending);
 
         // Send code
-        if (email != null) {
+        if (emailProvided) {
             String html = """
                 <html><body style="font-family: Arial; text-align:center; padding:20px">
                 <h2 style="color:#4CAF50">Welcome to build4all Business!</h2>
@@ -344,7 +424,6 @@ public class BusinessService {
             """.formatted(code);
             emailService.sendHtmlEmail(email, "Business Verification Code", html);
         } else {
-            // SMS dev path
             System.out.println("📱 SMS to " + phone + ": code " + code);
         }
 
@@ -356,9 +435,13 @@ public class BusinessService {
      * NOTE: PendingBusiness lookup is GLOBAL by email (not tenant-scoped).
      */
     public Long verifyBusinessEmailCode(String email, String code) {
-        PendingBusiness pending = pendingBusinessRepository.findByEmail(email);
-        if (pending == null || !pending.getVerificationCode().equals(code))
+        if (email == null || email.isBlank()) throw new IllegalArgumentException("email is required");
+        if (code == null || code.isBlank()) throw new IllegalArgumentException("code is required");
+
+        PendingBusiness pending = pendingBusinessRepository.findByEmail(email.trim());
+        if (pending == null || !Objects.equals(pending.getVerificationCode(), code))
             throw new RuntimeException("Invalid verification code");
+
         pending.setIsVerified(true);
         pendingBusinessRepository.save(pending);
         return pending.getId();
@@ -369,9 +452,13 @@ public class BusinessService {
      * NOTE: PendingBusiness lookup is GLOBAL by phone (not tenant-scoped).
      */
     public Long verifyBusinessPhoneCode(String phone, String code) {
-        PendingBusiness pending = pendingBusinessRepository.findByPhoneNumber(phone);
-        if (pending == null || !pending.getVerificationCode().equals(code))
+        if (phone == null || phone.isBlank()) throw new IllegalArgumentException("phone is required");
+        if (code == null || code.isBlank()) throw new IllegalArgumentException("code is required");
+
+        PendingBusiness pending = pendingBusinessRepository.findByPhoneNumber(phone.trim());
+        if (pending == null || !Objects.equals(pending.getVerificationCode(), code))
             throw new RuntimeException("Invalid verification code");
+
         pending.setIsVerified(true);
         pendingBusinessRepository.save(pending);
         return pending.getId();
@@ -382,11 +469,14 @@ public class BusinessService {
      * NOTE: PendingBusiness lookup is GLOBAL by email/phone.
      */
     public boolean resendBusinessVerificationCode(String emailOrPhone) {
-        boolean isEmail = emailOrPhone.contains("@");
+        if (emailOrPhone == null || emailOrPhone.isBlank()) throw new IllegalArgumentException("emailOrPhone is required");
+
+        String id = emailOrPhone.trim();
+        boolean isEmail = id.contains("@");
 
         PendingBusiness pending = isEmail
-                ? pendingBusinessRepository.findByEmail(emailOrPhone)
-                : pendingBusinessRepository.findByPhoneNumber(emailOrPhone);
+                ? pendingBusinessRepository.findByEmail(id)
+                : pendingBusinessRepository.findByPhoneNumber(id);
 
         if (pending == null) throw new RuntimeException("No pending business found with this " + (isEmail ? "email" : "phone"));
 
@@ -402,9 +492,9 @@ public class BusinessService {
                 <h1 style="color:#2196F3">%s</h1>
                 </body></html>
             """.formatted(code);
-            emailService.sendHtmlEmail(emailOrPhone, "Resend Business Verification Code", html);
+            emailService.sendHtmlEmail(id, "Resend Business Verification Code", html);
         } else {
-            System.out.println("📱 Resending SMS to " + emailOrPhone + ": " + code);
+            System.out.println("📱 Resending SMS to " + id + ": " + code);
         }
         return true;
     }
@@ -432,11 +522,16 @@ public class BusinessService {
         PendingBusiness pending = pendingBusinessRepository.findById(pendingId)
                 .orElseThrow(() -> new RuntimeException("Pending business not found."));
 
-        Role BusinessRole = roleRepository.findByNameIgnoreCase("BUSINESS")
+        // ✅ Allowed roles in your system: SUPER_ADMIN, OWNER, BUSINESS, USER
+        Role businessRole = roleRepository.findByNameIgnoreCase("BUSINESS")
                 .orElseThrow(() -> new RuntimeException("Role BUSINESS not found"));
 
         Businesses business = new Businesses();
-        business.setOwnerProjectLink(app); // attach tenant/app
+        business.setOwnerProjectLink(app);
+
+        // NOTE:
+        // - pending.getEmail() may already be normalized; still safe to keep as-is.
+        // - save(ownerProjectLinkId, business) will enforce uniqueness.
         business.setEmail(pending.getEmail());
         business.setPhoneNumber(pending.getPhoneNumber());
         business.setPasswordHash(pending.getPasswordHash());
@@ -445,29 +540,26 @@ public class BusinessService {
         business.setBusinessName(businessName);
         business.setDescription(description);
         business.setWebsiteUrl(websiteUrl);
-        business.setRole(BusinessRole);
+        business.setRole(businessRole);
         business.setCreatedAt(LocalDateTime.now());
         business.setUpdatedAt(LocalDateTime.now());
 
-        // Ensure local upload folder exists
         Path uploadDir = Paths.get("uploads");
         if (!Files.exists(uploadDir)) Files.createDirectories(uploadDir);
 
-        // Save logo file if provided
         if (logo != null && !logo.isEmpty()) {
             String file = UUID.randomUUID() + "_" + logo.getOriginalFilename();
             Files.copy(logo.getInputStream(), uploadDir.resolve(file), StandardCopyOption.REPLACE_EXISTING);
-            business.setBusinessLogoUrl("/uploads/" + file); // stored as public path
+            business.setBusinessLogoUrl("/uploads/" + file);
         }
 
-        // Save banner file if provided
         if (banner != null && !banner.isEmpty()) {
             String file = UUID.randomUUID() + "_" + banner.getOriginalFilename();
             Files.copy(banner.getInputStream(), uploadDir.resolve(file), StandardCopyOption.REPLACE_EXISTING);
             business.setBusinessBannerUrl("/uploads/" + file);
         }
 
-        // Use tenant-aware save (applies tenant uniqueness checks)
+        // Tenant-aware save enforces tenant uniqueness (including email ignore-case)
         Businesses saved = save(ownerProjectLinkId, business);
 
         // Remove pending record after successful completion
@@ -480,6 +572,9 @@ public class BusinessService {
      * Tenant-aware update for business + optional images.
      * - Checks that the business belongs to the passed ownerProjectLinkId
      * - Enforces tenant uniqueness for email/phone (when changed)
+     *
+     * Email note:
+     * - Use findByOwnerProjectLink_IdAndEmailIgnoreCase to avoid case duplicates.
      */
     public Businesses updateBusinessWithImages(
             Long ownerProjectLinkId,
@@ -494,38 +589,41 @@ public class BusinessService {
             MultipartFile banner
     ) throws IOException {
 
-        Role BusinessRole = roleRepository.findByNameIgnoreCase("BUSINESS")
+        // ✅ Allowed roles in your system: SUPER_ADMIN, OWNER, BUSINESS, USER
+        Role businessRole = roleRepository.findByNameIgnoreCase("BUSINESS")
                 .orElseThrow(() -> new RuntimeException("Role BUSINESS not found"));
 
         Businesses existing = businessRepository.findById(id).orElse(null);
         if (existing == null) throw new IllegalArgumentException("Business with ID " + id + " not found.");
 
         // IMPORTANT: ensure you are not updating a business across tenants
-        if (!Objects.equals(existing.getOwnerProjectLink().getId(), ownerProjectLinkId)) {
+        if (existing.getOwnerProjectLink() == null || !Objects.equals(existing.getOwnerProjectLink().getId(), ownerProjectLinkId)) {
             throw new IllegalArgumentException("Business does not belong to the specified app.");
         }
 
-        // Email update: enforce tenant uniqueness
+        // Email update: enforce tenant uniqueness (ignore case)
         if (email != null) {
-            Optional<Businesses> byEmail = businessRepository.findByOwnerProjectLink_IdAndEmail(ownerProjectLinkId, email);
+            String e = email.trim();
+            Optional<Businesses> byEmail = businessRepository.findByOwnerProjectLink_IdAndEmailIgnoreCase(ownerProjectLinkId, e);
             if (byEmail.isPresent() && !Objects.equals(byEmail.get().getId(), id)) {
                 throw new IllegalArgumentException("Email already exists for this app!");
             }
-            existing.setEmail(email);
+            existing.setEmail(e);
         }
 
         // Phone update: enforce tenant uniqueness
         if (phoneNumber != null) {
-            Optional<Businesses> byPhone = businessRepository.findByOwnerProjectLink_IdAndPhoneNumber(ownerProjectLinkId, phoneNumber);
+            String p = phoneNumber.trim();
+            Optional<Businesses> byPhone = businessRepository.findByOwnerProjectLink_IdAndPhoneNumber(ownerProjectLinkId, p);
             if (byPhone.isPresent() && !Objects.equals(byPhone.get().getId(), id)) {
                 throw new IllegalArgumentException("Phone already exists for this app!");
             }
-            existing.setPhoneNumber(phoneNumber);
+            existing.setPhoneNumber(p);
         }
 
         existing.setBusinessName(name);
 
-        // Update password only if provided (and enforce minimal length)
+        // Update password only if provided
         if (password != null && !password.trim().isEmpty()) {
             if (password.length() < 6) throw new IllegalArgumentException("Password must be at least 6 characters long.");
             existing.setPasswordHash(passwordEncoder.encode(password));
@@ -533,20 +631,18 @@ public class BusinessService {
 
         existing.setDescription(description);
         existing.setWebsiteUrl(websiteUrl);
-        existing.setRole(BusinessRole);
+        existing.setRole(businessRole);
+        existing.setUpdatedAt(LocalDateTime.now());
 
-        // Upload directory
         Path uploadDir = Paths.get("uploads/");
         if (!Files.exists(uploadDir)) Files.createDirectories(uploadDir);
 
-        // Update logo file (overwrite DB link only)
         if (logo != null && !logo.isEmpty()) {
             String f = UUID.randomUUID() + "_" + logo.getOriginalFilename();
             Files.copy(logo.getInputStream(), uploadDir.resolve(f), StandardCopyOption.REPLACE_EXISTING);
             existing.setBusinessLogoUrl("/uploads/" + f);
         }
 
-        // Update banner file
         if (banner != null && !banner.isEmpty()) {
             String f = UUID.randomUUID() + "_" + banner.getOriginalFilename();
             Files.copy(banner.getInputStream(), uploadDir.resolve(f), StandardCopyOption.REPLACE_EXISTING);
@@ -573,18 +669,29 @@ public class BusinessService {
         return true;
     }
 
-    /* -------- password reset (legacy-global by email) -------- */
+    /* =====================================================================
+     * Password reset (legacy-global by email)
+     * ===================================================================== */
 
     /**
      * Legacy password reset (global).
      * NOTE: Tenant-aware reset is not implemented here.
+     *
+     * Email note:
+     * - We use findByEmailIgnoreCase to allow users to enter email in any case.
+     * - resetCodes map key is stored as trimmed email (not lowercased) to keep consistent behavior.
+     *   If you want stronger consistency, use e.toLowerCase() as the map key.
      */
     public boolean resetPassword(String email) {
-        Optional<Businesses> optional = businessRepository.findByEmail(email);
+        if (email == null || email.isBlank()) return false;
+
+        String e = email.trim();
+
+        Optional<Businesses> optional = businessRepository.findByEmailIgnoreCase(e);
         if (optional.isEmpty()) return false;
 
         String code = String.format("%06d", new Random().nextInt(999999));
-        resetCodes.put(email, code);
+        resetCodes.put(e, code);
 
         String htmlMessage = """
             <html><body style="font-family: Arial; text-align: center; padding: 20px;">
@@ -595,29 +702,45 @@ public class BusinessService {
             </body></html>
         """.formatted(code);
 
-        emailService.sendHtmlEmail(email, "Password Reset Code", htmlMessage);
+        emailService.sendHtmlEmail(e, "Password Reset Code", htmlMessage);
         return true;
     }
 
     public boolean verifyResetCode(String email, String code) {
-        // Basic equality check on the in-memory map
-        return resetCodes.containsKey(email) && Objects.equals(resetCodes.get(email), code);
+        if (email == null || email.isBlank()) return false;
+        if (code == null || code.isBlank()) return false;
+
+        String e = email.trim();
+        return resetCodes.containsKey(e) && Objects.equals(resetCodes.get(e), code);
     }
 
     public boolean updatePasswordDirectly(String email, String newPassword) {
-        Optional<Businesses> optional = businessRepository.findByEmail(email);
+        if (email == null || email.isBlank()) return false;
+        if (newPassword == null || newPassword.trim().isEmpty()) return false;
+
+        String e = email.trim();
+
+        Optional<Businesses> optional = businessRepository.findByEmailIgnoreCase(e);
         if (optional.isEmpty()) return false;
 
         Businesses b = optional.get();
         b.setPasswordHash(passwordEncoder.encode(newPassword));
         businessRepository.save(b);
 
-        resetCodes.remove(email);
+        resetCodes.remove(e);
         return true;
     }
 
-    // --- Legacy overload kept for backward compatibility ---
-    // Matches calls like: updateBusinessWithImages(id, name, email, password, description, phoneNumber, websiteUrl, logo, banner)
+    /* =====================================================================
+     * Legacy overload kept for backward compatibility
+     * ===================================================================== */
+
+    /**
+     * Legacy overload:
+     * - Keeps compatibility with older controller calls that update by businessId only.
+     * - If the business has a tenant link, we delegate to the tenant-aware method.
+     * - Otherwise we fall back to global behavior.
+     */
     public Businesses updateBusinessWithImages(
             Long id,
             String name,
@@ -630,18 +753,18 @@ public class BusinessService {
             MultipartFile banner
     ) throws IOException {
 
-        // Load existing business first
         Businesses existing = businessRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Business with ID " + id + " not found."));
 
-        Role BusinessRole = roleRepository.findByNameIgnoreCase("BUSINESS")
+        // ✅ Allowed roles in your system: SUPER_ADMIN, OWNER, BUSINESS, USER
+        Role businessRole = roleRepository.findByNameIgnoreCase("BUSINESS")
                 .orElseThrow(() -> new RuntimeException("Role BUSINESS not found"));
 
-        // If the business is tied to an app, delegate to the tenant-aware method
         Long ownerProjectLinkId = (existing.getOwnerProjectLink() != null)
                 ? existing.getOwnerProjectLink().getId()
                 : null;
 
+        // Delegate to tenant-aware method if the record is tenant-scoped
         if (ownerProjectLinkId != null) {
             return updateBusinessWithImages(
                     ownerProjectLinkId, id, name, email, password, description, phoneNumber, websiteUrl, logo, banner
@@ -649,21 +772,22 @@ public class BusinessService {
         }
 
         // ---- Fallback to legacy (global) behavior when no tenant link exists ----
-        // Email uniqueness (global)
         if (email != null) {
-            Optional<Businesses> byEmail = businessRepository.findByEmail(email);
+            String e = email.trim();
+            Optional<Businesses> byEmail = businessRepository.findByEmailIgnoreCase(e);
             if (byEmail.isPresent() && !Objects.equals(byEmail.get().getId(), id)) {
                 throw new IllegalArgumentException("Email already exists for another business!");
             }
-            existing.setEmail(email);
+            existing.setEmail(e);
         }
 
-        if (phoneNumber != null) existing.setPhoneNumber(phoneNumber);
+        if (phoneNumber != null) existing.setPhoneNumber(phoneNumber.trim());
 
         existing.setBusinessName(name);
         existing.setDescription(description);
         existing.setWebsiteUrl(websiteUrl);
-        existing.setRole(BusinessRole);
+        existing.setRole(businessRole);
+        existing.setUpdatedAt(LocalDateTime.now());
 
         if (password != null && !password.trim().isEmpty()) {
             if (password.length() < 6) throw new IllegalArgumentException("Password must be at least 6 characters long.");
@@ -688,19 +812,25 @@ public class BusinessService {
         return businessRepository.save(existing);
     }
 
-    /* -------- assets -------- */
+    /* =====================================================================
+     * Assets
+     * ===================================================================== */
 
     /**
      * Deletes the physical logo file (if stored locally) and nulls the DB field.
      * NOTE: For safety, this assumes local path mapping from "/uploads/..." -> "uploads/..."
      */
     public boolean deleteBusinessLogo(Long businessId) {
-        Businesses b = businessRepository.findById(businessId).orElseThrow(() -> new RuntimeException("Business not found"));
+        Businesses b = businessRepository.findById(businessId)
+                .orElseThrow(() -> new RuntimeException("Business not found"));
+
         if (b.getBusinessLogoUrl() != null && !b.getBusinessLogoUrl().isEmpty()) {
             String logoPath = b.getBusinessLogoUrl().replace("/uploads", "uploads");
             try { Files.deleteIfExists(Paths.get(logoPath)); }
             catch (IOException e) { throw new RuntimeException("Failed to delete logo: " + e.getMessage()); }
+
             b.setBusinessLogoUrl(null);
+            b.setUpdatedAt(LocalDateTime.now());
             businessRepository.save(b);
             return true;
         }
@@ -708,23 +838,26 @@ public class BusinessService {
     }
 
     public boolean deleteBusinessBanner(Long businessId) {
-        Businesses b = businessRepository.findById(businessId).orElseThrow(() -> new RuntimeException("Business not found"));
+        Businesses b = businessRepository.findById(businessId)
+                .orElseThrow(() -> new RuntimeException("Business not found"));
+
         if (b.getBusinessBannerUrl() != null && !b.getBusinessBannerUrl().isEmpty()) {
             String p = b.getBusinessBannerUrl().replace("/uploads", "uploads");
             try { Files.deleteIfExists(Paths.get(p)); }
             catch (IOException e) { throw new RuntimeException("Failed to delete banner: " + e.getMessage()); }
+
             b.setBusinessBannerUrl(null);
+            b.setUpdatedAt(LocalDateTime.now());
             businessRepository.save(b);
             return true;
         }
         return false;
     }
 
-    /* -------- listings / housekeeping -------- */
+    /* =====================================================================
+     * Listings / housekeeping
+     * ===================================================================== */
 
-    /**
-     * Tenant-aware list of public businesses with ACTIVE status.
-     */
     public List<Businesses> getAllPublicActiveBusinesses(Long ownerProjectLinkId) {
         BusinessStatus active = businessStatusRepository.findByNameIgnoreCase("ACTIVE")
                 .orElseThrow(() -> new RuntimeException("ACTIVE status not found"));
@@ -772,14 +905,18 @@ public class BusinessService {
     @Scheduled(cron = "0 0 3 * * *")
     public void permanentlyDeleteBusinessesAfter90Days() {
         LocalDateTime cutoff = LocalDateTime.now().minusDays(90);
+
         List<Businesses> toDelete = businessRepository.findAll().stream()
                 .filter(b -> b.getStatus() != null && "DELETED".equalsIgnoreCase(b.getStatus().getName()))
                 .filter(b -> b.getUpdatedAt() != null && b.getUpdatedAt().isBefore(cutoff))
                 .toList();
+
         for (Businesses b : toDelete) businessRepository.delete(b);
     }
 
-    /* -------- misc / legacy wrappers -------- */
+    /* =====================================================================
+     * Misc / legacy wrappers
+     * ===================================================================== */
 
     public Optional<Businesses> findByIdOptional(Long id) { return businessRepository.findById(id); }
 
@@ -822,7 +959,6 @@ public class BusinessService {
 
             double avg = reviews.stream().mapToInt(Review::getRating).average().orElse(0.0);
 
-            // <= 3.0 means low rated (threshold)
             if (avg <= 3.0) {
                 result.add(new LowRatedBusinessDTO(
                         b.getId(),
@@ -835,27 +971,37 @@ public class BusinessService {
         return result;
     }
 
-    /* -------- manager invite + registration -------- */
+    /* =====================================================================
+     * Staff invite + registration
+     * ===================================================================== */
 
     /**
-     * Sends an invite email to become a manager for a business.
-     * - Creates a PendingManager row with a unique token
-     * - Sends email with link containing the token
+     * Sends an invite email to become a business staff/admin user.
+     *
+     * NOTE (important):
+     * - You said you DO NOT want role MANAGER in authorization.
+     * - So we keep the PendingManager table/class name for backward compatibility,
+     *   BUT we will create the AdminUser with role "BUSINESS" (allowed roles).
      */
     public void sendManagerInvite(String email, Businesses business) {
-        String token = UUID.randomUUID().toString(); // unique token for this invite
+        if (email == null || email.isBlank()) throw new IllegalArgumentException("email is required");
+        if (business == null) throw new IllegalArgumentException("business is required");
 
-        PendingManager pending = new PendingManager(email, business, token);
+        String token = UUID.randomUUID().toString();
+
+        PendingManager pending = new PendingManager(email.trim(), business, token);
         pendingManagerRepository.save(pending);
 
         // If you have a configured domain, swap the link below
         String inviteLink = "http://localhost:5173/assign-manager?token=" + token;
 
+        // Text can still say "Manager" if you want UI compatibility,
+        // but role-wise we will create BUSINESS staff user.
         String html = """
             <html>
             <body style="font-family: Arial, sans-serif; text-align: center; padding: 20px;">
-                <h2 style="color: #4CAF50;">You're Invited to Be a Manager!</h2>
-                <p>You have been invited to become a manager at build4all.</p>
+                <h2 style="color: #4CAF50;">You're Invited!</h2>
+                <p>You have been invited to join build4all business staff.</p>
                 <p>
                   <a href="%s" style="display:inline-block; padding:10px 20px; background:#2196F3; color:#fff; text-decoration:none; border-radius:5px;">
                     Complete Registration
@@ -866,46 +1012,50 @@ public class BusinessService {
             </html>
         """.formatted(inviteLink);
 
-        emailService.sendHtmlEmail(email, "Manager Invitation", html);
+        emailService.sendHtmlEmail(email.trim(), "Business Staff Invitation", html);
     }
 
     /**
-     * Completes manager registration using the invite token:
+     * Completes staff registration using the invite token:
      * - Reads PendingManager by token
-     * - Creates an AdminUser with MANAGER role
-     * - Links manager to the business
+     * - Creates an AdminUser with BUSINESS role (NOT MANAGER)
+     * - Links staff to the business
      * - Deletes the pending token (one-time use)
      */
     @Transactional
     public boolean registerManagerFromInvite(String token, String username, String firstName, String lastName, String password) {
-        Optional<PendingManager> pendingOpt = pendingManagerRepository.findByToken(token);
+        if (token == null || token.isBlank()) return false;
+
+        Optional<PendingManager> pendingOpt = pendingManagerRepository.findByToken(token.trim());
         if (pendingOpt.isEmpty()) return false;
 
         PendingManager pending = pendingOpt.get();
         Businesses business = pending.getBusiness();
 
-        Role managerRole = roleRepository.findByNameIgnoreCase("MANAGER")
-                .orElseThrow(() -> new RuntimeException("Manager role not found"));
+        // ✅ Allowed roles in your system: SUPER_ADMIN, OWNER, BUSINESS, USER
+        // We use BUSINESS role for invited business staff.
+        Role businessStaffRole = roleRepository.findByNameIgnoreCase("BUSINESS")
+                .orElseThrow(() -> new RuntimeException("Role BUSINESS not found"));
 
         // Prevent duplicates: same email already exists as admin
         if (adminUsersRepository.findByEmail(pending.getEmail()).isPresent()) {
             throw new RuntimeException("User already exists as admin");
         }
 
-        AdminUser newManager = new AdminUser();
-        newManager.setUsername(username);
-        newManager.setFirstName(firstName);
-        newManager.setLastName(lastName);
-        newManager.setEmail(pending.getEmail());
-        newManager.setPasswordHash(passwordEncoder.encode(password));
-        newManager.setRole(managerRole);
-        newManager.setBusiness(business);
-        newManager.setNotifyItemUpdates(true);
-        newManager.setNotifyUserFeedback(true);
-        newManager.setCreatedAt(LocalDateTime.now());
-        newManager.setUpdatedAt(LocalDateTime.now());
+        AdminUser newStaff = new AdminUser();
+        newStaff.setUsername(username);
+        newStaff.setFirstName(firstName);
+        newStaff.setLastName(lastName);
+        newStaff.setEmail(pending.getEmail());
+        newStaff.setPasswordHash(passwordEncoder.encode(password));
+        newStaff.setRole(businessStaffRole);
+        newStaff.setBusiness(business);
+        newStaff.setNotifyItemUpdates(true);
+        newStaff.setNotifyUserFeedback(true);
+        newStaff.setCreatedAt(LocalDateTime.now());
+        newStaff.setUpdatedAt(LocalDateTime.now());
 
-        adminUsersRepository.save(newManager);
+        adminUsersRepository.save(newStaff);
 
         // Consume token so it can't be reused
         pendingManagerRepository.delete(pending);

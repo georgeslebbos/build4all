@@ -15,19 +15,19 @@ public interface CouponService {
     CouponResponse create(CouponRequest req);
 
     /**
-     * Update an existing coupon by ID using the given partial Coupon entity as updates.
+     * ✅ Tenant-scoped update (security + correctness).
      */
-    Coupon update(Long id, Coupon coupon);
+    Coupon update(Long ownerProjectId, Long id, CouponRequest req);
 
     /**
-     * Delete coupon by ID.
+     * ✅ Tenant-scoped delete.
      */
-    void delete(Long id);
+    void delete(Long ownerProjectId, Long id);
 
     /**
-     * Get a coupon by ID or throw IllegalArgumentException if not found.
+     * ✅ Tenant-scoped get.
      */
-    Coupon get(Long id);
+    Coupon get(Long ownerProjectId, Long id);
 
     /**
      * List all coupons for a given ownerProjectId (one app).
@@ -46,4 +46,9 @@ public interface CouponService {
      * (Currently discount is applied on itemsSubtotal only.)
      */
     BigDecimal computeDiscount(Coupon coupon, BigDecimal itemsSubtotal);
+
+    /**
+     * Keep mapping centralized (optional but cleaner than repeating in controller).
+     */
+    CouponResponse toResponse(Coupon c);
 }

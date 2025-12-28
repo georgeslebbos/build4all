@@ -1,3 +1,4 @@
+// src/main/java/com/build4all/business/repository/BusinessesRepository.java
 package com.build4all.business.repository;
 
 import com.build4all.business.domain.BusinessStatus;
@@ -21,6 +22,14 @@ import java.util.Optional;
  * Notes about SQL:
  * - Spring Data derives SQL from method names.
  * - Exact SQL varies slightly by DB and naming strategy, but the WHERE clauses below are equivalent.
+ *
+ * EMAIL CASE NOTE (important):
+ * - In most systems, emails should be treated case-insensitive.
+ * - That’s why we provide:
+ *   - findByEmailIgnoreCase(...)
+ *   - findByOwnerProjectLink_IdAndEmailIgnoreCase(...)
+ *   - existsByOwnerProjectLink_IdAndEmailIgnoreCase(...)
+ * - For strongest enforcement, consider a DB unique index on (aup_id, LOWER(email)).
  */
 @Repository
 public interface BusinessesRepository extends JpaRepository<Businesses, Long> {
@@ -74,6 +83,18 @@ public interface BusinessesRepository extends JpaRepository<Businesses, Long> {
      * LIMIT 1;
      */
     Optional<Businesses> findByEmail(String email);
+
+    /**
+     * ✅ Optional helper: case-insensitive email lookup (global).
+     * Useful if you still have legacy login endpoints without tenant.
+     *
+     * Equivalent SQL (conceptual):
+     * SELECT *
+     * FROM businesses b
+     * WHERE LOWER(b.email) = LOWER(:email)
+     * LIMIT 1;
+     */
+    Optional<Businesses> findByEmailIgnoreCase(String email);
 
     /**
      * Check if an email exists (global).
@@ -150,6 +171,19 @@ public interface BusinessesRepository extends JpaRepository<Businesses, Long> {
     Optional<Businesses> findByOwnerProjectLink_IdAndEmail(Long ownerProjectLinkId, String email);
 
     /**
+     * ✅ Tenant-aware: email lookup ignoring case.
+     * Recommended for login (email should be case-insensitive).
+     *
+     * Equivalent SQL (conceptual):
+     * SELECT *
+     * FROM businesses b
+     * WHERE b.aup_id = :ownerProjectLinkId
+     *   AND LOWER(b.email) = LOWER(:email)
+     * LIMIT 1;
+     */
+    Optional<Businesses> findByOwnerProjectLink_IdAndEmailIgnoreCase(Long ownerProjectLinkId, String email);
+
+    /**
      * Find business by tenant (ownerProjectLinkId) + phone number.
      *
      * Equivalent SQL:
@@ -171,6 +205,18 @@ public interface BusinessesRepository extends JpaRepository<Businesses, Long> {
      *   AND b.email = :email;
      */
     boolean existsByOwnerProjectLink_IdAndEmail(Long ownerProjectLinkId, String email);
+
+    /**
+     * ✅ Tenant-aware: email existence ignoring case.
+     * Recommended when you treat emails as case-insensitive.
+     *
+     * Equivalent SQL (conceptual):
+     * SELECT CASE WHEN COUNT(*) > 0 THEN TRUE ELSE FALSE END
+     * FROM businesses b
+     * WHERE b.aup_id = :ownerProjectLinkId
+     *   AND LOWER(b.email) = LOWER(:email);
+     */
+    boolean existsByOwnerProjectLink_IdAndEmailIgnoreCase(Long ownerProjectLinkId, String email);
 
     /**
      * Check if phone exists inside a tenant.

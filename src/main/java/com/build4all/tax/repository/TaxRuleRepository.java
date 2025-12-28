@@ -4,6 +4,7 @@ import com.build4all.tax.domain.TaxRule;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Repository for TaxRule.
@@ -38,4 +39,7 @@ public interface TaxRuleRepository extends JpaRepository<TaxRule, Long> {
      * so disabled rules are ignored.
      */
     List<TaxRule> findByOwnerProject_IdAndEnabledTrue(Long ownerProjectId);
+
+    // secure scoping by tenant (prevents cross-tenant update/read/delete)
+    Optional<TaxRule> findByIdAndOwnerProject_Id(Long id, Long ownerProjectId);
 }

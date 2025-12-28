@@ -28,7 +28,17 @@ public class CouponRequest {
     private LocalDateTime startsAt;
     private LocalDateTime expiresAt;
 
-    private boolean active;
+    /**
+     * ✅ IMPORTANT:
+     * Make it nullable to avoid the "default false" problem:
+     * - if frontend doesn't send active, boolean defaults to false
+     * - coupon gets disabled accidentally.
+     *
+     * Strategy:
+     * - CREATE: if null => default true
+     * - UPDATE: if null => do not change existing value
+     */
+    private Boolean active;
 
     public Long getOwnerProjectId() {
         return ownerProjectId;
@@ -118,11 +128,11 @@ public class CouponRequest {
         this.expiresAt = expiresAt;
     }
 
-    public boolean isActive() {
+    public Boolean getActive() {
         return active;
     }
 
-    public void setActive(boolean active) {
+    public void setActive(Boolean active) {
         this.active = active;
     }
 }

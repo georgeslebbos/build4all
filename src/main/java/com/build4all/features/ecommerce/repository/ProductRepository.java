@@ -26,6 +26,10 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             LocalDateTime fromDate
     );
 
+    List<Product> findByOwnerProject_IdAndItemType_Id(Long ownerProjectId, Long itemTypeId);
+
+    List<Product> findByOwnerProject_IdAndItemType_Category_Id(Long ownerProjectId, Long categoryId);
+
     List<Product> findByIdIn(List<Long> ids);
 
     @Query("""

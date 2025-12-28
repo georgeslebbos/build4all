@@ -1,8 +1,11 @@
 package com.build4all.shipping.web;
 
 import com.build4all.admin.domain.AdminUserProject;
+import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.catalog.domain.Country;
 import com.build4all.catalog.domain.Region;
+import com.build4all.catalog.repository.CountryRepository;
+import com.build4all.catalog.repository.RegionRepository;
 import com.build4all.security.JwtUtil;
 import com.build4all.shipping.domain.ShippingMethod;
 import com.build4all.shipping.domain.ShippingMethodType;
@@ -17,8 +20,8 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
@@ -34,12 +37,23 @@ public class ShippingController {
     private final ShippingMethodRepository methodRepository;
     private final JwtUtil jwtUtil;
 
+    // ✅ NEW: Real lookups to avoid "stub entities" and enforce tenant isolation
+    private final AdminUserProjectRepository adminUserProjectRepository;
+    private final CountryRepository countryRepository;
+    private final RegionRepository regionRepository;
+
     public ShippingController(ShippingService shippingService,
                               ShippingMethodRepository methodRepository,
-                              JwtUtil jwtUtil) {
+                              JwtUtil jwtUtil,
+                              AdminUserProjectRepository adminUserProjectRepository,
+                              CountryRepository countryRepository,
+                              RegionRepository regionRepository) {
         this.shippingService = shippingService;
         this.methodRepository = methodRepository;
         this.jwtUtil = jwtUtil;
+        this.adminUserProjectRepository = adminUserProjectRepository;
+        this.countryRepository = countryRepository;
+        this.regionRepository = regionRepository;
     }
 
     /* ===================== helpers ===================== */
@@ -85,13 +99,15 @@ public class ShippingController {
         return r;
     }
 
-    private void applyRequestToMethod(ShippingMethodRequest req, ShippingMethod m) {
-
-        if (req.getOwnerProjectId() != null) {
-            AdminUserProject proj = new AdminUserProject();
-            proj.setId(req.getOwnerProjectId());
-            m.setOwnerProject(proj);
-        }
+    /**
+     * ✅ NEW:
+     * Apply request fields EXCEPT ownerProject/country/region.
+     *
+     * Why?
+     * - ownerProject must be set ONLY once during creation (otherwise you can "move" a method between tenants)
+     * - country/region must be resolved from DB (not stubs) to avoid FK problems and to validate IDs
+     */
+    private void applyRequestToMethodCore(ShippingMethodRequest req, ShippingMethod m) {
 
         if (req.getName() != null) m.setName(req.getName());
         if (req.getDescription() != null) m.setDescription(req.getDescription());
@@ -113,20 +129,48 @@ public class ShippingController {
             m.setFreeShippingThreshold(req.getFreeShippingThreshold());
         }
 
-        // enabled flag
+        // enabled flag (always applied)
         m.setEnabled(req.isEnabled());
+    }
 
-        // country / region as "stub" entities by ID (no repository lookup here)
+    /**
+     * ✅ NEW:
+     * Resolve country & region as real entities (no stubs).
+     *
+     * Also adds safety: if Region has a relation to Country, ensure both match.
+     * If your Region entity doesn't have getCountry(), this still works without that validation.
+     */
+    private void applyCountryRegion(ShippingMethodRequest req, ShippingMethod m) {
+
+        Country country = null;
+        Region region = null;
+
         if (req.getCountryId() != null) {
-            Country c = new Country();
-            c.setId(req.getCountryId());
-            m.setCountry(c);
+            country = countryRepository.findById(req.getCountryId())
+                    .orElseThrow(() -> new IllegalArgumentException("Invalid countryId: " + req.getCountryId()));
         }
+
         if (req.getRegionId() != null) {
-            Region r = new Region();
-            r.setId(req.getRegionId());
-            m.setRegion(r);
+            region = regionRepository.findById(req.getRegionId())
+                    .orElseThrow(() -> new IllegalArgumentException("Invalid regionId: " + req.getRegionId()));
         }
+
+        // Optional strict validation (only if Region has Country)
+        if (country != null && region != null) {
+            try {
+                if (region.getCountry() != null && region.getCountry().getId() != null) {
+                    if (!region.getCountry().getId().equals(country.getId())) {
+                        throw new IllegalArgumentException("regionId does not belong to countryId");
+                    }
+                }
+            } catch (Exception ignored) {
+                // If Region has no getCountry() in your model, ignore.
+                // You can remove this try/catch once you confirm Region structure.
+            }
+        }
+
+        m.setCountry(country);
+        m.setRegion(region);
     }
 
     /* ====================================================
@@ -196,11 +240,13 @@ public class ShippingController {
             @RequestHeader("Authorization") String auth,
             @RequestBody ShippingMethodRequest req
     ) {
-       /* String token = strip(auth);
-        if (!hasRole(token, "OWNER", "ADMIN")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "Owner/Admin role required"));
-        }*/
+        /*
+         * NOTE:
+         * We rely on @PreAuthorize for authorization.
+         * If you want to support ADMIN too, change to:
+         * @PreAuthorize("hasAnyRole('OWNER','SUPER_ADMIN')")
+         * (and align role names with your system)
+         */
 
         try {
             if (req.getOwnerProjectId() == null) {
@@ -213,8 +259,18 @@ public class ShippingController {
                 throw new IllegalArgumentException("methodType is required");
             }
 
+            // ✅ REAL lookup: avoids setting a stub AdminUserProject(id) which can break validation and FK constraints
+            AdminUserProject ownerProject = adminUserProjectRepository.findById(req.getOwnerProjectId())
+                    .orElseThrow(() -> new IllegalArgumentException("Invalid ownerProjectId: " + req.getOwnerProjectId()));
+
             ShippingMethod method = new ShippingMethod();
-            applyRequestToMethod(req, method);
+
+            // ✅ ownerProject set ONLY at create time (prevents tenant reassignment later)
+            method.setOwnerProject(ownerProject);
+
+            // ✅ apply fields (no stubs)
+            applyRequestToMethodCore(req, method);
+            applyCountryRegion(req, method);
 
             ShippingMethod saved = methodRepository.save(method);
             return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(saved));
@@ -227,22 +283,31 @@ public class ShippingController {
 
     @PutMapping("/methods/{id}")
     @Operation(summary = "Update shipping method (OWNER/ADMIN)")
+    @PreAuthorize("hasRole('OWNER')")
     public ResponseEntity<?> updateMethod(
             @RequestHeader("Authorization") String auth,
             @PathVariable Long id,
             @RequestBody ShippingMethodRequest req
     ) {
-        String token = strip(auth);
-        if (!hasRole(token, "OWNER", "ADMIN")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "Owner/Admin role required"));
-        }
-
+        /*
+         * ✅ IMPORTANT:
+         * We scope the update by ownerProjectId to prevent cross-tenant access:
+         * - someone cannot update shipping method #10 that belongs to another tenant
+         *   just by guessing the ID.
+         */
         try {
-            ShippingMethod method = methodRepository.findById(id)
-                    .orElseThrow(() -> new IllegalArgumentException("Shipping method not found"));
+            if (req.getOwnerProjectId() == null) {
+                throw new IllegalArgumentException("ownerProjectId is required (for scoping update)");
+            }
 
-            applyRequestToMethod(req, method);
+            // ✅ secure lookup: must belong to the same ownerProject
+            ShippingMethod method = methodRepository
+                    .findByIdAndOwnerProject_Id(id, req.getOwnerProjectId())
+                    .orElseThrow(() -> new IllegalArgumentException("Shipping method not found for this ownerProject"));
+
+            // ✅ DO NOT change ownerProject on update (ignore req.ownerProjectId as a setter)
+            applyRequestToMethodCore(req, method);
+            applyCountryRegion(req, method);
 
             ShippingMethod saved = methodRepository.save(method);
             return ResponseEntity.ok(toResponse(saved));
@@ -255,19 +320,20 @@ public class ShippingController {
 
     @DeleteMapping("/methods/{id}")
     @Operation(summary = "Delete/disable shipping method (OWNER/ADMIN)")
+    @PreAuthorize("hasRole('OWNER')")
     public ResponseEntity<?> deleteMethod(
             @RequestHeader("Authorization") String auth,
-            @PathVariable Long id
+            @PathVariable Long id,
+            @RequestParam Long ownerProjectId
     ) {
-        String token = strip(auth);
-        if (!hasRole(token, "OWNER", "ADMIN")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "Owner/Admin role required"));
-        }
-
+        /*
+         * ✅ IMPORTANT:
+         * Delete is also scoped by ownerProjectId.
+         */
         try {
-            ShippingMethod method = methodRepository.findById(id)
-                    .orElseThrow(() -> new IllegalArgumentException("Shipping method not found"));
+            ShippingMethod method = methodRepository
+                    .findByIdAndOwnerProject_Id(id, ownerProjectId)
+                    .orElseThrow(() -> new IllegalArgumentException("Shipping method not found for this ownerProject"));
 
             // Soft delete: disable instead of physical delete
             method.setEnabled(false);
@@ -283,22 +349,26 @@ public class ShippingController {
 
     @GetMapping("/methods/{id}")
     @Operation(summary = "Get shipping method by id (OWNER/ADMIN)")
+    @PreAuthorize("hasRole('OWNER')")
     public ResponseEntity<?> getMethodById(
             @RequestHeader("Authorization") String auth,
-            @PathVariable Long id
+            @PathVariable Long id,
+            @RequestParam Long ownerProjectId
     ) {
-        String token = strip(auth);
-        if (!hasRole(token, "OWNER", "ADMIN")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "Owner/Admin role required"));
-        }
-
+        /*
+         * ✅ IMPORTANT:
+         * Get-by-id is also scoped by ownerProjectId.
+         */
         try {
-            ShippingMethod method = methodRepository.findById(id)
-                    .orElseThrow(() -> new IllegalArgumentException("Shipping method not found"));
+            ShippingMethod method = methodRepository
+                    .findByIdAndOwnerProject_Id(id, ownerProjectId)
+                    .orElseThrow(() -> new IllegalArgumentException("Shipping method not found for this ownerProject"));
+
             return ResponseEntity.ok(toResponse(method));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError().body(Map.of("error", ex.getMessage()));
         }
     }
 

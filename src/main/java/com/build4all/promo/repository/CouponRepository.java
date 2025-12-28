@@ -11,4 +11,11 @@ public interface CouponRepository extends JpaRepository<Coupon, Long> {
     List<Coupon> findByOwnerProjectId(Long ownerProjectId);
 
     Optional<Coupon> findByOwnerProjectIdAndCodeIgnoreCase(Long ownerProjectId, String code);
+
+    /**
+     * ✅ Multi-tenant safety:
+     * Prevent cross-tenant access by guessing coupon IDs.
+     * All update/get/delete should use this method.
+     */
+    Optional<Coupon> findByIdAndOwnerProjectId(Long id, Long ownerProjectId);
 }

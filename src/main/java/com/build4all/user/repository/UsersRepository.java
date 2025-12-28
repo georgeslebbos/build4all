@@ -412,4 +412,8 @@ public interface UsersRepository extends JpaRepository<Users, Long> {
     """)
     List<Users> findUsersWithMatchingCategories(@Param("userId") Long userId,
                                                 @Param("categories") List<Category> categories);
+
+    Optional<Users> findByEmailIgnoreCaseAndOwnerProject_Id(String email, Long ownerProjectId);
+
+    Optional<Users> findByUsernameIgnoreCaseAndOwnerProject_Id(String username, Long ownerProjectId);
 }

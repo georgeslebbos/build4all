@@ -40,18 +40,30 @@ public class CouponServiceImpl implements CouponService {
             throw new IllegalArgumentException("discountType is required");
         }
 
-        // ✅ Use value from REQUEST
-        BigDecimal value = req.getDiscountValue();
-        if (value == null || value.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("Coupon value must be > 0");
-        }
-
         CouponDiscountType type =
                 CouponDiscountType.valueOf(req.getDiscountType().toUpperCase());
 
+        // ✅ Validation depends on type:
+        // - FREE_SHIPPING: allow value null/0
+        // - others: must be > 0
+        BigDecimal value = req.getDiscountValue();
+        if (type != CouponDiscountType.FREE_SHIPPING) {
+            if (value == null || value.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new IllegalArgumentException("discountValue must be > 0");
+            }
+        } else {
+            value = BigDecimal.ZERO;
+        }
+
+        // ✅ Per-tenant uniqueness check (better error than DB constraint)
+        couponRepository.findByOwnerProjectIdAndCodeIgnoreCase(req.getOwnerProjectId(), req.getCode().trim())
+                .ifPresent(c -> {
+                    throw new IllegalArgumentException("Coupon code already exists for this ownerProjectId");
+                });
+
         Coupon coupon = new Coupon();
         coupon.setOwnerProjectId(req.getOwnerProjectId());
-        coupon.setCode(req.getCode());
+        coupon.setCode(req.getCode().trim());
         coupon.setDescription(req.getDescription());
         coupon.setType(type);
         coupon.setValue(value);
@@ -60,7 +72,10 @@ public class CouponServiceImpl implements CouponService {
         coupon.setMaxDiscountAmount(req.getMaxDiscountAmount());
         coupon.setValidFrom(req.getStartsAt());
         coupon.setValidTo(req.getExpiresAt());
-        coupon.setActive(req.isActive());
+
+        // ✅ Default active=true if not provided
+        coupon.setActive(req.getActive() == null ? true : req.getActive());
+
         coupon.setUsedCount(0);
 
         coupon = couponRepository.save(coupon);
@@ -73,41 +88,94 @@ public class CouponServiceImpl implements CouponService {
        ============================ */
 
     @Override
-    public Coupon update(Long id, Coupon updates) {
-        Coupon existing = couponRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Coupon not found"));
+    public Coupon update(Long ownerProjectId, Long id, CouponRequest req) {
+        if (ownerProjectId == null) {
+            throw new IllegalArgumentException("ownerProjectId is required");
+        }
 
-        if (updates.getCode() != null) existing.setCode(updates.getCode());
-        if (updates.getDescription() != null) existing.setDescription(updates.getDescription());
-        if (updates.getType() != null) existing.setType(updates.getType());
-        if (updates.getValue() != null) existing.setValue(updates.getValue());
-        if (updates.getGlobalUsageLimit() != null) existing.setGlobalUsageLimit(updates.getGlobalUsageLimit());
-        if (updates.getMinOrderAmount() != null) existing.setMinOrderAmount(updates.getMinOrderAmount());
-        if (updates.getMaxDiscountAmount() != null) existing.setMaxDiscountAmount(updates.getMaxDiscountAmount());
-        if (updates.getValidFrom() != null) existing.setValidFrom(updates.getValidFrom());
-        if (updates.getValidTo() != null) existing.setValidTo(updates.getValidTo());
+        // ✅ tenant-scoped load
+        Coupon existing = couponRepository.findByIdAndOwnerProjectId(id, ownerProjectId)
+                .orElseThrow(() -> new IllegalArgumentException("Coupon not found for this ownerProjectId"));
 
-        existing.setActive(updates.isActive());
+        if (req.getCode() != null && !req.getCode().isBlank()) {
+            String newCode = req.getCode().trim();
+
+            // prevent duplicates in same tenant
+            couponRepository.findByOwnerProjectIdAndCodeIgnoreCase(ownerProjectId, newCode)
+                    .ifPresent(other -> {
+                        if (!other.getId().equals(existing.getId())) {
+                            throw new IllegalArgumentException("Coupon code already exists for this ownerProjectId");
+                        }
+                    });
+
+            existing.setCode(newCode);
+        }
+
+        if (req.getDescription() != null) existing.setDescription(req.getDescription());
+
+        if (req.getDiscountType() != null && !req.getDiscountType().isBlank()) {
+            CouponDiscountType type = CouponDiscountType.valueOf(req.getDiscountType().toUpperCase());
+            existing.setType(type);
+
+            // If switching to FREE_SHIPPING, force value to 0
+            if (type == CouponDiscountType.FREE_SHIPPING) {
+                existing.setValue(BigDecimal.ZERO);
+            }
+        }
+
+        if (req.getDiscountValue() != null) {
+            // For FREE_SHIPPING, ignore any value and force 0
+            if (existing.getType() == CouponDiscountType.FREE_SHIPPING) {
+                existing.setValue(BigDecimal.ZERO);
+            } else {
+                if (req.getDiscountValue().compareTo(BigDecimal.ZERO) <= 0) {
+                    throw new IllegalArgumentException("discountValue must be > 0");
+                }
+                existing.setValue(req.getDiscountValue());
+            }
+        }
+
+        if (req.getMaxUses() != null) existing.setGlobalUsageLimit(req.getMaxUses());
+        if (req.getMinOrderAmount() != null) existing.setMinOrderAmount(req.getMinOrderAmount());
+        if (req.getMaxDiscountAmount() != null) existing.setMaxDiscountAmount(req.getMaxDiscountAmount());
+        if (req.getStartsAt() != null) existing.setValidFrom(req.getStartsAt());
+        if (req.getExpiresAt() != null) existing.setValidTo(req.getExpiresAt());
+
+        // ✅ Only update active if client sent it
+        if (req.getActive() != null) {
+            existing.setActive(req.getActive());
+        }
 
         return couponRepository.save(existing);
     }
 
     @Override
-    public void delete(Long id) {
-        if (!couponRepository.existsById(id)) {
-            throw new IllegalArgumentException("Coupon not found");
+    public void delete(Long ownerProjectId, Long id) {
+        if (ownerProjectId == null) {
+            throw new IllegalArgumentException("ownerProjectId is required");
         }
-        couponRepository.deleteById(id);
+
+        Coupon existing = couponRepository.findByIdAndOwnerProjectId(id, ownerProjectId)
+                .orElseThrow(() -> new IllegalArgumentException("Coupon not found for this ownerProjectId"));
+
+        couponRepository.delete(existing);
     }
 
     @Override
-    public Coupon get(Long id) {
-        return couponRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Coupon not found"));
+    public Coupon get(Long ownerProjectId, Long id) {
+        if (ownerProjectId == null) {
+            throw new IllegalArgumentException("ownerProjectId is required");
+        }
+
+        return couponRepository.findByIdAndOwnerProjectId(id, ownerProjectId)
+                .orElseThrow(() -> new IllegalArgumentException("Coupon not found for this ownerProjectId"));
     }
 
     @Override
     public List<Coupon> listByOwnerProject(Long ownerProjectId) {
+        if (ownerProjectId == null) {
+            throw new IllegalArgumentException("ownerProjectId is required");
+        }
         return couponRepository.findByOwnerProjectId(ownerProjectId);
     }
 
@@ -166,6 +234,12 @@ public class CouponServiceImpl implements CouponService {
         }
 
         BigDecimal base = itemsSubtotal;
+
+        // FREE_SHIPPING is handled in shipping logic
+        if (coupon.getType() == CouponDiscountType.FREE_SHIPPING) {
+            return BigDecimal.ZERO;
+        }
+
         BigDecimal value = coupon.getValue();
         if (value == null || value.compareTo(BigDecimal.ZERO) <= 0) {
             return BigDecimal.ZERO;
@@ -178,9 +252,6 @@ public class CouponServiceImpl implements CouponService {
                     .divide(BigDecimal.valueOf(100));
         } else if (coupon.getType() == CouponDiscountType.FIXED) {
             discount = value;
-        } else if (coupon.getType() == CouponDiscountType.FREE_SHIPPING) {
-            // handled on shipping side; here we do nothing or return 0
-            discount = BigDecimal.ZERO;
         }
 
         if (coupon.getMaxDiscountAmount() != null
@@ -202,7 +273,8 @@ public class CouponServiceImpl implements CouponService {
        MAPPER
        ============================ */
 
-    private CouponResponse toResponse(Coupon c) {
+    @Override
+    public CouponResponse toResponse(Coupon c) {
         CouponResponse r = new CouponResponse();
         r.setId(c.getId());
         r.setOwnerProjectId(c.getOwnerProjectId());

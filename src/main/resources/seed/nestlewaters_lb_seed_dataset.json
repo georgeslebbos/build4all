@@ -1,0 +1,212 @@
+{
+  "projectName": "Nestlé Waters Lebanon",
+  "projectDescription": "Auto-created demo data inspired by buyonline.nestlewaters.com.lb",
+  "owner": {
+    "username": "nestle_owner",
+    "firstName": "Nestle",
+    "lastName": "Waters",
+    "email": "owner@nestlewaterslb.test",
+    "password": "Owner@12345",
+    "role": "OWNER"
+  },
+  "tenant": {
+    "slug": "nestlewaterslb",
+    "appName": "Nestlé Waters LB Shop",
+    "status": "ACTIVE",
+    "currencyCode": "LBP"
+  },
+
+  "categories": [
+    { "name": "Small Water Bottles", "iconName": "water", "iconLibrary": "Ionicons", "includeInMenu": true, "weight": 1 },
+    { "name": "5G eCoupons", "iconName": "ticket", "iconLibrary": "Ionicons", "includeInMenu": true, "weight": 2 },
+    { "name": "Dispenser & Accessories", "iconName": "cube", "iconLibrary": "Ionicons", "includeInMenu": true, "weight": 3 },
+    { "name": "Services", "iconName": "settings", "iconLibrary": "Ionicons", "includeInMenu": true, "weight": 4 },
+    { "name": "Deals & Promotions", "iconName": "pricetag", "iconLibrary": "Ionicons", "includeInMenu": true, "weight": 5 },
+    { "name": "Water Subscription", "iconName": "repeat", "iconLibrary": "Ionicons", "includeInMenu": true, "weight": 6 }
+  ],
+
+  "itemTypes": [
+    { "name": "Water Bottle Pack", "iconName": "water", "iconLibrary": "Ionicons", "categoryName": "Small Water Bottles", "defaultForCategory": true },
+    { "name": "5 Gallon Bottle", "iconName": "beaker", "iconLibrary": "Ionicons", "categoryName": "Water Subscription", "defaultForCategory": true },
+    { "name": "eCoupon", "iconName": "ticket", "iconLibrary": "Ionicons", "categoryName": "5G eCoupons", "defaultForCategory": true },
+    { "name": "Dispenser", "iconName": "cube", "iconLibrary": "Ionicons", "categoryName": "Dispenser & Accessories", "defaultForCategory": true },
+    { "name": "Service", "iconName": "settings", "iconLibrary": "Ionicons", "categoryName": "Services", "defaultForCategory": true }
+  ],
+
+  "taxRules": [
+    {
+      "name": "VAT (Default)",
+      "rate": 11.00,
+      "appliesToShipping": false,
+      "enabled": true,
+      "countryIso2": "LB"
+    }
+  ],
+
+  "shippingMethods": [
+    {
+      "name": "Standard Delivery",
+      "description": "Default delivery method (set flatRate=0 if delivery is free).",
+      "type": "FLAT_RATE",
+      "flatRate": 0,
+      "enabled": true,
+      "countryIso2": "LB"
+    },
+    {
+      "name": "Local Pickup",
+      "description": "Customer picks up from store (no shipping cost).",
+      "type": "LOCAL_PICKUP",
+      "enabled": true,
+      "countryIso2": "LB"
+    }
+  ],
+
+  "coupons": [
+    {
+      "code": "WELCOME10",
+      "description": "10% off for first order",
+      "type": "PERCENT",
+      "value": 10,
+      "globalUsageLimit": 5000,
+      "maxDiscountAmount": 200000,
+      "minOrderAmount": 0,
+      "validFrom": "2025-12-01T00:00:00",
+      "validTo": "2026-12-31T23:59:59",
+      "active": true
+    },
+    {
+      "code": "FREESHIP",
+      "description": "Free shipping coupon",
+      "type": "FREE_SHIPPING",
+      "value": 0,
+      "globalUsageLimit": 10000,
+      "minOrderAmount": 0,
+      "validFrom": "2025-12-01T00:00:00",
+      "validTo": "2026-12-31T23:59:59",
+      "active": true
+    }
+  ],
+
+  "products": [
+    {
+      "name": "Nestlé Pure Life 1.5L",
+      "description": "1.5L / 6 bottles",
+      "price": 160000,
+      "status": "Active",
+      "stock": 500,
+      "sku": "NWL-PL-15-6",
+      "productType": "SIMPLE",
+      "virtualProduct": false,
+      "downloadable": false,
+      "imageUrl": null,
+      "itemTypeName": "Water Bottle Pack"
+    },
+    {
+      "name": "Nestlé Pure Life 0.33L",
+      "description": "0.33L / 12 bottles",
+      "price": 152500,
+      "status": "Active",
+      "stock": 500,
+      "sku": "NWL-PL-033-12",
+      "productType": "SIMPLE",
+      "virtualProduct": false,
+      "downloadable": false,
+      "imageUrl": null,
+      "itemTypeName": "Water Bottle Pack"
+    },
+    {
+      "name": "Nestlé Pure Life 0.6L Bottles",
+      "description": "0.6L / 12 bottles",
+      "price": 190000,
+      "status": "Active",
+      "stock": 500,
+      "sku": "NWL-PL-06-12",
+      "productType": "SIMPLE",
+      "virtualProduct": false,
+      "downloadable": false,
+      "imageUrl": null,
+      "itemTypeName": "Water Bottle Pack"
+    },
+    {
+      "name": "Nestlé Pure Life 6 Bottles 2 Liters",
+      "description": "2L / 6 bottles",
+      "price": 190000,
+      "status": "Active",
+      "stock": 500,
+      "sku": "NWL-PL-2-6",
+      "productType": "SIMPLE",
+      "virtualProduct": false,
+      "downloadable": false,
+      "imageUrl": null,
+      "itemTypeName": "Water Bottle Pack"
+    },
+    {
+      "name": "Nestlé Pure Life 5 Gallon Water",
+      "description": "18.9 Liters / 5 Gallon",
+      "price": 350000,
+      "status": "Active",
+      "stock": 300,
+      "sku": "NWL-PL-5G",
+      "productType": "SIMPLE",
+      "virtualProduct": false,
+      "downloadable": false,
+      "imageUrl": null,
+      "itemTypeName": "5 Gallon Bottle"
+    },
+
+    {
+      "name": "Hot and Cold Water Dispenser - Midea White & Grey",
+      "description": "Dispenses hot, cold & room temperature water (1 year warranty).",
+      "price": 10500000,
+      "status": "Active",
+      "stock": 50,
+      "sku": "NWL-DISP-MIDEA-WG",
+      "productType": "SIMPLE",
+      "virtualProduct": false,
+      "downloadable": false,
+      "imageUrl": null,
+      "itemTypeName": "Dispenser"
+    },
+
+    {
+      "name": "60 Gallons E-Coupon (Pay 50 Gallons - Get 10 Gallons for free)",
+      "description": "eCoupon bundle",
+      "price": 17500000,
+      "status": "Active",
+      "stock": 999999,
+      "sku": "NWL-COUPON-60G",
+      "productType": "SIMPLE",
+      "virtualProduct": true,
+      "downloadable": true,
+      "imageUrl": null,
+      "itemTypeName": "eCoupon"
+    },
+    {
+      "name": "35 Gallons E-Coupon (Pay 30 Gallons - Get 5 Gallons for Free)",
+      "description": "eCoupon bundle",
+      "price": 10500000,
+      "status": "Active",
+      "stock": 999999,
+      "sku": "NWL-COUPON-35G",
+      "productType": "SIMPLE",
+      "virtualProduct": true,
+      "downloadable": true,
+      "imageUrl": null,
+      "itemTypeName": "eCoupon"
+    },
+
+    {
+      "name": "Dispenser Sanitization Service",
+      "description": "Sanitization service (additional charge may apply by location).",
+      "price": 720000,
+      "status": "Active",
+      "stock": 999999,
+      "sku": "NWL-SVC-SANITIZE",
+      "productType": "SIMPLE",
+      "virtualProduct": true,
+      "downloadable": false,
+      "imageUrl": null,
+      "itemTypeName": "Service"
+    }
+  ]
+}

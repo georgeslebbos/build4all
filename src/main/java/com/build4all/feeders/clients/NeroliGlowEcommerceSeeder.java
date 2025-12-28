@@ -1,4 +1,4 @@
-package com.build4all.feeders;
+package com.build4all.feeders.clients;
 
 import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.domain.AdminUserProject;
@@ -53,7 +53,7 @@ import java.util.*;
  *   2) Run with profile "seed":
  *        mvn spring-boot:run -Dspring-boot.run.profiles=seed
  */
-@Configuration
+@Configuration("NeroliGlowEcommerceSeeder")
 @Profile("seed")
 public class NeroliGlowEcommerceSeeder {
 

@@ -4,7 +4,9 @@ public class AdminLoginRequest {
     private String usernameOrEmail;
     private String password;
 
-    // Getters and Setters
+    // OPTIONAL (AUP id) - used when OWNER has multiple apps
+    private Long ownerProjectId;
+
     public String getUsernameOrEmail() {
         return usernameOrEmail;
     }
@@ -19,5 +21,13 @@ public class AdminLoginRequest {
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    public Long getOwnerProjectId() {
+        return ownerProjectId;
+    }
+
+    public void setOwnerProjectId(Long ownerProjectId) {
+        this.ownerProjectId = ownerProjectId;
     }
 }

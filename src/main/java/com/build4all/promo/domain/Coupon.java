@@ -5,17 +5,47 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "coupons")
+@Table(
+        name = "coupons",
+        uniqueConstraints = {
+                /**
+                 * ✅ Multi-tenant uniqueness:
+                 * Code must be unique PER owner_project_id (per app),
+                 * not globally across the whole database.
+                 *
+                 * This fixes the common SaaS bug where coupon codes conflict between apps.
+                 */
+                @UniqueConstraint(
+                        name = "uk_coupon_owner_code",
+                        columnNames = {"owner_project_id", "code"}
+                )
+        }
+)
 public class Coupon {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /**
+     * Tenant/app scope.
+     * We keep it as Long (not ManyToOne) for simplicity in promo module.
+     *
+     * IMPORTANT:
+     * Because this is just a Long, you must ALWAYS scope queries by ownerProjectId
+     * to prevent cross-tenant access (security issue).
+     */
     @Column(name = "owner_project_id", nullable = false)
     private Long ownerProjectId;
 
-    @Column(nullable = false, unique = true, length = 100)
+    /**
+     * Coupon code.
+     *
+     * ✅ IMPORTANT CHANGE:
+     * Remove unique=true because that would enforce global uniqueness across all tenants.
+     * The correct uniqueness is now enforced by the composite unique constraint above.
+     */
+    @Column(nullable = false, length = 100)
     private String code;
 
     @Column(length = 255)

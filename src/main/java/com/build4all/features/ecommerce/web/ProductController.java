@@ -344,9 +344,9 @@ public class ProductController {
             List<ProductResponse> result;
 
             if (itemTypeId != null) {
-                result = productService.listByItemType(itemTypeId);
+                result = productService.listByItemType(ownerProjectId, itemTypeId);
             } else if (categoryId != null) {
-                result = productService.listByCategory(categoryId);
+                result = productService.listByCategory(ownerProjectId, categoryId);
             } else {
                 result = productService.listByOwnerProject(ownerProjectId);
             }

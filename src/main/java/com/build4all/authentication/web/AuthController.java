@@ -2,6 +2,7 @@
 package com.build4all.authentication.web;
 
 import com.build4all.admin.domain.AdminUser;
+import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.authentication.dto.AdminLoginRequest;
 import com.build4all.admin.dto.AdminRegisterRequest;
@@ -16,6 +17,9 @@ import com.build4all.business.repository.BusinessStatusRepository;
 import com.build4all.business.repository.BusinessesRepository;
 import com.build4all.business.service.BusinessService;
 
+import com.build4all.project.domain.Project;
+import com.build4all.project.repository.ProjectRepository;
+
 import com.build4all.role.domain.Role;
 import com.build4all.role.repository.RoleRepository;
 
@@ -23,16 +27,12 @@ import com.build4all.security.JwtUtil;
 
 import com.build4all.user.domain.UserStatus;
 import com.build4all.user.domain.Users;
-import com.build4all.user.dto.UserSummaryDTO;
 import com.build4all.user.repository.UserStatusRepository;
-import com.build4all.user.repository.UsersRepository;
 import com.build4all.user.service.UserService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
-
-import jakarta.validation.Valid;
 
 import org.apache.coyote.BadRequestException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,7 +41,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -57,6 +57,16 @@ import java.util.*;
  *   3) /owner/complete-profile         -> creates the OWNER admin using the registration token
  *
  * Also exposes unified admin login that accepts any of SUPER_ADMIN / OWNER / MANAGER.
+ *
+ * ✅ Multi-tenant security:
+ * - USER tokens MUST include ownerProjectId (tenant scope).
+ * - BUSINESS tokens MUST include ownerProjectId (tenant scope).
+ * - OWNER tokens SHOULD include ownerProjectId (tenant scope via AdminUserProject aup_id).
+ * - SUPER_ADMIN tokens may omit ownerProjectId (global).
+ *
+ * ✅ With the new strict JwtUtil:
+ * - Any attempt to mint a USER token without ownerProjectId will throw.
+ * - Any attempt to mint a USER token for a different tenant than DB will throw.
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -74,7 +84,6 @@ public class AuthController {
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private GoogleAuthService googleAuthService;
 
-    @Autowired private UsersRepository usersRepository;
     @Autowired private UserStatusRepository userStatusRepository;
 
     @Autowired private BusinessesRepository businessRepository;
@@ -82,7 +91,13 @@ public class AuthController {
 
     // Real OTP generator/validator for Owner email signup
     @Autowired private OwnerOtpService ownerOtpService;
+
+    // AdminUserProject (AUP) link repository (tenant scope)
     @Autowired private AdminUserProjectRepository adminUserProjectRepo;
+
+    // ✅ Needed only for OWNER signup to create the first AdminUserProject row
+    // because AdminUserProject.project is non-nullable in your entity.
+    @Autowired private ProjectRepository projectRepository;
 
     /* =====================================================================================
      *  USER REGISTRATION (OWNER-LINKED / MULTI-TENANT)
@@ -237,7 +252,9 @@ public class AuthController {
         }
 
         if ("INACTIVE".equalsIgnoreCase(status)) {
-            String tempToken = jwtUtil.generateToken(existingUser);
+            // ✅ IMPORTANT: with strict JwtUtil, USER token MUST include tenant
+            String tempToken = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
+
             Map<String, Object> inactiveUserData = new HashMap<>();
             inactiveUserData.put("id", existingUser.getId());
             inactiveUserData.put("username", existingUser.getUsername());
@@ -260,7 +277,8 @@ public class AuthController {
         existingUser.setLastLogin(LocalDateTime.now());
         userService.save(existingUser);
 
-        String token = jwtUtil.generateToken(existingUser);
+        // ✅ IMPORTANT: with strict JwtUtil, USER token MUST include tenant
+        String token = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
 
         Map<String, Object> userData = new HashMap<>();
         userData.put("id", existingUser.getId());
@@ -306,7 +324,8 @@ public class AuthController {
         }
 
         if ("INACTIVE".equalsIgnoreCase(currentStatus)) {
-            String tempToken = jwtUtil.generateToken(existingUser);
+            // ✅ IMPORTANT: with strict JwtUtil, USER token MUST include tenant
+            String tempToken = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
 
             Map<String, Object> inactiveUserData = new HashMap<>();
             inactiveUserData.put("id", existingUser.getId());
@@ -330,7 +349,8 @@ public class AuthController {
         existingUser.setLastLogin(LocalDateTime.now());
         userService.save(existingUser);
 
-        String token = jwtUtil.generateToken(existingUser);
+        // ✅ IMPORTANT: with strict JwtUtil, USER token MUST include tenant
+        String token = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
 
         Map<String, Object> userData = new HashMap<>();
         userData.put("id", existingUser.getId());
@@ -354,9 +374,14 @@ public class AuthController {
      * ===================================================================================== */
     @PostMapping("/reactivate")
     public ResponseEntity<?> reactivateAccount(@RequestBody Map<String, Object> request) {
+
+        // ✅ With strict JwtUtil, we must mint a tenant-scoped token.
+        // So ownerProjectLinkId is REQUIRED here.
         Long userId = toLongOrNull(request.get("id"));
-        if (userId == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "id is required"));
+        Long ownerProjectLinkId = toLongOrNull(request.get("ownerProjectLinkId"));
+
+        if (userId == null || ownerProjectLinkId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "id and ownerProjectLinkId are required"));
         }
 
         Optional<Users> userOpt = userService.findById(userId);
@@ -365,6 +390,13 @@ public class AuthController {
         }
 
         Users user = userOpt.get();
+
+        // ✅ Extra safety: prevent reactivating across tenants
+        if (user.getOwnerProject() == null || user.getOwnerProject().getId() == null
+                || !ownerProjectLinkId.equals(user.getOwnerProject().getId())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Invalid tenancy"));
+        }
+
         String currentStatus = user.getStatus().getName();
         if (!"INACTIVE".equalsIgnoreCase(currentStatus)) {
             return ResponseEntity.badRequest().body(Map.of("error", "User is not inactive"));
@@ -377,7 +409,8 @@ public class AuthController {
         user.setLastLogin(LocalDateTime.now());
         userService.save(user);
 
-        String token = jwtUtil.generateToken(user);
+        // ✅ IMPORTANT: with strict JwtUtil, USER token MUST include tenant
+        String token = jwtUtil.generateToken(user, ownerProjectLinkId);
 
         Map<String, Object> userData = new HashMap<>();
         userData.put("id", user.getId());
@@ -386,6 +419,7 @@ public class AuthController {
         userData.put("lastName", user.getLastName());
         userData.put("email", user.getEmail());
         userData.put("profilePictureUrl", user.getProfilePictureUrl());
+        userData.put("ownerProjectLinkId", ownerProjectLinkId);
 
         return ResponseEntity.ok(Map.of(
                 "message", "Account reactivated successfully",
@@ -420,7 +454,7 @@ public class AuthController {
             return ResponseEntity.ok(Map.of(
                     "pendingId", pendingId,
                     "message", phoneNumber != null ? "Static code 123456 set for phone verification"
-                                                  : "Verification code sent to email"
+                            : "Verification code sent to email"
             ));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -531,7 +565,10 @@ public class AuthController {
                         .body(Map.of("error", "This account has been deleted and cannot be accessed."));
             }
             if ("INACTIVE".equalsIgnoreCase(statusName)) {
+                // ✅ Business token already embeds ownerProjectId from DB (business.ownerProjectLink.id)
+                // (Your JwtUtil.generateToken(Businesses) reads it from the entity.)
                 String tempToken = jwtUtil.generateToken(business);
+
                 Map<String, Object> businessData = baseBusinessMap(business);
                 businessData.put("userType", "business");
                 return ResponseEntity.ok(Map.of(
@@ -544,6 +581,7 @@ public class AuthController {
             business.setLastLoginAt(LocalDateTime.now());
             businessService.save(ownerProjectLinkId, business);
 
+            // ✅ Business token already embeds ownerProjectId from DB
             String token = jwtUtil.generateToken(business);
             Map<String, Object> businessData = baseBusinessMap(business);
 
@@ -590,7 +628,9 @@ public class AuthController {
                     .body(Map.of("error", "This account has been deleted and cannot be accessed."));
         }
         if ("INACTIVE".equalsIgnoreCase(statusName)) {
+            // ✅ Business token already embeds ownerProjectId from DB
             String tempToken = jwtUtil.generateToken(business);
+
             Map<String, Object> businessData = baseBusinessMap(business);
             businessData.put("userType", "business");
             return ResponseEntity.ok(Map.of(
@@ -603,6 +643,7 @@ public class AuthController {
         business.setLastLoginAt(LocalDateTime.now());
         businessService.save(ownerProjectLinkId, business);
 
+        // ✅ Business token already embeds ownerProjectId from DB
         String token = jwtUtil.generateToken(business);
         Map<String, Object> businessData = baseBusinessMap(business);
 
@@ -637,6 +678,7 @@ public class AuthController {
         business.setStatus(activeStatus);
         businessRepository.save(business);
 
+        // ✅ Business token already embeds ownerProjectId from DB (ownerProjectLink.id)
         String token = jwtUtil.generateToken(business);
         Map<String, Object> businessData = baseBusinessMap(business);
 
@@ -678,15 +720,22 @@ public class AuthController {
             Businesses business = admin.getBusiness();
             String status = (business.getStatus() != null) ? business.getStatus().getName().toUpperCase() : "";
             if ("INACTIVE".equals(status) ||
-                "INACTIVEBYADMIN".equals(status) ||
-                "INACTIVEBYBUSINESS".equals(status) ||
-                "DELETED".equals(status)) {
+                    "INACTIVEBYADMIN".equals(status) ||
+                    "INACTIVEBYBUSINESS".equals(status) ||
+                    "DELETED".equals(status)) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN)
                         .body(Map.of("error", "Cannot log in: This business account is disabled or deleted. Please contact support."));
             }
         }
 
-        String token = jwtUtil.generateToken(admin,null);
+        // ✅ Manager can be tenant-scoped if it belongs to a business
+        // If you want MANAGER to always be tenant-scoped, keep it like this:
+        Long ownerProjectId = null;
+        if (admin.getBusiness() != null && admin.getBusiness().getOwnerProjectLink() != null) {
+            ownerProjectId = admin.getBusiness().getOwnerProjectLink().getId(); // aup_id
+        }
+
+        String token = jwtUtil.generateToken(admin, ownerProjectId);
 
         Map<String, Object> managerData = new HashMap<>();
         managerData.put("id", admin.getAdminId());
@@ -706,7 +755,8 @@ public class AuthController {
                 "message", "Manager login successful",
                 "token", token,
                 "manager", managerData,
-                "business", businessData
+                "business", businessData,
+                "ownerProjectId", ownerProjectId
         ));
     }
 
@@ -738,6 +788,7 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Access denied: Not a Super Admin"));
         }
 
+        // ✅ SUPER_ADMIN is global. ownerProjectId is optional.
         String token = jwtUtil.generateToken(admin, null);
 
         Map<String, Object> adminData = new HashMap<>();
@@ -798,46 +849,68 @@ public class AuthController {
     }
 
     /* ---------- UNIFIED ADMIN LOGIN (SUPER_ADMIN / OWNER / MANAGER) ---------- */
-    @Operation(summary = "Unified Admin Login (SUPER_ADMIN / OWNER / MANAGER)")
+    @Operation(summary = "Unified Admin Login (SUPER_ADMIN / OWNER)")
     @PostMapping("/admin/login")
     public ResponseEntity<?> adminLogin(@RequestBody AdminLoginRequest request) {
-        if (request.getUsernameOrEmail() == null || request.getPassword() == null) {
+
+        if (request.getUsernameOrEmail() == null || request.getUsernameOrEmail().isBlank()
+                || request.getPassword() == null || request.getPassword().isBlank()) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("error", "Email/Username and password are required"));
+                    .body(Map.of("error", "usernameOrEmail and password are required"));
         }
 
-        var opt = adminUserService.findByUsernameOrEmail(request.getUsernameOrEmail());
+        var opt = adminUserService.findByUsernameOrEmail(request.getUsernameOrEmail().trim());
         if (opt.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Invalid credentials"));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid credentials"));
         }
 
-        var admin = opt.get();
+        AdminUser admin = opt.get();
+
         if (!passwordEncoder.matches(request.getPassword(), admin.getPasswordHash())) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Invalid credentials"));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid credentials"));
         }
 
-        String role = admin.getRole() != null ? admin.getRole().getName() : null;
-        if (role == null || !(role.equalsIgnoreCase("SUPER_ADMIN")
-                || role.equalsIgnoreCase("OWNER") || role.equalsIgnoreCase("MANAGER"))) {
+        String role = (admin.getRole() != null) ? admin.getRole().getName() : null;
+        if (role == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Access denied for this role"));
+        }
+
+        boolean isSuperAdmin = "SUPER_ADMIN".equalsIgnoreCase(role);
+        boolean isOwner = "OWNER".equalsIgnoreCase(role);
+
+        // ✅ Allowed roles ONLY
+        if (!isSuperAdmin && !isOwner) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Access denied for this role"));
         }
 
         Long ownerProjectId = null;
 
-            // pick the first app (AUP) for this owner
-            var links = adminUserProjectRepo.findByAdmin_AdminId(admin.getAdminId());
-
+        if (isOwner) {
+            // OWNER must be tenant-scoped (AUP id)
+            List<AdminUserProject> links = adminUserProjectRepo.findByAdmin_AdminId(admin.getAdminId());
             if (links == null || links.isEmpty()) {
-                // IMPORTANT: owner has no app/tenant link yet
-                // Either create one at registration time (recommended) OR fail clearly here
-                throw new IllegalArgumentException("Owner has no ownerProject link (AdminUserProject). Create an app first.");
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(Map.of("error", "Owner has no AdminUserProject link. Create an app first."));
             }
 
-            ownerProjectId = links.get(0).getId(); // ✅ this is aup_id
+            Long requestedOwnerProjectId = request.getOwnerProjectId();
 
+            // If frontend requested a specific AUP id, validate it belongs to this owner
+            if (requestedOwnerProjectId != null) {
+                boolean ok = links.stream().anyMatch(l -> requestedOwnerProjectId.equals(l.getId()));
+                if (!ok) {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                            .body(Map.of("error", "Invalid ownerProjectId for this owner"));
+                }
+                ownerProjectId = requestedOwnerProjectId;
+            } else {
+                // Default: pick the first AUP
+                ownerProjectId = links.get(0).getId();
+            }
+        }
+
+        // ✅ SUPER_ADMIN is global -> ownerProjectId stays null
         String token = jwtUtil.generateToken(admin, ownerProjectId);
 
         Map<String, Object> adminData = new HashMap<>();
@@ -856,6 +929,7 @@ public class AuthController {
                 "admin", adminData
         ));
     }
+
 
     /* =====================================================================================
      *  OWNER EMAIL-OTP SIGNUP (REAL OTP)
@@ -928,6 +1002,12 @@ public class AuthController {
             String firstName  = req.get("firstName");
             String lastName   = req.get("lastName");
 
+            // ✅ OPTIONAL but recommended fields to create first AUP correctly
+            // because AdminUserProject.project is NON-NULLABLE in your entity.
+            Long projectId = toLongOrNull(req.get("projectId"));
+            String slug = req.get("slug");       // optional, but uniqueness is enforced with (admin_id, project_id, slug)
+            String appName = req.get("appName"); // optional
+
             if (registrationToken == null || username == null || firstName == null || lastName == null) {
                 return ResponseEntity.badRequest().body(Map.of("error", "registrationToken, username, firstName, lastName are required"));
             }
@@ -956,7 +1036,58 @@ public class AuthController {
 
             adminUserService.save(owner);
 
-            String token = jwtUtil.generateToken(owner, null);
+            // ✅ Ensure owner has an AdminUserProject (tenant scope).
+            // Because your AdminUserProject requires:
+            // - admin (not null)
+            // - project (not null)
+            // So we must create the first AUP row here if owner has none yet.
+            var links = adminUserProjectRepo.findByAdmin_AdminId(owner.getAdminId());
+
+            Long ownerProjectId;
+            if (links == null || links.isEmpty()) {
+
+                if (projectId == null) {
+                    // We cannot create AUP without a project (your entity has nullable=false for project_id).
+                    // So force the client to provide it.
+                    throw new IllegalArgumentException("projectId is required to create the first AdminUserProject for OWNER signup");
+                }
+
+                Project project = projectRepository.findById(projectId)
+                        .orElseThrow(() -> new IllegalArgumentException("Invalid projectId"));
+
+                AdminUserProject aup = new AdminUserProject();
+                aup.setAdmin(owner);
+                aup.setProject(project);
+
+                // Optional fields
+                aup.setStatus("ACTIVE");
+
+                // If slug is not sent, you can auto-generate a stable one
+                // (still must respect unique constraint per admin+project+slug).
+                if (slug == null || slug.isBlank()) {
+                    aup.setSlug("app-" + owner.getAdminId() + "-" + projectId);
+                } else {
+                    aup.setSlug(slug.trim());
+                }
+
+                if (appName != null && !appName.isBlank()) {
+                    aup.setAppName(appName.trim());
+                } else {
+                    aup.setAppName("My App"); // sensible default
+                }
+
+                // License dates are optional; keep null unless you have a default policy
+                // aup.setValidFrom(LocalDate.now());
+                // aup.setEndTo(LocalDate.now().plusYears(1));
+
+                adminUserProjectRepo.save(aup);
+                ownerProjectId = aup.getId(); // ✅ aup_id
+            } else {
+                ownerProjectId = links.get(0).getId();
+            }
+
+            // ✅ IMPORTANT: OWNER token should include ownerProjectId
+            String token = jwtUtil.generateToken(owner, ownerProjectId);
 
             Map<String, Object> ownerData = new HashMap<>();
             ownerData.put("id", owner.getAdminId());
@@ -969,6 +1100,7 @@ public class AuthController {
             return ResponseEntity.ok(Map.of(
                     "message", "Owner registered successfully",
                     "token", token,
+                    "ownerProjectId", ownerProjectId,
                     "owner", ownerData
             ));
         } catch (Exception e) {

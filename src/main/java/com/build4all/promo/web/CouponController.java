@@ -31,11 +31,19 @@ public class CouponController {
         return auth == null ? "" : auth.replace("Bearer ", "").trim();
     }
 
+    /**
+     * Supports both OWNER and ROLE_OWNER (Spring Security often uses ROLE_*).
+     */
     private boolean hasRole(String token, String... roles) {
         String role = jwtUtil.extractRole(token);
         if (role == null) return false;
+
+        String normalized = role.toUpperCase();
         for (String r : roles) {
-            if (r.equalsIgnoreCase(role)) return true;
+            String expected = r.toUpperCase();
+            if (normalized.equals(expected) || normalized.equals("ROLE_" + expected)) {
+                return true;
+            }
         }
         return false;
     }
@@ -77,6 +85,7 @@ public class CouponController {
     public ResponseEntity<?> update(
             @RequestHeader("Authorization") String auth,
             @PathVariable Long id,
+            @RequestParam Long ownerProjectId,
             @RequestBody CouponRequest req
     ) {
         String token = strip(auth);
@@ -86,40 +95,8 @@ public class CouponController {
         }
 
         try {
-            Coupon updates = new Coupon();
-            if (req.getCode() != null) updates.setCode(req.getCode());
-            if (req.getDescription() != null) updates.setDescription(req.getDescription());
-            if (req.getDiscountType() != null) {
-                updates.setType(
-                        com.build4all.promo.domain.CouponDiscountType.valueOf(
-                                req.getDiscountType().toUpperCase()
-                        )
-                );
-            }
-            if (req.getDiscountValue() != null) updates.setValue(req.getDiscountValue());
-            if (req.getMaxUses() != null) updates.setGlobalUsageLimit(req.getMaxUses());
-            if (req.getMinOrderAmount() != null) updates.setMinOrderAmount(req.getMinOrderAmount());
-            if (req.getMaxDiscountAmount() != null) updates.setMaxDiscountAmount(req.getMaxDiscountAmount());
-            if (req.getStartsAt() != null) updates.setValidFrom(req.getStartsAt());
-            if (req.getExpiresAt() != null) updates.setValidTo(req.getExpiresAt());
-            updates.setActive(req.isActive());
-
-            Coupon updated = couponService.update(id, updates);
-            CouponResponse resp = new CouponResponse();
-            resp.setId(updated.getId());
-            resp.setOwnerProjectId(updated.getOwnerProjectId());
-            resp.setCode(updated.getCode());
-            resp.setDescription(updated.getDescription());
-            resp.setDiscountType(updated.getType() != null ? updated.getType().name() : null);
-            resp.setDiscountValue(updated.getValue());
-            resp.setMaxUses(updated.getGlobalUsageLimit());
-            resp.setMinOrderAmount(updated.getMinOrderAmount());
-            resp.setMaxDiscountAmount(updated.getMaxDiscountAmount());
-            resp.setStartsAt(updated.getValidFrom());
-            resp.setExpiresAt(updated.getValidTo());
-            resp.setActive(updated.isActive());
-
-            return ResponseEntity.ok(resp);
+            Coupon updated = couponService.update(ownerProjectId, id, req);
+            return ResponseEntity.ok(couponService.toResponse(updated));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
@@ -137,7 +114,8 @@ public class CouponController {
     @Operation(summary = "Delete coupon (OWNER only)")
     public ResponseEntity<?> delete(
             @RequestHeader("Authorization") String auth,
-            @PathVariable Long id
+            @PathVariable Long id,
+            @RequestParam Long ownerProjectId
     ) {
         String token = strip(auth);
         if (!hasRole(token, "OWNER")) {
@@ -146,7 +124,7 @@ public class CouponController {
         }
 
         try {
-            couponService.delete(id);
+            couponService.delete(ownerProjectId, id);
             return ResponseEntity.noContent().build();
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -162,7 +140,8 @@ public class CouponController {
     @Operation(summary = "Get coupon by id (OWNER only)")
     public ResponseEntity<?> get(
             @RequestHeader("Authorization") String auth,
-            @PathVariable Long id
+            @PathVariable Long id,
+            @RequestParam Long ownerProjectId
     ) {
         String token = strip(auth);
         if (!hasRole(token, "OWNER")) {
@@ -171,21 +150,8 @@ public class CouponController {
         }
 
         try {
-            Coupon c = couponService.get(id);
-            CouponResponse r = new CouponResponse();
-            r.setId(c.getId());
-            r.setOwnerProjectId(c.getOwnerProjectId());
-            r.setCode(c.getCode());
-            r.setDescription(c.getDescription());
-            r.setDiscountType(c.getType() != null ? c.getType().name() : null);
-            r.setDiscountValue(c.getValue());
-            r.setMaxUses(c.getGlobalUsageLimit());
-            r.setMinOrderAmount(c.getMinOrderAmount());
-            r.setMaxDiscountAmount(c.getMaxDiscountAmount());
-            r.setStartsAt(c.getValidFrom());
-            r.setExpiresAt(c.getValidTo());
-            r.setActive(c.isActive());
-            return ResponseEntity.ok(r);
+            Coupon c = couponService.get(ownerProjectId, id);
+            return ResponseEntity.ok(couponService.toResponse(c));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("error", e.getMessage()));
@@ -206,23 +172,9 @@ public class CouponController {
 
         List<CouponResponse> list = couponService.listByOwnerProject(ownerProjectId)
                 .stream()
-                .map(c -> {
-                    CouponResponse r = new CouponResponse();
-                    r.setId(c.getId());
-                    r.setOwnerProjectId(c.getOwnerProjectId());
-                    r.setCode(c.getCode());
-                    r.setDescription(c.getDescription());
-                    r.setDiscountType(c.getType() != null ? c.getType().name() : null);
-                    r.setDiscountValue(c.getValue());
-                    r.setMaxUses(c.getGlobalUsageLimit());
-                    r.setMinOrderAmount(c.getMinOrderAmount());
-                    r.setMaxDiscountAmount(c.getMaxDiscountAmount());
-                    r.setStartsAt(c.getValidFrom());
-                    r.setExpiresAt(c.getValidTo());
-                    r.setActive(c.isActive());
-                    return r;
-                })
+                .map(couponService::toResponse)
                 .collect(Collectors.toList());
+
         return ResponseEntity.ok(list);
     }
 

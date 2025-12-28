@@ -67,6 +67,25 @@ public class ProductService {
     }
 
     /**
+     *  Validate that itemType/category belongs to the same project as the ownerProject.
+     */
+    private void assertItemTypeBelongsToOwnerProject(AdminUserProject ownerProject, ItemType itemType) {
+        if (ownerProject == null) throw new IllegalArgumentException("ownerProject is required");
+        if (itemType == null) throw new IllegalArgumentException("itemType is required");
+
+        if (ownerProject.getProject() == null || ownerProject.getProject().getId() == null) {
+            throw new IllegalArgumentException("OwnerProject project is missing");
+        }
+        if (itemType.getCategory() == null || itemType.getCategory().getProject() == null || itemType.getCategory().getProject().getId() == null) {
+            throw new IllegalArgumentException("ItemType category/project is missing");
+        }
+
+        if (!itemType.getCategory().getProject().getId().equals(ownerProject.getProject().getId())) {
+            throw new IllegalArgumentException("Category/ItemType does not belong to this ownerProject's project");
+        }
+    }
+
+    /**
      * Resolve the ItemType when the client only sends categoryId.
      * If a default ItemType exists for that category → reuse it.
      * Otherwise create a new hidden "DEFAULT" ItemType linked to that category.
@@ -112,6 +131,9 @@ public class ProductService {
         } else {
             throw new IllegalArgumentException("Either itemTypeId or categoryId must be provided");
         }
+
+        // enforce tenant/project consistency
+        assertItemTypeBelongsToOwnerProject(ownerProject, itemType);
 
         Currency currency;
         if (request.getCurrencyId() != null) {
@@ -210,6 +232,9 @@ public class ProductService {
                 newItemType = resolveDefaultItemTypeForCategory(request.getCategoryId());
             }
 
+            // Enforce tenant/project consistency (ownerProject from existing product)
+            assertItemTypeBelongsToOwnerProject(p.getOwnerProject(), newItemType);
+
             p.setItemType(newItemType);
         }
 
@@ -267,6 +292,9 @@ public class ProductService {
                     ? itemTypeRepository.findById(request.getItemTypeId())
                         .orElseThrow(() -> new IllegalArgumentException("Invalid item type"))
                     : resolveDefaultItemTypeForCategory(request.getCategoryId());
+
+            // enforce tenant/project consistency (ownerProject from existing product)
+            assertItemTypeBelongsToOwnerProject(p.getOwnerProject(), newItemType);
 
             p.setItemType(newItemType);
         }
@@ -400,17 +428,50 @@ public class ProductService {
                 .toList();
     }
 
-    public List<ProductResponse> listByItemType(Long itemTypeId) {
-        return productRepository.findByItemType_Id(itemTypeId).stream()
+    public List<ProductResponse> listByItemType(Long ownerProjectId, Long itemTypeId) {
+        if (ownerProjectId == null) throw new IllegalArgumentException("ownerProjectId is required");
+        if (itemTypeId == null) throw new IllegalArgumentException("itemTypeId is required");
+
+        // Optional safety: validate itemType belongs to same project as ownerProject
+        AdminUserProject aup = adminUserProjectRepository.findById(ownerProjectId)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid ownerProjectId"));
+
+        ItemType type = itemTypeRepository.findById(itemTypeId)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid itemTypeId"));
+
+        if (!type.getCategory().getProject().getId().equals(aup.getProject().getId())) {
+            throw new IllegalArgumentException("itemTypeId does not belong to ownerProject's project");
+        }
+
+        return productRepository
+                .findByOwnerProject_IdAndItemType_Id(ownerProjectId, itemTypeId)
+                .stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
 
-    public List<ProductResponse> listByCategory(Long categoryId) {
-        return productRepository.findByItemType_Category_Id(categoryId).stream()
+    public List<ProductResponse> listByCategory(Long ownerProjectId, Long categoryId) {
+        if (ownerProjectId == null) throw new IllegalArgumentException("ownerProjectId is required");
+        if (categoryId == null) throw new IllegalArgumentException("categoryId is required");
+
+        // Optional safety: validate category belongs to same project as ownerProject
+        AdminUserProject aup = adminUserProjectRepository.findById(ownerProjectId)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid ownerProjectId"));
+
+        Category cat = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid categoryId"));
+
+        if (!cat.getProject().getId().equals(aup.getProject().getId())) {
+            throw new IllegalArgumentException("categoryId does not belong to ownerProject's project");
+        }
+
+        return productRepository
+                .findByOwnerProject_IdAndItemType_Category_Id(ownerProjectId, categoryId)
+                .stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
+
 
     public void delete(Long id) {
         if (!productRepository.existsById(id)) {

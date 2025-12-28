@@ -1,3 +1,4 @@
+// src/main/java/com/build4all/user/service/UserService.java
 package com.build4all.user.service;
 
 import com.build4all.admin.domain.AdminUserProject;
@@ -40,6 +41,11 @@ import java.util.stream.Collectors;
  * Important SQL note:
  * - Any repository call below will translate to SQL.
  * - I’m adding the “equivalent SQL” as comments right above the exact call.
+ *
+ * ✅ SECURITY NOTE (important):
+ * - For authentication/login: ALWAYS use tenant-scoped lookups:
+ *   findByEmailOptional / findByPhoneOptional / findByUsernameOptional.
+ * - Never use global findByEmail(email) for login (it breaks tenancy and leaks cross-tenant).
  */
 @Service
 public class UserService {
@@ -101,6 +107,66 @@ public class UserService {
         if (ownerProjectLinkId == null) throw new IllegalArgumentException("ownerProjectLinkId is required");
         return aupRepo.findById(ownerProjectLinkId)
                 .orElseThrow(() -> new RuntimeException("AdminUserProject not found: " + ownerProjectLinkId));
+    }
+
+    /* ====================== LOGIN (tenant-safe OPTIONAL) ===================== */
+
+    /**
+     * ✅ Tenant-safe lookup by email for login (case-insensitive).
+     *
+     * Returns Optional.empty() if:
+     * - user does not exist in this tenant
+     * - OR email exists but in another tenant (we MUST NOT leak)
+     *
+     * SQL:
+     *   SELECT * FROM users
+     *   WHERE LOWER(email)=LOWER(:email)
+     *     AND aup_id=:ownerProjectLinkId
+     *   LIMIT 1;
+     */
+    public Optional<Users> findByEmailOptional(String email, Long ownerProjectLinkId) {
+        if (ownerProjectLinkId == null) return Optional.empty();
+        if (email == null || email.isBlank()) return Optional.empty();
+
+        // NOTE: this method must exist in UsersRepository:
+        // Optional<Users> findByEmailIgnoreCaseAndOwnerProject_Id(String email, Long ownerProjectId);
+        return userRepository.findByEmailIgnoreCaseAndOwnerProject_Id(email.trim(), ownerProjectLinkId);
+    }
+
+    /**
+     * ✅ Tenant-safe lookup by phone for login.
+     *
+     * SQL:
+     *   SELECT * FROM users
+     *   WHERE phone_number=:phoneNumber
+     *     AND aup_id=:ownerProjectLinkId
+     *   LIMIT 1;
+     */
+    public Optional<Users> findByPhoneOptional(String phoneNumber, Long ownerProjectLinkId) {
+        if (ownerProjectLinkId == null) return Optional.empty();
+        if (phoneNumber == null || phoneNumber.isBlank()) return Optional.empty();
+
+        // Your repo already uses the non-Optional version; we wrap it into Optional.
+        Users u = userRepository.findByPhoneNumberAndOwnerProject_Id(phoneNumber.trim(), ownerProjectLinkId);
+        return Optional.ofNullable(u);
+    }
+
+    /**
+     * ✅ Tenant-safe lookup by username for login (case-insensitive).
+     *
+     * SQL:
+     *   SELECT * FROM users
+     *   WHERE LOWER(username)=LOWER(:username)
+     *     AND aup_id=:ownerProjectLinkId
+     *   LIMIT 1;
+     */
+    public Optional<Users> findByUsernameOptional(String username, Long ownerProjectLinkId) {
+        if (ownerProjectLinkId == null) return Optional.empty();
+        if (username == null || username.isBlank()) return Optional.empty();
+
+        // NOTE: this method must exist in UsersRepository:
+        // Optional<Users> findByUsernameIgnoreCaseAndOwnerProject_Id(String username, Long ownerProjectId);
+        return userRepository.findByUsernameIgnoreCaseAndOwnerProject_Id(username.trim(), ownerProjectLinkId);
     }
 
     /* ====================== Registration (tenant) ===================== */
@@ -223,15 +289,14 @@ public class UserService {
 
         return true;
     }
-    
-    
- // src/main/java/com/build4all/user/service/UserService.java
+
+    // src/main/java/com/build4all/user/service/UserService.java
 
     @Transactional
     public Users updateUserProfile(
             Long userId,
             Long ownerProjectLinkId,
-            Long tokenUserId,            
+            Long tokenUserId,
             String username,
             String firstName,
             String lastName,
@@ -240,17 +305,15 @@ public class UserService {
             Boolean imageRemoved
     ) throws IOException {
 
-
         if (userId == null || ownerProjectLinkId == null)
             throw new IllegalArgumentException("userId and ownerProjectLinkId are required");
 
         Users user = getUserById(userId, ownerProjectLinkId); // tenant-safe
 
-     // ✅ self-only security by token id
+        // ✅ self-only security by token id
         if (tokenUserId == null || !userId.equals(tokenUserId)) {
             throw new RuntimeException("Access denied");
         }
-
 
         // ✅ username uniqueness per tenant (only if changed)
         if (username != null && !username.isBlank()) {
@@ -281,7 +344,6 @@ public class UserService {
         user.setUpdatedAt(LocalDateTime.now());
         return userRepository.save(user);
     }
-
 
     /**
      * Resend verification code (email or phone).
@@ -459,18 +521,33 @@ public class UserService {
 
     /* ====================== Lookups (tenant) ====================== */
 
+    /**
+     * Tenant-scoped lookup (EMAIL).
+     *
+     * ✅ For login, prefer findByEmailOptional(...) to avoid any leaking behavior.
+     */
     public Users findByEmail(String email, Long ownerProjectLinkId) {
         // SQL:
         //   SELECT * FROM users WHERE email=:email AND aup_id=:ownerProjectLinkId LIMIT 1;
         return userRepository.findByEmailAndOwnerProject_Id(email, ownerProjectLinkId);
     }
 
+    /**
+     * Tenant-scoped lookup (PHONE).
+     *
+     * ✅ For login, prefer findByPhoneOptional(...) to avoid any leaking behavior.
+     */
     public Users findByPhoneNumber(String phone, Long ownerProjectLinkId) {
         // SQL:
         //   SELECT * FROM users WHERE phone_number=:phone AND aup_id=:ownerProjectLinkId LIMIT 1;
         return userRepository.findByPhoneNumberAndOwnerProject_Id(phone, ownerProjectLinkId);
     }
 
+    /**
+     * Tenant-scoped lookup (USERNAME).
+     *
+     * ✅ For login, prefer findByUsernameOptional(...) to avoid any leaking behavior.
+     */
     public Users findByUsername(String username, Long ownerProjectLinkId) {
         // SQL:
         //   SELECT * FROM users WHERE username=:username AND aup_id=:ownerProjectLinkId LIMIT 1;

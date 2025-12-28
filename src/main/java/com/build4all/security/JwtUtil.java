@@ -5,7 +5,6 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
-// import jakarta.servlet.http.HttpServletRequest; // (unused here because you used fully-qualified type below)
 
 import org.springframework.stereotype.Component;
 
@@ -20,17 +19,25 @@ import java.util.Map;
 
 /**
  * Utility class for generating and parsing JWTs for:
- * - Users  (role = USER)
+ * - Users      (role = USER)
  * - Businesses (role = BUSINESS)
- * - Admins (role = SUPER_ADMIN / OWNER / MANAGER)
+ * - Admins     (role = SUPER_ADMIN / OWNER)
  *
- * Also supports a short-lived "Owner Registration Token" used between OTP verification
- * and final owner account creation.
+ * Multi-tenant (Build4All):
+ * - ownerProjectId is the tenant scope (AdminUserProject link id = aup_id)
+ * - For USER login: ownerProjectId is REQUIRED
+ * - For BUSINESS login: ownerProjectId is REQUIRED
+ * - For OWNER login: ownerProjectId is REQUIRED (owner is tenant-scoped by AUP)
+ * - For SUPER_ADMIN: ownerProjectId is optional (can be global)
  *
- * How this class is used in your project:
- * - Controllers/filters generate tokens at login (generateToken(...))
- * - Controllers/filters validate/authorize requests by reading claims (extractRole/extractId/isXToken)
- * - "Owner registration token" is a special temporary token used to carry data after OTP verification.
+ * ✅ CRITICAL SECURITY RULES:
+ * 1) NEVER issue a USER token without ownerProjectId.
+ * 2) NEVER issue a BUSINESS token without ownerProjectId.
+ * 3) NEVER issue an OWNER token without ownerProjectId.
+ * 4) If a controller/service passes a wrong tenant id, JwtUtil MUST block cross-tenant minting.
+ *
+ * Why enforce here?
+ * - Even if a controller has a bug, JwtUtil is the last line of defense before token minting.
  */
 @Component
 public class JwtUtil {
@@ -42,7 +49,6 @@ public class JwtUtil {
     private final long expirationTime;
 
     public JwtUtil(JwtProperties jwtProperties) {
-        // Secret must be long enough for HS256, otherwise jjwt will throw an exception at startup.
         this.key = Keys.hmacShaKeyFor(jwtProperties.getSecretKey().getBytes());
         this.expirationTime = jwtProperties.getExpirationTime();
     }
@@ -50,30 +56,64 @@ public class JwtUtil {
     /* ======================== LOGIN TOKENS ======================== */
 
     /**
-     * Generates a JWT for a normal end-user.
+     * ⚠️ LEGACY / BACKWARD COMPATIBILITY ONLY.
      *
-     * Token content:
-     * - subject: user email if exists, otherwise phone
-     * - claims: id, username, firstName, lastName, profileImageUrl, role
+     * Previously this could mint a USER token without ownerProjectId.
+     * In a strict multi-tenant system, that is unsafe.
      *
-     * Note:
-     * - "role" is taken from DB (user.getRole().getName()) and defaults to "USER" if null.
+     * ✅ NOW ENFORCED:
+     * - USER token MUST contain ownerProjectId.
+     * - We derive it ONLY from DB (user.ownerProject.id).
+     * - If DB tenant is missing -> throw.
+     *
+     * Recommendation:
+     * - Prefer generateToken(user, ownerProjectId) everywhere.
      */
     public String generateToken(Users user) {
+        if (user == null) throw new RuntimeException("User cannot be null");
 
-        var builder = Jwts.builder()
-                .setSubject(String.valueOf(user.getId()))
-                //.setSubject(user.getEmail())
-                .claim("id", user.getId())
-                .claim("username", user.getUsername())
-                .claim("role", "USER");
-
-        // ✅ include tenant from DB
-        if (user.getOwnerProject() != null && user.getOwnerProject().getId() != null) {
-            builder.claim("ownerProjectId", user.getOwnerProject().getId());
+        Long dbTenantId = (user.getOwnerProject() != null) ? user.getOwnerProject().getId() : null;
+        if (dbTenantId == null) {
+            throw new RuntimeException("Cannot generate USER token: ownerProjectId is missing on the user record");
         }
 
-        return builder
+        return generateToken(user, dbTenantId);
+    }
+
+    /**
+     * ✅ STRICT (Recommended):
+     * Generates a USER token while forcing tenant scope.
+     *
+     * Policy:
+     * - ownerProjectId is REQUIRED for USER login.
+     * - If user.ownerProject (DB) exists, it MUST equal ownerProjectId.
+     * - No fallback. No silent behavior.
+     *
+     * Why strict?
+     * - Prevents cross-tenant token minting even if user is loaded incorrectly.
+     */
+    public String generateToken(Users user, Long ownerProjectId) {
+
+        if (user == null) {
+            throw new RuntimeException("User cannot be null");
+        }
+
+        if (ownerProjectId == null) {
+            throw new RuntimeException("ownerProjectId is required for USER token");
+        }
+
+        // ✅ HARD TENANCY CHECK (anti cross-tenant token minting)
+        Long dbTenantId = (user.getOwnerProject() != null) ? user.getOwnerProject().getId() : null;
+        if (dbTenantId != null && !ownerProjectId.equals(dbTenantId)) {
+            throw new RuntimeException("Invalid tenancy: user does not belong to this ownerProjectId");
+        }
+
+        return Jwts.builder()
+                .setSubject(String.valueOf(user.getId()))
+                .claim("id", user.getId())
+                .claim("username", user.getUsername())
+                .claim("role", "USER")
+                .claim("ownerProjectId", ownerProjectId) // ✅ always embed tenant
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
                 .signWith(key, SignatureAlgorithm.HS256)
@@ -84,30 +124,36 @@ public class JwtUtil {
      * Generates a JWT for a business account.
      *
      * Token content:
-     * - subject: business email if exists, otherwise phone (must exist)
-     * - claims: id, businessName, logoUrl, bannerUrl, role
+     * - subject: businessId as string
+     * - claims : id, username, role, ownerProjectId
+     *
+     * Tenant:
+     * - ownerProjectId = business.getOwnerProjectLink().id (AUP id)
+     *
+     * ✅ ENFORCED:
+     * - BUSINESS token MUST include ownerProjectId.
+     * - If missing -> throw (never mint an unscoped business token).
      */
     public String generateToken(Businesses business) {
+        if (business == null) throw new RuntimeException("Business cannot be null");
 
-        // 👇 role from DB, default to BUSINESS if null
+        // role from DB, default to BUSINESS if null
         String roleName = "BUSINESS";
         if (business.getRole() != null && business.getRole().getName() != null) {
             roleName = business.getRole().getName();
         }
 
-        var builder = Jwts.builder()
-                //.setSubject(business.getEmail())         // Business principal is email (your getUsername returns email)
-                .setSubject(String.valueOf(business.getId()))
-                .claim("id", business.getId())           // Businesses primary key
-                .claim("username", business.getUsername())
-                .claim("role", roleName);
-
-        // ✅ tenant scope = aup_id (AdminUserProject link)
-        if (business.getOwnerProjectLink() != null && business.getOwnerProjectLink().getId() != null) {
-            builder.claim("ownerProjectId", business.getOwnerProjectLink().getId());
+        Long tenantId = (business.getOwnerProjectLink() != null) ? business.getOwnerProjectLink().getId() : null;
+        if (tenantId == null) {
+            throw new RuntimeException("Cannot generate BUSINESS token: ownerProjectId (AUP id) is missing on business record");
         }
 
-        return builder
+        return Jwts.builder()
+                .setSubject(String.valueOf(business.getId()))
+                .claim("id", business.getId())
+                .claim("username", business.getUsername())
+                .claim("role", roleName)
+                .claim("ownerProjectId", tenantId) // ✅ always embed tenant
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
                 .signWith(key, SignatureAlgorithm.HS256)
@@ -115,21 +161,32 @@ public class JwtUtil {
     }
 
     /**
-     * Generates a JWT for an admin user (SUPER_ADMIN / OWNER / MANAGER ...).
+     * Generates a JWT for an admin user (SUPER_ADMIN / OWNER).
      *
      * Token content:
      * - subject: admin email
-     * - claims: id (adminId), username, role
+     * - claims : id (adminId), username, role, ownerProjectId?
      *
-     * NOTE:
-     * - The default roleName="USER" is just a fallback; usually adminUser.role is never null.
-     * - extractAdminId() simply delegates to extractId() (same claim name "id").
+     * Tenant:
+     * - OWNER must include ownerProjectId (tenant-scoped).
+     * - SUPER_ADMIN may include it (optional).
+     *
+     * ✅ ENFORCED:
+     * - If role == OWNER -> ownerProjectId is REQUIRED, otherwise throw.
+     * - If role == SUPER_ADMIN -> ownerProjectId optional.
      */
     public String generateToken(AdminUser adminUser, Long ownerProjectId) {
+
+        if (adminUser == null) throw new RuntimeException("AdminUser cannot be null");
 
         String roleName = "USER";
         if (adminUser.getRole() != null && adminUser.getRole().getName() != null) {
             roleName = adminUser.getRole().getName();
+        }
+
+        // ✅ OWNER must ALWAYS be tenant-scoped
+        if ("OWNER".equalsIgnoreCase(roleName) && ownerProjectId == null) {
+            throw new RuntimeException("Cannot generate OWNER token: ownerProjectId is required");
         }
 
         var builder = Jwts.builder()
@@ -138,7 +195,7 @@ public class JwtUtil {
                 .claim("username", adminUser.getUsername())
                 .claim("role", roleName);
 
-        // ✅ optional
+        // SUPER_ADMIN may be global; OWNER is required above
         if (ownerProjectId != null) {
             builder.claim("ownerProjectId", ownerProjectId);
         }
@@ -150,24 +207,24 @@ public class JwtUtil {
                 .compact();
     }
 
+    /**
+     * Helper: returns all claims for debugging/advanced checks.
+     * Accepts raw token or "Bearer <token>".
+     */
     public Claims extractAllClaims(String token) {
+        String jwt = normalize(token);
         return Jwts.parserBuilder()
-                .setSigningKey(key)          // your Key field in JwtUtil (Keys.hmacShaKeyFor(...))
+                .setSigningKey(key)
                 .build()
-                .parseClaimsJws(token)
+                .parseClaimsJws(jwt)
                 .getBody();
     }
+
     /* ======================== EXTRACTION HELPERS ======================== */
 
-    /**
-     * Reads the "role" claim from the token.
-     *
-     * Returns null if token is invalid/expired/signature mismatch/etc.
-     * (You intentionally swallow exceptions and return null to simplify callers.)
-     */
     public String extractRole(String token) {
         try {
-            String jwt = normalize(token); // removes optional "Bearer " prefix
+            String jwt = normalize(token);
             return Jwts.parserBuilder()
                     .setSigningKey(key)
                     .build()
@@ -179,14 +236,6 @@ public class JwtUtil {
         }
     }
 
-    /**
-     * Reads the "id" claim from the token.
-     *
-     * Used for:
-     * - Users: userId
-     * - Businesses: businessId
-     * - Admins: adminId
-     */
     public Long extractId(String token) {
         String jwt = normalize(token);
         return Jwts.parserBuilder()
@@ -197,21 +246,10 @@ public class JwtUtil {
                 .get("id", Long.class);
     }
 
-    /**
-     * Semantic alias for admin tokens. In your tokens, adminId is stored in the same claim "id".
-     */
     public Long extractAdminId(String token) {
         return extractId(token);
     }
 
-    /**
-     * Returns the JWT subject (setSubject(...)).
-     *
-     * In your project you use it as:
-     * - Users: email or phone
-     * - Businesses: email or phone
-     * - Admins: email
-     */
     public String extractUsername(String token) {
         String jwt = normalize(token);
         return Jwts.parserBuilder()
@@ -222,22 +260,11 @@ public class JwtUtil {
                 .getSubject();
     }
 
-    /**
-     * ✅ New helper used by JwtAuthenticationFilter
-     *
-     * Validates that:
-     * - token is parseable
-     * - signature matches
-     * - token is not expired
-     *
-     * If any of these fails, returns false.
-     */
     public boolean validateToken(String token) {
         try {
             String jwt = normalize(token);
             if (jwt == null || jwt.isBlank()) return false;
 
-            // parseClaimsJws will throw if signature invalid OR expired OR malformed
             Jwts.parserBuilder()
                     .setSigningKey(key)
                     .build()
@@ -249,10 +276,8 @@ public class JwtUtil {
         }
     }
 
-    /**
-     * Checks if token role == BUSINESS (case-insensitive).
-     * This relies on extractRole(...) which returns null if token invalid.
-     */
+    /* ======================== ROLE CHECKS ======================== */
+
     public boolean isBusinessToken(String token) {
         try {
             String role = extractRole(token);
@@ -262,7 +287,6 @@ public class JwtUtil {
         }
     }
 
-    /** Checks if token role == USER. */
     public boolean isUserToken(String token) {
         try {
             String role = extractRole(token);
@@ -273,22 +297,10 @@ public class JwtUtil {
     }
 
     /**
-     * Checks if token belongs to an admin (SUPER_ADMIN or MANAGER).
-     *
-     * NOTE:
-     * - OWNER is NOT included here intentionally, that's why you later have isOwnerToken() and isAdminOrOwner().
+     * Admin token here means SUPER_ADMIN (global admin).
+     * OWNER is checked via isOwnerToken().
      */
     public boolean isAdminToken(String token) {
-        try {
-            String role = extractRole(token);
-            return role != null && ("SUPER_ADMIN".equalsIgnoreCase(role) || "MANAGER".equalsIgnoreCase(role));
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    /** Checks if token role == SUPER_ADMIN. */
-    public boolean isSuperAdmin(String token) {
         try {
             String role = extractRole(token);
             return role != null && "SUPER_ADMIN".equalsIgnoreCase(role);
@@ -297,17 +309,10 @@ public class JwtUtil {
         }
     }
 
-    /** Checks if token role == MANAGER. */
-    public boolean isManagerToken(String token) {
-        try {
-            String role = extractRole(token);
-            return role != null && "MANAGER".equalsIgnoreCase(role);
-        } catch (Exception e) {
-            return false;
-        }
+    public boolean isSuperAdmin(String token) {
+        return isAdminToken(token);
     }
 
-    /** Checks if token role == OWNER. */
     public boolean isOwnerToken(String token) {
         try {
             String role = extractRole(token);
@@ -317,19 +322,12 @@ public class JwtUtil {
         }
     }
 
-    /**
-     * Convenience check used by controllers:
-     * - allow both "admin" roles (SUPER_ADMIN/MANAGER) and "OWNER".
-     */
     public boolean isAdminOrOwner(String token) {
         return isAdminToken(token) || isOwnerToken(token);
     }
 
-    /**
-     * Extracts businessId from token after asserting it's a BUSINESS token.
-     *
-     * If it's not a business token, you throw RuntimeException to stop controller flow.
-     */
+    /* ======================== ID EXTRACTION HELPERS ======================== */
+
     public Long extractBusinessId(String token) {
         String jwt = normalize(token);
         if (!isBusinessToken(jwt)) {
@@ -338,34 +336,46 @@ public class JwtUtil {
         return extractId(jwt);
     }
 
-    // Add this method inside JwtUtil (same class), near extractBusinessId() for consistency.
-
     /**
-     * Extracts ownerProjectId from token after asserting it's an OWNER (or ADMIN/OWNER) token.
+     * Extract tenant scope for OWNER/SUPER_ADMIN tokens.
      *
-     * ✅ Why we need it:
-     * - OWNER (application admin) must be scoped to ONE application (tenant).
-     * - Controllers/services can use ownerProjectId to load orders/config safely for that tenant.
-     *
-     * ✅ Expected claim:
-     * - ownerProjectId : Long
-     *
-     * ⚠️ IMPORTANT:
-     * - This will only work if your OWNER token actually contains the claim "ownerProjectId".
-     * - If you don't add this claim when generating OWNER tokens, this method will throw.
-     *
-     * Recommended policy:
-     * - OWNER must always have ownerProjectId.
-     * - SUPER_ADMIN typically does NOT need ownerProjectId (they can query any application),
-     *   but you can still include it if you want (optional).
+     * ✅ IMPORTANT:
+     * - OWNER token MUST have ownerProjectId, otherwise exception.
+     * - SUPER_ADMIN token MAY be missing ownerProjectId (global access).
      */
     public Long extractOwnerProjectId(String token) {
         String jwt = normalize(token);
 
-        // We allow OWNER tokens. Optionally allow SUPER_ADMIN/MANAGER to use it too.
-        // If you want ONLY OWNER, replace the condition with: if (!isOwnerToken(jwt)) ...
         if (!(isOwnerToken(jwt) || isAdminToken(jwt))) {
-            throw new RuntimeException("Invalid token: Not an OWNER/ADMIN token");
+            throw new RuntimeException("Invalid token: Not an OWNER/SUPER_ADMIN token");
+        }
+
+        try {
+            Long ownerProjectId = Jwts.parserBuilder()
+                    .setSigningKey(key)
+                    .build()
+                    .parseClaimsJws(jwt)
+                    .getBody()
+                    .get("ownerProjectId", Long.class);
+
+            // OWNER must have it; SUPER_ADMIN may not.
+            if (ownerProjectId == null && isOwnerToken(jwt)) {
+                throw new RuntimeException("OWNER token missing ownerProjectId claim");
+            }
+
+            return ownerProjectId; // may be null only for SUPER_ADMIN
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Invalid token: cannot extract ownerProjectId");
+        }
+    }
+
+    public Long extractOwnerProjectIdForUser(String token) {
+        String jwt = normalize(token);
+
+        if (!isUserToken(jwt)) {
+            throw new RuntimeException("Invalid token: Not a USER token");
         }
 
         try {
@@ -377,21 +387,50 @@ public class JwtUtil {
                     .get("ownerProjectId", Long.class);
 
             if (ownerProjectId == null) {
-                throw new RuntimeException("Token does not contain ownerProjectId claim");
+                // ✅ USER tokens are ALWAYS tenant-scoped
+                throw new RuntimeException("USER token missing ownerProjectId claim");
             }
 
             return ownerProjectId;
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
-            // Keep consistent with your existing behavior (RuntimeException for controller flow stop)
             throw new RuntimeException("Invalid token: cannot extract ownerProjectId");
         }
     }
 
-
     /**
-     * Helper to read Authorization header and return the raw JWT (without "Bearer ").
-     * Throws if header is missing or not bearer.
+     * (Optional utility) Extract tenant scope for BUSINESS tokens.
+     * Useful for business-scoped endpoints.
      */
+    public Long extractOwnerProjectIdForBusiness(String token) {
+        String jwt = normalize(token);
+
+        if (!isBusinessToken(jwt)) {
+            throw new RuntimeException("Invalid token: Not a BUSINESS token");
+        }
+
+        try {
+            Long ownerProjectId = Jwts.parserBuilder()
+                    .setSigningKey(key)
+                    .build()
+                    .parseClaimsJws(jwt)
+                    .getBody()
+                    .get("ownerProjectId", Long.class);
+
+            if (ownerProjectId == null) {
+                // ✅ BUSINESS tokens are ALWAYS tenant-scoped
+                throw new RuntimeException("BUSINESS token missing ownerProjectId claim");
+            }
+
+            return ownerProjectId;
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Invalid token: cannot extract ownerProjectId");
+        }
+    }
+
     public String extractTokenFromRequest(jakarta.servlet.http.HttpServletRequest request) {
         String bearerToken = request.getHeader("Authorization");
         if (bearerToken != null && bearerToken.toLowerCase().startsWith("bearer ")) {
@@ -400,13 +439,6 @@ public class JwtUtil {
         throw new RuntimeException("Authorization token missing or invalid");
     }
 
-    /**
-     * Validates that:
-     * - token is a USER token
-     * - token's id matches the requested userId
-     *
-     * Used for "user can only access their own data" authorization checks.
-     */
     public void validateUserToken(String token, Long userId) {
         if (!isUserToken(token)) {
             throw new RuntimeException("Invalid token for user");
@@ -415,41 +447,26 @@ public class JwtUtil {
         if (!tokenUserId.equals(userId)) {
             throw new RuntimeException("Token user ID does not match request user ID");
         }
+
+        // ✅ Ensure tenant exists in USER token (enforced at minting + re-checked here)
+        extractOwnerProjectIdForUser(token);
     }
 
     /* ==================== OWNER REGISTRATION TOKEN ==================== */
 
-    /**
-     * Generates a short-lived token used during owner registration flow.
-     *
-     * What makes it special:
-     * - claim("type", "OWNER_REG") so you can distinguish it from normal login tokens
-     * - includes encoded passwordHash so you can finish registration later without storing plaintext
-     *
-     * Typical flow:
-     * 1) OTP verified -> generateOwnerRegistrationToken(...)
-     * 2) client calls "complete registration" endpoint with this token
-     * 3) parseOwnerRegistrationToken(...) to retrieve email + passwordHash
-     */
     public String generateOwnerRegistrationToken(String email, String passwordHash, long ttlMillis) {
         long now = System.currentTimeMillis();
         return Jwts.builder()
-                .setSubject(email)                      // subject = email
-                .claim("type", "OWNER_REG")             // marker for registration
+                .setSubject(email)
+                .claim("type", "OWNER_REG")
                 .claim("email", email)
-                .claim("passwordHash", passwordHash)    // already encoded!
+                .claim("passwordHash", passwordHash)
                 .setIssuedAt(new Date(now))
                 .setExpiration(new Date(now + ttlMillis))
                 .signWith(key, SignatureAlgorithm.HS256)
                 .compact();
     }
 
-    /**
-     * Parses the owner registration token and extracts the needed values.
-     *
-     * Security logic:
-     * - Enforces claim("type") == "OWNER_REG" so normal login tokens cannot be used here.
-     */
     public Map<String, Object> parseOwnerRegistrationToken(String token) {
         var claims = Jwts.parserBuilder()
                 .setSigningKey(key)
@@ -475,8 +492,6 @@ public class JwtUtil {
      * Normalizes token string:
      * - Accepts either raw JWT or "Bearer <JWT>"
      * - Trims spaces
-     *
-     * Regex "(?i)" makes "Bearer" case-insensitive.
      */
     private String normalize(String token) {
         if (token == null) return null;

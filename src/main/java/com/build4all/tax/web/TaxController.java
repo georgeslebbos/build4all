@@ -1,16 +1,18 @@
 package com.build4all.tax.web;
 
 import com.build4all.admin.domain.AdminUserProject;
+import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.catalog.domain.Country;
 import com.build4all.catalog.domain.Region;
-import com.build4all.order.dto.CartLine;
-import com.build4all.order.dto.ShippingAddressDTO;
+import com.build4all.catalog.repository.CountryRepository;
+import com.build4all.catalog.repository.RegionRepository;
 import com.build4all.security.JwtUtil;
 import com.build4all.tax.domain.TaxRule;
 import com.build4all.tax.dto.TaxPreviewRequest;
 import com.build4all.tax.dto.TaxRuleRequest;
 import com.build4all.tax.dto.TaxRuleResponse;
 import com.build4all.tax.service.TaxService;
+import com.build4all.tax.service.impl.TaxServiceImpl;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -32,9 +34,26 @@ public class TaxController {
     private final TaxService taxService;
     private final JwtUtil jwtUtil;
 
-    public TaxController(TaxService taxService, JwtUtil jwtUtil) {
+    // ✅ NEW: real lookups to avoid stubs and validate IDs
+    private final AdminUserProjectRepository adminUserProjectRepository;
+    private final CountryRepository countryRepository;
+    private final RegionRepository regionRepository;
+
+    // ✅ NEW: we will use tenant-safe methods in TaxServiceImpl
+    private final TaxServiceImpl taxServiceImpl;
+
+    public TaxController(TaxService taxService,
+                         JwtUtil jwtUtil,
+                         AdminUserProjectRepository adminUserProjectRepository,
+                         CountryRepository countryRepository,
+                         RegionRepository regionRepository,
+                         TaxServiceImpl taxServiceImpl) {
         this.taxService = taxService;
         this.jwtUtil = jwtUtil;
+        this.adminUserProjectRepository = adminUserProjectRepository;
+        this.countryRepository = countryRepository;
+        this.regionRepository = regionRepository;
+        this.taxServiceImpl = taxServiceImpl;
     }
 
     /* ===================== helpers ===================== */
@@ -60,12 +79,17 @@ public class TaxController {
         return false;
     }
 
-    private TaxRule fromRequest(TaxRuleRequest req) {
+    /**
+     * ✅ NEW:
+     * Convert request into entity, using REAL lookups (not stubs).
+     * This makes errors clean (Invalid countryId...) and prevents FK surprises.
+     */
+    private TaxRule fromRequestResolved(TaxRuleRequest req) {
         TaxRule rule = new TaxRule();
 
         if (req.getOwnerProjectId() != null) {
-            AdminUserProject proj = new AdminUserProject();
-            proj.setId(req.getOwnerProjectId());
+            AdminUserProject proj = adminUserProjectRepository.findById(req.getOwnerProjectId())
+                    .orElseThrow(() -> new IllegalArgumentException("Invalid ownerProjectId: " + req.getOwnerProjectId()));
             rule.setOwnerProject(proj);
         }
 
@@ -74,17 +98,34 @@ public class TaxController {
         rule.setAppliesToShipping(req.isAppliesToShipping());
         rule.setEnabled(req.isEnabled());
 
+        Country country = null;
+        Region region = null;
+
         if (req.getCountryId() != null) {
-            Country c = new Country();
-            c.setId(req.getCountryId());
-            rule.setCountry(c);
+            country = countryRepository.findById(req.getCountryId())
+                    .orElseThrow(() -> new IllegalArgumentException("Invalid countryId: " + req.getCountryId()));
         }
 
         if (req.getRegionId() != null) {
-            Region r = new Region();
-            r.setId(req.getRegionId());
-            rule.setRegion(r);
+            region = regionRepository.findById(req.getRegionId())
+                    .orElseThrow(() -> new IllegalArgumentException("Invalid regionId: " + req.getRegionId()));
         }
+
+        // Optional strict validation (only if Region has Country in your model)
+        if (country != null && region != null) {
+            try {
+                if (region.getCountry() != null && region.getCountry().getId() != null) {
+                    if (!region.getCountry().getId().equals(country.getId())) {
+                        throw new IllegalArgumentException("regionId does not belong to countryId");
+                    }
+                }
+            } catch (Exception ignored) {
+                // If Region has no getCountry(), ignore (you can remove later).
+            }
+        }
+
+        rule.setCountry(country);
+        rule.setRegion(region);
 
         return rule;
     }
@@ -99,12 +140,8 @@ public class TaxController {
         r.setRate(rule.getRate());
         r.setAppliesToShipping(rule.isAppliesToShipping());
         r.setEnabled(rule.isEnabled());
-        r.setCountryId(
-                rule.getCountry() != null ? rule.getCountry().getId() : null
-        );
-        r.setRegionId(
-                rule.getRegion() != null ? rule.getRegion().getId() : null
-        );
+        r.setCountryId(rule.getCountry() != null ? rule.getCountry().getId() : null);
+        r.setRegionId(rule.getRegion() != null ? rule.getRegion().getId() : null);
         return r;
     }
 
@@ -125,7 +162,7 @@ public class TaxController {
         }
 
         try {
-            TaxRule created = taxService.createRule(fromRequest(req));
+            TaxRule created = taxService.createRule(fromRequestResolved(req));
             return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(created));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
@@ -148,8 +185,16 @@ public class TaxController {
         }
 
         try {
-            TaxRule updates = fromRequest(req);
-            TaxRule updated = taxService.updateRule(id, updates);
+            // ✅ Tenant scoping: required
+            if (req.getOwnerProjectId() == null) {
+                throw new IllegalArgumentException("ownerProjectId is required (for scoping update)");
+            }
+
+            TaxRule updates = fromRequestResolved(req);
+
+            // ✅ Use scoped update (id + ownerProjectId)
+            TaxRule updated = taxServiceImpl.updateRuleScoped(req.getOwnerProjectId(), id, updates);
+
             return ResponseEntity.ok(toResponse(updated));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
@@ -162,7 +207,8 @@ public class TaxController {
     @Operation(summary = "Delete tax rule (OWNER/ADMIN only)")
     public ResponseEntity<?> deleteRule(
             @RequestHeader("Authorization") String auth,
-            @PathVariable Long id
+            @PathVariable Long id,
+            @RequestParam Long ownerProjectId
     ) {
         String token = strip(auth);
         if (!hasRole(token, "OWNER", "ADMIN")) {
@@ -171,7 +217,8 @@ public class TaxController {
         }
 
         try {
-            taxService.deleteRule(id);
+            // ✅ scoped delete prevents cross-tenant delete
+            taxServiceImpl.deleteRuleScoped(ownerProjectId, id);
             return ResponseEntity.noContent().build();
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
@@ -184,7 +231,8 @@ public class TaxController {
     @Operation(summary = "Get tax rule by id (OWNER/ADMIN only)")
     public ResponseEntity<?> getRule(
             @RequestHeader("Authorization") String auth,
-            @PathVariable Long id
+            @PathVariable Long id,
+            @RequestParam Long ownerProjectId
     ) {
         String token = strip(auth);
         if (!hasRole(token, "OWNER", "ADMIN")) {
@@ -193,7 +241,7 @@ public class TaxController {
         }
 
         try {
-            TaxRule rule = taxService.getRule(id);
+            TaxRule rule = taxServiceImpl.getRuleScoped(ownerProjectId, id);
             return ResponseEntity.ok(toResponse(rule));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
