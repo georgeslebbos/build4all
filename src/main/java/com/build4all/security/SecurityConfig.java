@@ -39,6 +39,8 @@ import java.util.List;
 @EnableMethodSecurity(prePostEnabled = true) // enables @PreAuthorize / @PostAuthorize on methods
 public class SecurityConfig implements WebMvcConfigurer {
 
+	
+	
     /* =========================================================
      * 1) Static resources mapping (/uploads/** → local folder)
      * =========================================================
@@ -209,4 +211,6 @@ public class SecurityConfig implements WebMvcConfigurer {
 
         return source;
     }
+    
+    
 }

@@ -155,4 +155,29 @@ public class CurrencyController {
 
         return ResponseEntity.ok(toDto(selectedCurrency.get()));
     }
+    
+    
+ // --------------- LIST ALL CURRENCIES (for dropdown) ---------------
+    @GetMapping
+    public ResponseEntity<?> listCurrencies(
+           
+    ) {
+       
+
+        // Ensure defaults exist
+        currencyService.ensureDefaultCurrencies();
+
+        // Return all currencies as DTOs (sorted nicely)
+        var list = currencyRepository.findAll().stream()
+                .sorted((a, b) -> {
+                    String aa = (a.getCurrencyType() == null ? "" : a.getCurrencyType());
+                    String bb = (b.getCurrencyType() == null ? "" : b.getCurrencyType());
+                    return aa.compareToIgnoreCase(bb);
+                })
+                .map(this::toDto)
+                .toList();
+
+        return ResponseEntity.ok(list);
+    }
+
 }
