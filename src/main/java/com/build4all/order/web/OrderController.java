@@ -833,6 +833,8 @@ public class OrderController {
             Map<String, Object> m = new HashMap<>();
             m.put("id", o.getId());
             m.put("orderDate", o.getOrderDate());
+            m.put("addressline", o.getShippingAddress());
+            m.put("phone", o.getShippingPhone());
             m.put("totalPrice", o.getTotalPrice());
             String st = (o.getStatus() != null) ? o.getStatus().getName() : null;
             m.put("status", st);
