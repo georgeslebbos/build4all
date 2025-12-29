@@ -871,6 +871,8 @@ public class OrderController {
             m.put("id", o.getId());
             m.put("orderDate", o.getOrderDate());
             m.put("totalPrice", o.getTotalPrice());
+            m.put("addressline", o.getShippingAddress());
+            m.put("phone", o.getShippingPhone());
             String st = (o.getStatus() != null) ? o.getStatus().getName() : null;
             m.put("status", st);
             m.put("statusUi", titleCaseStatus(st));
@@ -908,6 +910,8 @@ public class OrderController {
             m.put("id", o.getId());
             m.put("orderDate", o.getOrderDate());
             m.put("totalPrice", o.getTotalPrice());
+            m.put("addressline", o.getShippingAddress());
+            m.put("phone", o.getShippingPhone());
             String st = (o.getStatus() != null) ? o.getStatus().getName() : null;
             m.put("status", st);
             m.put("statusUi", titleCaseStatus(st));
