@@ -850,8 +850,8 @@ public class AuthController {
 
     /* ---------- UNIFIED ADMIN LOGIN (SUPER_ADMIN / OWNER / MANAGER) ---------- */
     @Operation(summary = "Unified Admin Login (SUPER_ADMIN / OWNER)")
-    @PostMapping("/admin/login")
-    public ResponseEntity<?> adminLogin(@RequestBody AdminLoginRequest request) {
+    @PostMapping("/admin/login/front")
+    public ResponseEntity<?> adminLoginFront(@RequestBody AdminLoginRequest request) {
 
         if (request.getUsernameOrEmail() == null || request.getUsernameOrEmail().isBlank()
                 || request.getPassword() == null || request.getPassword().isBlank()) {
@@ -930,6 +930,50 @@ public class AuthController {
         ));
     }
 
+    @Operation(summary = "Unified Admin Login (SUPER_ADMIN / OWNER / MANAGER)")
+    @PostMapping("/admin/login")
+    public ResponseEntity<?> adminLogin(@RequestBody AdminLoginRequest request) {
+        if (request.getUsernameOrEmail() == null || request.getPassword() == null) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", "Email/Username and password are required"));
+        }
+
+        var opt = adminUserService.findByUsernameOrEmail(request.getUsernameOrEmail());
+        if (opt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Invalid credentials"));
+        }
+
+        var admin = opt.get();
+        if (!passwordEncoder.matches(request.getPassword(), admin.getPasswordHash())) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Invalid credentials"));
+        }
+
+        String role = admin.getRole() != null ? admin.getRole().getName() : null;
+        if (role == null || !(role.equalsIgnoreCase("SUPER_ADMIN")
+                || role.equalsIgnoreCase("OWNER") || role.equalsIgnoreCase("MANAGER"))) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Access denied for this role"));
+        }
+
+        String token = jwtUtil.generateToken(admin);
+
+        Map<String, Object> adminData = new HashMap<>();
+        adminData.put("id", admin.getAdminId());
+        adminData.put("username", admin.getUsername());
+        adminData.put("firstName", admin.getFirstName());
+        adminData.put("lastName", admin.getLastName());
+        adminData.put("email", admin.getEmail());
+        adminData.put("role", role);
+
+        return ResponseEntity.ok(Map.of(
+                "message", "Login successful",
+                "token", token,
+                "role", role,
+                "admin", adminData
+        ));
+    }
 
     /* =====================================================================================
      *  OWNER EMAIL-OTP SIGNUP (REAL OTP)
