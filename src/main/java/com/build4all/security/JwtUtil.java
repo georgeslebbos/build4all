@@ -207,6 +207,29 @@ public class JwtUtil {
                 .compact();
     }
 
+    public String generateToken(AdminUser adminUser) {
+
+        if (adminUser == null) throw new RuntimeException("AdminUser cannot be null");
+
+        String roleName = "USER";
+        if (adminUser.getRole() != null && adminUser.getRole().getName() != null) {
+            roleName = adminUser.getRole().getName();
+        }
+
+        var builder = Jwts.builder()
+                .setSubject(adminUser.getEmail())
+                .claim("id", adminUser.getAdminId())
+                .claim("username", adminUser.getUsername())
+                .claim("role", roleName);
+
+
+        return builder
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
+                .signWith(key, SignatureAlgorithm.HS256)
+                .compact();
+    }
+
     /**
      * Helper: returns all claims for debugging/advanced checks.
      * Accepts raw token or "Bearer <token>".

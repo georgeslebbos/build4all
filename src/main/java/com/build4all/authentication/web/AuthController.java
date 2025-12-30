@@ -1002,12 +1002,6 @@ public class AuthController {
             String firstName  = req.get("firstName");
             String lastName   = req.get("lastName");
 
-            // ✅ OPTIONAL but recommended fields to create first AUP correctly
-            // because AdminUserProject.project is NON-NULLABLE in your entity.
-            Long projectId = toLongOrNull(req.get("projectId"));
-            String slug = req.get("slug");       // optional, but uniqueness is enforced with (admin_id, project_id, slug)
-            String appName = req.get("appName"); // optional
-
             if (registrationToken == null || username == null || firstName == null || lastName == null) {
                 return ResponseEntity.badRequest().body(Map.of("error", "registrationToken, username, firstName, lastName are required"));
             }
@@ -1036,58 +1030,7 @@ public class AuthController {
 
             adminUserService.save(owner);
 
-            // ✅ Ensure owner has an AdminUserProject (tenant scope).
-            // Because your AdminUserProject requires:
-            // - admin (not null)
-            // - project (not null)
-            // So we must create the first AUP row here if owner has none yet.
-            var links = adminUserProjectRepo.findByAdmin_AdminId(owner.getAdminId());
-
-            Long ownerProjectId;
-            if (links == null || links.isEmpty()) {
-
-                if (projectId == null) {
-                    // We cannot create AUP without a project (your entity has nullable=false for project_id).
-                    // So force the client to provide it.
-                    throw new IllegalArgumentException("projectId is required to create the first AdminUserProject for OWNER signup");
-                }
-
-                Project project = projectRepository.findById(projectId)
-                        .orElseThrow(() -> new IllegalArgumentException("Invalid projectId"));
-
-                AdminUserProject aup = new AdminUserProject();
-                aup.setAdmin(owner);
-                aup.setProject(project);
-
-                // Optional fields
-                aup.setStatus("ACTIVE");
-
-                // If slug is not sent, you can auto-generate a stable one
-                // (still must respect unique constraint per admin+project+slug).
-                if (slug == null || slug.isBlank()) {
-                    aup.setSlug("app-" + owner.getAdminId() + "-" + projectId);
-                } else {
-                    aup.setSlug(slug.trim());
-                }
-
-                if (appName != null && !appName.isBlank()) {
-                    aup.setAppName(appName.trim());
-                } else {
-                    aup.setAppName("My App"); // sensible default
-                }
-
-                // License dates are optional; keep null unless you have a default policy
-                // aup.setValidFrom(LocalDate.now());
-                // aup.setEndTo(LocalDate.now().plusYears(1));
-
-                adminUserProjectRepo.save(aup);
-                ownerProjectId = aup.getId(); // ✅ aup_id
-            } else {
-                ownerProjectId = links.get(0).getId();
-            }
-
-            // ✅ IMPORTANT: OWNER token should include ownerProjectId
-            String token = jwtUtil.generateToken(owner, ownerProjectId);
+            String token = jwtUtil.generateToken(owner);
 
             Map<String, Object> ownerData = new HashMap<>();
             ownerData.put("id", owner.getAdminId());
@@ -1100,7 +1043,6 @@ public class AuthController {
             return ResponseEntity.ok(Map.of(
                     "message", "Owner registered successfully",
                     "token", token,
-                    "ownerProjectId", ownerProjectId,
                     "owner", ownerData
             ));
         } catch (Exception e) {
