@@ -101,12 +101,21 @@ public class AdminUserProject {
     @JoinColumn(name = "currency_id", referencedColumnName = "currency_id")
     // Currency that should be used for this app instance (optional override).
     private Currency currency;
+    
+    
+    @Column(name = "android_version_code")
+    private Integer androidVersionCode;
+
+    @Column(name = "android_version_name", length = 32)
+    private String androidVersionName;
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+    
+    
 
     public AdminUserProject() {}
 
@@ -206,6 +215,12 @@ public class AdminUserProject {
 
     public Currency getCurrency() { return currency; }
     public void setCurrency(Currency currency) { this.currency = currency; }
+    
+    public Integer getAndroidVersionCode() { return androidVersionCode; }
+    public void setAndroidVersionCode(Integer androidVersionCode) { this.androidVersionCode = androidVersionCode; }
+
+    public String getAndroidVersionName() { return androidVersionName; }
+    public void setAndroidVersionName(String androidVersionName) { this.androidVersionName = androidVersionName; }
 
     // Convenience computed values (not persisted) useful for JSON output or service logic.
 
@@ -217,4 +232,37 @@ public class AdminUserProject {
     @Transient public boolean isSuspended() { return "SUSPENDED".equalsIgnoreCase(status); }
     @Transient public boolean isExpired() { return "EXPIRED".equalsIgnoreCase(status); }
     @Transient public boolean isDeleted() { return "DELETED".equalsIgnoreCase(status); }
+    
+    /**
+     * Bump Android version for this app instance.
+     * - If first time: versionCode = 1, versionName = "1.0.0"
+     * - Otherwise: increment patch number (e.g. 1.0.0 -> 1.0.1)
+     */
+    public void bumpAndroidVersion() {
+        // 1) versionCode
+        if (this.androidVersionCode == null) {
+            this.androidVersionCode = 1;
+        } else {
+            this.androidVersionCode = this.androidVersionCode + 1;
+        }
+
+        // 2) versionName
+        if (this.androidVersionName == null || this.androidVersionName.isBlank()) {
+            this.androidVersionName = "1.0.0";
+            return;
+        }
+
+        String[] parts = this.androidVersionName.split("\\.");
+        try {
+            int lastIndex = parts.length - 1;
+            int patch = Integer.parseInt(parts[lastIndex]);
+            patch++;
+            parts[lastIndex] = String.valueOf(patch);
+            this.androidVersionName = String.join(".", parts);
+        } catch (Exception e) {
+            // If any parse issue => reset to default
+            this.androidVersionName = "1.0.0";
+        }
+    }
+
 }

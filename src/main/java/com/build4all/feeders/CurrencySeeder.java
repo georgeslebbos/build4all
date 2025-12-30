@@ -3,7 +3,9 @@ package com.build4all.feeders;
 import com.build4all.catalog.domain.Currency;
 import com.build4all.catalog.repository.CurrencyRepository;
 import jakarta.annotation.PostConstruct;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 @Component
 public class CurrencySeeder {
@@ -15,80 +17,85 @@ public class CurrencySeeder {
     }
 
     @PostConstruct
+    @Transactional
     public void seedCurrencies() {
-        //seed("DOLLAR", "$", "USD");
-        //seed("EURO", "€", "EUR");
-        //seed("CAD", "C$", "CAD");
 
         // Major / Global
-        seed("US_DOLLAR", "$", "USD");
-        seed("EURO", "€", "EUR");
-        seed("BRITISH_POUND", "£", "GBP");
-        seed("JAPANESE_YEN", "¥", "JPY");
-        seed("SWISS_FRANC", "CHF", "CHF");
-        seed("CANADIAN_DOLLAR", "C$", "CAD");
-        seed("AUSTRALIAN_DOLLAR", "A$", "AUD");
+        seed("USD", "US_DOLLAR", "$");
+        seed("EUR", "EURO", "€");
+        seed("GBP", "BRITISH_POUND", "£");
+        seed("JPY", "JAPANESE_YEN", "¥");
+        seed("CHF", "SWISS_FRANC", "CHF");
+        seed("CAD", "CANADIAN_DOLLAR", "C$");
+        seed("AUD", "AUSTRALIAN_DOLLAR", "A$");
 
-// Middle East
-        seed("LEBANESE_POUND", "L£", "LBP");
-        seed("SAUDI_RIYAL", "﷼", "SAR");
-        seed("UAE_DIRHAM", "د.إ", "AED");
-        seed("QATARI_RIYAL", "﷼", "QAR");
-        seed("KUWAITI_DINAR", "د.ك", "KWD");
-        seed("OMANI_RIAL", "﷼", "OMR");
-        seed("BAHRAINI_DINAR", ".د.ب", "BHD");
-        seed("JORDANIAN_DINAR", "د.ا", "JOD");
+        // Middle East
+        seed("LBP", "LEBANESE_POUND", "L£");
+        seed("SAR", "SAUDI_RIYAL", "﷼");
+        seed("AED", "UAE_DIRHAM", "د.إ");
+        seed("QAR", "QATARI_RIYAL", "﷼");
+        seed("KWD", "KUWAITI_DINAR", "د.ك");
+        seed("OMR", "OMANI_RIAL", "﷼");
+        seed("BHD", "BAHRAINI_DINAR", ".د.ب");
+        seed("JOD", "JORDANIAN_DINAR", "د.ا");
 
-// Asia
-        seed("CHINESE_YUAN", "¥", "CNY");
-        seed("INDIAN_RUPEE", "₹", "INR");
-        seed("PAKISTANI_RUPEE", "₨", "PKR");
-        seed("SOUTH_KOREAN_WON", "₩", "KRW");
-        seed("SINGAPORE_DOLLAR", "S$", "SGD");
+        // Asia
+        seed("CNY", "CHINESE_YUAN", "¥");
+        seed("INR", "INDIAN_RUPEE", "₹");
+        seed("PKR", "PAKISTANI_RUPEE", "₨");
+        seed("KRW", "SOUTH_KOREAN_WON", "₩");
+        seed("SGD", "SINGAPORE_DOLLAR", "S$");
 
-// Africa
-        seed("EGYPTIAN_POUND", "E£", "EGP");
-        seed("MOROCCAN_DIRHAM", "د.م.", "MAD");
-        seed("TUNISIAN_DINAR", "د.ت", "TND");
-        seed("ALGERIAN_DINAR", "د.ج", "DZD");
-        seed("SOUTH_AFRICAN_RAND", "R", "ZAR");
+        // Africa
+        seed("EGP", "EGYPTIAN_POUND", "E£");
+        seed("MAD", "MOROCCAN_DIRHAM", "د.م.");
+        seed("TND", "TUNISIAN_DINAR", "د.ت");
+        seed("DZD", "ALGERIAN_DINAR", "د.ج");
+        seed("ZAR", "SOUTH_AFRICAN_RAND", "R");
 
-// Europe (non-Euro)
-        seed("SWEDISH_KRONA", "kr", "SEK");
-        seed("NORWEGIAN_KRONE", "kr", "NOK");
-        seed("DANISH_KRONE", "kr", "DKK");
-        seed("POLISH_ZLOTY", "zł", "PLN");
-        seed("CZECH_KORUNA", "Kč", "CZK");
+        // Europe (non-Euro)
+        seed("SEK", "SWEDISH_KRONA", "kr");
+        seed("NOK", "NORWEGIAN_KRONE", "kr");
+        seed("DKK", "DANISH_KRONE", "kr");
+        seed("PLN", "POLISH_ZLOTY", "zł");
+        seed("CZK", "CZECH_KORUNA", "Kč");
 
-// Americas
-        seed("MEXICAN_PESO", "$", "MXN");
-        seed("BRAZILIAN_REAL", "R$", "BRL");
-        seed("ARGENTINE_PESO", "$", "ARS");
-        seed("CHILEAN_PESO", "$", "CLP");
-
-
+        // Americas
+        seed("MXN", "MEXICAN_PESO", "$");
+        seed("BRL", "BRAZILIAN_REAL", "R$");
+        seed("ARS", "ARGENTINE_PESO", "$");
+        seed("CLP", "CHILEAN_PESO", "$");
     }
 
-    private void seed(String currencyType, String symbol, String code) {
-        currencyRepository.findByCurrencyType(currencyType)
-            .ifPresentOrElse(existing -> {
-                boolean updated = false;
+    private void seed(String code, String currencyType, String symbol) {
 
-                if (!symbol.equals(existing.getSymbol())) {
-                    existing.setSymbol(symbol);
-                    updated = true;
-                }
+        // ✅ 1) Look up by UNIQUE KEY (code)
+    	currencyRepository.findByCodeIgnoreCase(code).ifPresentOrElse(existing -> {
 
-                if (existing.getCode() == null || !code.equals(existing.getCode())) {
-                    existing.setCode(code);
-                    updated = true;
-                }
+            boolean updated = false;
 
-                if (updated) {
-                    currencyRepository.save(existing);
-                }
-            }, () -> {
-                currencyRepository.save(new Currency(currencyType, symbol, code));
-            });
+            if (existing.getCurrencyType() == null || !currencyType.equals(existing.getCurrencyType())) {
+                existing.setCurrencyType(currencyType);
+                updated = true;
+            }
+
+            if (existing.getSymbol() == null || !symbol.equals(existing.getSymbol())) {
+                existing.setSymbol(symbol);
+                updated = true;
+            }
+
+            // code already matches, since we searched by it
+            if (updated) currencyRepository.save(existing);
+
+        }, () -> {
+
+            // ✅ 2) Insert safely (in case two threads seed at once)
+            try {
+                Currency c = new Currency(currencyType, symbol, code);
+                currencyRepository.saveAndFlush(c);
+            } catch (DataIntegrityViolationException ignored) {
+                // Another seeder/thread inserted it first → ignore
+            }
+        });
     }
 }

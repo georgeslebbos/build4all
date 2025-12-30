@@ -152,7 +152,9 @@ public class CiBuildService {
             String navJson,
             String homeJson,
             String enabledFeaturesJson,
-            String brandingJson
+            String brandingJson,
+            Integer androidVersionCode,
+            String androidVersionName
     ) {
         if (!isConfigured()) {
             String msg = "CI DISPATCH SKIPPED: ci.webhook.url/token not configured.";
@@ -185,6 +187,7 @@ public class CiBuildService {
         // ---- logoPath (relative) for BRANDING.logoPath ----
         // appLogoUrl is like "/uploads/owner/..."
         String logoPath = nz(appLogoUrl);
+        String packageName = "com.build4all.app" + opl;  // opl = OWNER_PROJECT_LINK_ID
 
         // ================== CONFIG OBJECT (nested) ==================
         Map<String, Object> config = new LinkedHashMap<>();
@@ -220,18 +223,23 @@ public class CiBuildService {
         config.put("ENABLED_FEATURES_JSON_B64", enabledB64);
         config.put("BRANDING_JSON_B64", brandingB64);
 
+        // 🔥 VERSION INFO (الجديد)
+        config.put("ANDROID_VERSION_CODE", androidVersionCode);
+        config.put("ANDROID_VERSION_NAME", nz(androidVersionName));
+
         // logo info
         config.put("LOGO_PATH", logoPath);
 
         Map<String, Object> brandingMap = new LinkedHashMap<>();
         brandingMap.put("logoPath", logoPath);
-        brandingMap.put("splashColor", "#FFFFFF"); // يمكن نعملها configurable بعدين
+        brandingMap.put("splashColor", "#FFFFFF");
         config.put("BRANDING", brandingMap);
 
         // extra runtime stuff if you ever need it from workflow
         config.put("WS_PATH", nz(mobileWsPath));
         config.put("OWNER_ATTACH_MODE", nz(mobileOwnerAttachMode));
         config.put("APP_ROLE", nz(mobileAppRole));
+        config.put("PACKAGE_NAME", packageName);
 
         // ================== client_payload (<= 10 top-level keys) ==================
         Map<String, Object> clientPayload = new LinkedHashMap<>();
