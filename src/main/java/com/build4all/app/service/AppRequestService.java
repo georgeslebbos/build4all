@@ -196,7 +196,10 @@ public class AppRequestService {
 					String ownerProjectLinkId = String.valueOf(link.getId());
 					Long currencyIdForBuild = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
 					
-					String themeJson = resolveThemeJson(chosenThemeId, req.getThemeJson());
+					String themeJson = (req.getThemeJson() != null && !req.getThemeJson().isBlank())
+					        ? req.getThemeJson()
+					        : resolveThemeJson(chosenThemeId, "{}");
+
 					
 					// ✅ APP_TYPE من الـ ProjectType (fallback لو null)
 					String appType = (project.getProjectType() != null)

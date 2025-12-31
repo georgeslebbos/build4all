@@ -7,6 +7,7 @@ import com.build4all.app.repository.AppRuntimeConfigRepository;
 import com.build4all.theme.domain.Theme;
 import com.build4all.theme.repository.ThemeRepository;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.nio.charset.StandardCharsets;
@@ -98,6 +99,64 @@ public class PublicRuntimeConfigController {
         res.put("BRANDING_JSON", branding);
 
         // Base64 (action/env-friendly)
+        res.put("NAV_JSON_B64", b64(nav));
+        res.put("HOME_JSON_B64", b64(home));
+        res.put("ENABLED_FEATURES_JSON_B64", b64(features));
+        res.put("BRANDING_JSON_B64", b64(branding));
+
+        return ResponseEntity.ok(res);
+    }
+
+    @Transactional(readOnly = true)
+    @GetMapping("/runtime-config/by-link")
+    public ResponseEntity<Map<String, Object>> runtimeConfigByLink(@RequestParam Long linkId) {
+
+        AdminUserProject link = linkRepo.findById(linkId)
+                .orElseThrow(() -> new IllegalArgumentException("App not found"));
+
+        AppRuntimeConfig cfg = runtimeRepo.findByApp_Id(link.getId()).orElse(null);
+
+        String nav = cfg != null ? nz(cfg.getNavJson()) : "[]";
+        String home = cfg != null ? nz(cfg.getHomeJson()) : "{}";
+        String features = cfg != null ? nz(cfg.getEnabledFeaturesJson()) : "[]";
+        String branding = cfg != null ? nz(cfg.getBrandingJson()) : "{}";
+
+        String themeJson = resolveThemeJson(link.getThemeId());
+
+        Map<String, Object> res = new HashMap<>();
+
+        res.put("OWNER_ID", link.getAdmin().getAdminId().toString());
+        res.put("PROJECT_ID", link.getProject().getId().toString());
+        res.put("SLUG", link.getSlug());
+        res.put("OWNER_PROJECT_LINK_ID", String.valueOf(link.getId()));
+
+        res.put("APP_NAME", nz(link.getAppName()));
+        res.put("STATUS", nz(link.getStatus()));
+        res.put("LICENSE_ID", nz(link.getLicenseId()));
+
+        res.put("APP_TYPE", link.getProject() != null && link.getProject().getProjectType() != null
+                ? link.getProject().getProjectType().name()
+                : null);
+
+        res.put("THEME_ID", link.getThemeId());
+        res.put("THEME_JSON", themeJson);
+        res.put("THEME_JSON_B64", b64(themeJson));
+
+        res.put("CURRENCY_CODE", link.getCurrency() != null ? link.getCurrency().getCode() : null);
+        res.put("CURRENCY_SYMBOL", link.getCurrency() != null ? link.getCurrency().getSymbol() : null);
+
+        res.put("LOGO_URL", nz(link.getLogoUrl()));
+        res.put("APK_URL", nz(link.getApkUrl()));
+        res.put("IPA_URL", nz(link.getIpaUrl()));
+        res.put("BUNDLE_URL", nz(link.getBundleUrl()));
+
+        res.put("API_BASE_URL_OVERRIDE", cfg != null ? cfg.getApiBaseUrlOverride() : null);
+
+        res.put("NAV_JSON", nav);
+        res.put("HOME_JSON", home);
+        res.put("ENABLED_FEATURES_JSON", features);
+        res.put("BRANDING_JSON", branding);
+
         res.put("NAV_JSON_B64", b64(nav));
         res.put("HOME_JSON_B64", b64(home));
         res.put("ENABLED_FEATURES_JSON_B64", b64(features));
