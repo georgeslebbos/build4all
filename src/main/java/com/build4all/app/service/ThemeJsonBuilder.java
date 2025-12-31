@@ -45,4 +45,5 @@ public class ThemeJsonBuilder {
             throw new IllegalArgumentException("Could not build themeJson", e);
         }
     }
+
 }

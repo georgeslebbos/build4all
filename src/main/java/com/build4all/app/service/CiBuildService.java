@@ -35,14 +35,14 @@ public class CiBuildService {
     @Value("${ci.repo.owner:fatimahh0}")
     private String repoOwner;
 
-    @Value("${ci.repo.name:HobbySphereFlutter}")
+    @Value("${ci.repo.name:build4allFront}")
     private String repoName;
 
     @Value("${ci.repo.branch:main}")
     private String repoBranch;
 
     // Mobile runtime defaults
-    @Value("${mobile.apiBaseUrl:http://192.168.1.7:8080}")
+    @Value("${mobile.apiBaseUrl:http://3.96.140.126:8080}")
     private String mobileApiBaseUrl;
 
     @Value("${mobile.wsPath:/api/ws}")
