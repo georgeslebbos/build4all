@@ -9,7 +9,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
@@ -128,4 +130,39 @@ public class ThemeService {
 
         return themeRepository.save(theme);
     }
+    
+    private Map<String, Object> normalizeThemeMap(Map<String, Object> raw) {
+        if (raw == null) return Map.of();
+
+        if (raw.containsKey("valuesMobile")) return raw; // already good
+
+        // flat -> wrap
+        Map<String, Object> colors = new LinkedHashMap<>();
+        Object primary = raw.getOrDefault("primary", "#16A34A");
+        colors.put("primary", primary);
+        colors.put("onPrimary", raw.getOrDefault("onPrimary", "#FFFFFF"));
+        colors.put("background", raw.getOrDefault("background", "#FFFFFF"));
+        colors.put("surface", raw.getOrDefault("surface", "#FFFFFF"));
+        colors.put("label", raw.getOrDefault("label", "#111827"));
+        colors.put("body", raw.getOrDefault("body", "#374151"));
+        colors.put("border", raw.getOrDefault("border", primary));
+        Object error = raw.getOrDefault("error", "#DC2626");
+        colors.put("error", error);
+        colors.put("danger", raw.getOrDefault("danger", error));
+        colors.put("muted", raw.getOrDefault("muted", "#9CA3AF"));
+        colors.put("success", raw.getOrDefault("success", primary));
+
+        Map<String, Object> valuesMobile = new LinkedHashMap<>();
+        valuesMobile.put("colors", colors);
+        valuesMobile.put("card", raw.getOrDefault("card", Map.of()));
+        valuesMobile.put("search", raw.getOrDefault("search", Map.of()));
+        valuesMobile.put("button", raw.getOrDefault("button", Map.of()));
+
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("menuType", raw.getOrDefault("menuType", "bottom"));
+        root.put("valuesMobile", valuesMobile);
+
+        return root;
+    }
+
 }
