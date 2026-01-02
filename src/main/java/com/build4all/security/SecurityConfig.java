@@ -159,7 +159,10 @@ public class SecurityConfig implements WebMvcConfigurer {
                                 "/api/ci/**",     // CI callbacks or build webhooks
                                 "/uploads/**",    // serve uploaded images/files
                                 "/ws-chat/**",    // websocket endpoint (handshake might be public)
-                                "/error"// Spring default error endpoint (avoids weird blocking)
+                                "/error",// Spring default error endpoint (avoids weird blocking)
+                                "/api/public/runtime-config/**",
+                                "/api/public/runtime-config",
+                                "/api/public/runtime-config/by-link"
                         ).permitAll()
 
                         // Any other endpoint requires authentication (JWT must be valid).
