@@ -1,4 +1,3 @@
-// src/main/java/com/build4all/app/service/CiBuildService.java
 package com.build4all.app.service;
 
 import com.build4all.app.dto.CiDispatchResult;
@@ -14,8 +13,10 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
 import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class CiBuildService {
@@ -31,7 +32,6 @@ public class CiBuildService {
     @Value("${ci.webhook.token:}")
     private String webhookToken;
 
-    /** Where to upload the logo via Contents API so we only pass a small URL in client_payload */
     @Value("${ci.repo.owner:fatimahh0}")
     private String repoOwner;
 
@@ -65,19 +65,12 @@ public class CiBuildService {
         return notBlank(webhookUrl) && notBlank(webhookToken);
     }
 
-    /**
-     * Upload small logo bytes to GitHub (Contents API) to get a stable raw URL.
-     * If appLogoUrl is already absolute (http/https), it’s returned as-is.
-     * (Currently not used; we rely on /uploads path + API_BASE_URL on CI side.)
-     */
     @SuppressWarnings("unused")
     private String ensureLogoRawUrl(String slug, String appName, String appLogoUrl, byte[] logoBytesOpt) {
-        // Use given absolute URL if present
         if (notBlank(appLogoUrl) &&
                 (appLogoUrl.startsWith("http://") || appLogoUrl.startsWith("https://"))) {
             return appLogoUrl;
         }
-        // Nothing to upload
         if (logoBytesOpt == null || logoBytesOpt.length == 0) {
             log.warn("No logo bytes provided; proceeding without logo.");
             return "";
@@ -133,9 +126,6 @@ public class CiBuildService {
         return Base64.getEncoder().encodeToString(s.getBytes(StandardCharsets.UTF_8));
     }
 
-    /**
-     * Dispatch repository_dispatch and return FULL result (HTTP code + response body).
-     */
     public CiDispatchResult dispatchOwnerAndroidBuild(
             long ownerId,
             long projectId,
@@ -154,7 +144,8 @@ public class CiBuildService {
             String enabledFeaturesJson,
             String brandingJson,
             Integer androidVersionCode,
-            String androidVersionName
+            String androidVersionName,
+            String androidPackageName
     ) {
         if (!isConfigured()) {
             String msg = "CI DISPATCH SKIPPED: ci.webhook.url/token not configured.";
@@ -184,10 +175,15 @@ public class CiBuildService {
         String enabledB64  = b64(enabledJsonNorm);
         String brandingB64 = b64(brandingJsonNorm);
 
-        // ---- logoPath (relative) for BRANDING.logoPath ----
-        // appLogoUrl is like "/uploads/owner/..."
+        // ---- logoPath (relative) ----
         String logoPath = nz(appLogoUrl);
-        String packageName = "com.build4all.app" + opl;  // opl = OWNER_PROJECT_LINK_ID
+
+        String packageName = (androidPackageName == null) ? "" : androidPackageName.trim();
+        if (packageName.isBlank()) {
+            String msg = "PACKAGE_NAME missing (androidPackageName).";
+            log.error(msg);
+            return new CiDispatchResult(false, 0, msg, buildId);
+        }
 
         // ================== CONFIG OBJECT (nested) ==================
         Map<String, Object> config = new LinkedHashMap<>();
@@ -223,7 +219,7 @@ public class CiBuildService {
         config.put("ENABLED_FEATURES_JSON_B64", enabledB64);
         config.put("BRANDING_JSON_B64", brandingB64);
 
-        // 🔥 VERSION INFO (الجديد)
+        // VERSION INFO
         config.put("ANDROID_VERSION_CODE", androidVersionCode);
         config.put("ANDROID_VERSION_NAME", nz(androidVersionName));
 
@@ -235,16 +231,16 @@ public class CiBuildService {
         brandingMap.put("splashColor", "#FFFFFF");
         config.put("BRANDING", brandingMap);
 
-        // extra runtime stuff if you ever need it from workflow
+        // extra runtime stuff
         config.put("WS_PATH", nz(mobileWsPath));
         config.put("OWNER_ATTACH_MODE", nz(mobileOwnerAttachMode));
         config.put("APP_ROLE", nz(mobileAppRole));
         config.put("PACKAGE_NAME", packageName);
 
-        // ================== client_payload (<= 10 top-level keys) ==================
+        // ================== client_payload ==================
         Map<String, Object> clientPayload = new LinkedHashMap<>();
         clientPayload.put("BUILD_ID", buildId);
-        clientPayload.put("CONFIG", config); // كل شي جوّا CONFIG, so only 2 top-level keys
+        clientPayload.put("CONFIG", config);
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("event_type", "owner_app_build");

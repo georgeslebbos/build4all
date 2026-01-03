@@ -4,6 +4,7 @@ import com.build4all.catalog.domain.Currency;
 import com.build4all.project.domain.Project;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -11,28 +12,14 @@ import java.time.LocalDateTime;
 @Table(
         name = "admin_user_projects",
         uniqueConstraints = {
-                // Enforces that the same admin cannot have the same slug twice for the same project.
-                // (admin_id + project_id + slug) must be unique.
                 @UniqueConstraint(name = "uk_aup_owner_project_slug", columnNames = {"admin_id", "project_id", "slug"})
         },
         indexes = {
-                // These indexes speed up common filters: by admin, by project, and by slug.
                 @Index(name = "idx_aup_admin", columnList = "admin_id"),
                 @Index(name = "idx_aup_project", columnList = "project_id"),
                 @Index(name = "idx_aup_slug", columnList = "slug")
         }
 )
-/**
- * AdminUserProject is the "link" (association) entity between AdminUser and Project.
- * It represents one app/tenant instance owned/managed by an admin for a specific project.
- *
- * Besides the relationship itself, it stores metadata used by the platform:
- * - licensing (licenseId, validFrom, endTo, status)
- * - routing/tenant key (slug)
- * - branding/build outputs (appName, logoUrl, apkUrl, ipaUrl, bundleUrl)
- * - UI configuration (themeId)
- * - currency override (currency)
- */
 public class AdminUserProject {
 
     @Id
@@ -42,80 +29,65 @@ public class AdminUserProject {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "admin_id", referencedColumnName = "admin_id", nullable = false)
-    // Prevent infinite recursion / huge payload when serializing entities to JSON.
     @JsonIgnore
     private AdminUser admin;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "project_id", referencedColumnName = "id", nullable = false)
-    // Same recursion reason as above.
     @JsonIgnore
     private Project project;
 
-    // External or internal identifier for the subscription/license for this app.
     @Column(name = "license_id")
     private String licenseId;
 
-    // Start date of validity (license/subscription).
     @Column(name = "valid_from")
     private LocalDate validFrom;
 
-    // End date of validity (license/subscription).
     @Column(name = "end_to")
     private LocalDate endTo;
 
     @Column(name = "status", length = 16)
-    // Current state of this link/app instance.
     private String status = "ACTIVE"; // ACTIVE | SUSPENDED | EXPIRED | DELETED
 
     @Column(name = "slug", length = 128)
-    // Slug is a human-friendly identifier commonly used in routing or tenant discovery.
     private String slug;
 
     @Column(name = "app_name", length = 128)
-    // Display name of the generated app for this link.
     private String appName;
 
     @Column(name = "logo_url", columnDefinition = "TEXT")
-    // URL for the app logo (stored as TEXT to support long CDN/signed URLs).
     private String logoUrl;
 
     @Column(name = "apk_url", columnDefinition = "TEXT")
-    // URL of latest Android build output for this app instance.
     private String apkUrl;
 
     @Column(name = "ipa_url", columnDefinition = "TEXT")
-    // URL of latest iOS build output for this app instance.
     private String ipaUrl;
 
     @Column(name = "bundle_url", columnDefinition = "TEXT")
-    // URL of another build artifact type (e.g., AAB bundle / web bundle, depending on your pipeline).
     private String bundleUrl;
 
-    /** Theme chosen for this app (nullable => fallback) */
     @Column(name = "theme_id")
-    // Theme is stored as an ID (not as a relation) so the app can reference a theme record/config by id.
     private Long themeId;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "currency_id", referencedColumnName = "currency_id")
-    // Currency that should be used for this app instance (optional override).
     private Currency currency;
-    
-    
+
     @Column(name = "android_version_code")
     private Integer androidVersionCode;
 
     @Column(name = "android_version_name", length = 32)
     private String androidVersionName;
 
+    @Column(name = "android_package_name", length = 255, unique = true)
+    private String androidPackageName;
+
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
-    
-    
 
     public AdminUserProject() {}
 
@@ -129,7 +101,6 @@ public class AdminUserProject {
                             String appName,
                             String apkUrl,
                             Long themeId) {
-        // Constructor to quickly create a fully-configured link.
         this.admin = admin;
         this.project = project;
         this.licenseId = licenseId;
@@ -147,21 +118,63 @@ public class AdminUserProject {
                             String licenseId,
                             LocalDate validFrom,
                             LocalDate endTo) {
-        // Convenience constructor that creates an ACTIVE link with other optional fields null.
         this(admin, project, licenseId, validFrom, endTo, "ACTIVE", null, null, null, null);
     }
 
     @PrePersist
     protected void onCreate() {
-        // Automatically set timestamps when inserting a new row.
         this.createdAt = LocalDateTime.now();
         this.updatedAt = this.createdAt;
     }
 
     @PreUpdate
     protected void onUpdate() {
-        // Automatically update updatedAt whenever entity is updated.
         this.updatedAt = LocalDateTime.now();
+    }
+
+    // ---------------- FIX: generate package name ONCE ----------------
+    /**
+     * Ensure Android package name exists.
+     * Strategy: com.build4all.opl{linkId}
+     * Must be called ONLY after entity has an ID.
+     */
+    public String ensureAndroidPackageName() {
+        if (this.androidPackageName == null || this.androidPackageName.isBlank()) {
+            if (this.id == null) {
+                throw new IllegalStateException("Cannot generate androidPackageName before ID exists");
+            }
+            this.androidPackageName = "com.build4all.opl" + this.id;
+        }
+        return this.androidPackageName;
+    }
+
+    /**
+     * Bump Android version:
+     * - If first time: versionCode=1, versionName="1.0.0"
+     * - Else: increment patch (1.0.0 -> 1.0.1)
+     */
+    public void bumpAndroidVersion() {
+        if (this.androidVersionCode == null) {
+            this.androidVersionCode = 1;
+        } else {
+            this.androidVersionCode = this.androidVersionCode + 1;
+        }
+
+        if (this.androidVersionName == null || this.androidVersionName.isBlank()) {
+            this.androidVersionName = "1.0.0";
+            return;
+        }
+
+        String[] parts = this.androidVersionName.split("\\.");
+        try {
+            int lastIndex = parts.length - 1;
+            int patch = Integer.parseInt(parts[lastIndex]);
+            patch++;
+            parts[lastIndex] = String.valueOf(patch);
+            this.androidVersionName = String.join(".", parts);
+        } catch (Exception e) {
+            this.androidVersionName = "1.0.0";
+        }
     }
 
     // getters/setters
@@ -192,6 +205,9 @@ public class AdminUserProject {
     public String getAppName() { return appName; }
     public void setAppName(String appName) { this.appName = appName; }
 
+    public String getLogoUrl() { return logoUrl; }
+    public void setLogoUrl(String logoUrl) { this.logoUrl = logoUrl; }
+
     public String getApkUrl() { return apkUrl; }
     public void setApkUrl(String apkUrl) { this.apkUrl = apkUrl; }
 
@@ -204,8 +220,17 @@ public class AdminUserProject {
     public Long getThemeId() { return themeId; }
     public void setThemeId(Long themeId) { this.themeId = themeId; }
 
-    public String getLogoUrl() { return logoUrl; }
-    public void setLogoUrl(String logoUrl) { this.logoUrl = logoUrl; }
+    public Currency getCurrency() { return currency; }
+    public void setCurrency(Currency currency) { this.currency = currency; }
+
+    public Integer getAndroidVersionCode() { return androidVersionCode; }
+    public void setAndroidVersionCode(Integer androidVersionCode) { this.androidVersionCode = androidVersionCode; }
+
+    public String getAndroidVersionName() { return androidVersionName; }
+    public void setAndroidVersionName(String androidVersionName) { this.androidVersionName = androidVersionName; }
+
+    public String getAndroidPackageName() { return androidPackageName; }
+    public void setAndroidPackageName(String androidPackageName) { this.androidPackageName = androidPackageName; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
@@ -213,56 +238,11 @@ public class AdminUserProject {
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 
-    public Currency getCurrency() { return currency; }
-    public void setCurrency(Currency currency) { this.currency = currency; }
-    
-    public Integer getAndroidVersionCode() { return androidVersionCode; }
-    public void setAndroidVersionCode(Integer androidVersionCode) { this.androidVersionCode = androidVersionCode; }
-
-    public String getAndroidVersionName() { return androidVersionName; }
-    public void setAndroidVersionName(String androidVersionName) { this.androidVersionName = androidVersionName; }
-
-    // Convenience computed values (not persisted) useful for JSON output or service logic.
-
     @Transient public Long getAdminId() { return admin != null ? admin.getAdminId() : null; }
     @Transient public Long getProjectId() { return project != null ? project.getId() : null; }
 
-    // Status helper methods so callers don't repeat string comparisons.
     @Transient public boolean isActive() { return "ACTIVE".equalsIgnoreCase(status); }
     @Transient public boolean isSuspended() { return "SUSPENDED".equalsIgnoreCase(status); }
     @Transient public boolean isExpired() { return "EXPIRED".equalsIgnoreCase(status); }
     @Transient public boolean isDeleted() { return "DELETED".equalsIgnoreCase(status); }
-    
-    /**
-     * Bump Android version for this app instance.
-     * - If first time: versionCode = 1, versionName = "1.0.0"
-     * - Otherwise: increment patch number (e.g. 1.0.0 -> 1.0.1)
-     */
-    public void bumpAndroidVersion() {
-        // 1) versionCode
-        if (this.androidVersionCode == null) {
-            this.androidVersionCode = 1;
-        } else {
-            this.androidVersionCode = this.androidVersionCode + 1;
-        }
-
-        // 2) versionName
-        if (this.androidVersionName == null || this.androidVersionName.isBlank()) {
-            this.androidVersionName = "1.0.0";
-            return;
-        }
-
-        String[] parts = this.androidVersionName.split("\\.");
-        try {
-            int lastIndex = parts.length - 1;
-            int patch = Integer.parseInt(parts[lastIndex]);
-            patch++;
-            parts[lastIndex] = String.valueOf(patch);
-            this.androidVersionName = String.join(".", parts);
-        } catch (Exception e) {
-            // If any parse issue => reset to default
-            this.androidVersionName = "1.0.0";
-        }
-    }
-
 }

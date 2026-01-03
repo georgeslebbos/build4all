@@ -19,7 +19,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths; // ✅ java.nio.file.Paths
+import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -31,14 +31,9 @@ import java.util.UUID;
 /**
  * Business logic for managing AdminUserProject links (AUP).
  *
- * AdminUserProject = an "app assignment" row that connects:
- *   AdminUser (owner/manager) + Project
- * and stores metadata such as:
- *   slug, appName, license validity, build artifact URLs, themeId, currency, logoUrl, ...
- *
- * Option A:
- *   Store runtime config JSON (nav/home/features/branding/apiBaseUrlOverride) in AppRuntimeConfig table
- *   linked by app_id -> AdminUserProject.
+ * IMPORTANT:
+ * - This service is for "assignment/config".
+ * - It does NOT generate androidPackageName (that belongs to provisioning/build flow).
  */
 public class AdminUserProjectService {
 
@@ -93,10 +88,10 @@ public class AdminUserProjectService {
 
     /**
      * Create or update a single APP under (owner, project) keyed by slug.
-     * - If slug omitted: derive from appName (slugify)
+     * - If slug omitted: derive from appName
      * - Ensure uniqueness per (owner, project) by appending -2, -3...
      *
-     * Also upserts runtime config (Option A) in AppRuntimeConfig table.
+     * Upserts runtime config JSON (nav/home/features/branding/apiBaseUrlOverride).
      */
     @Transactional
     public void assign(Long adminId, AdminAppAssignmentRequest req) {
@@ -114,10 +109,10 @@ public class AdminUserProjectService {
                 ? slugify(req.getSlug())
                 : slugify(req.getAppName());
 
-        // 4) Ensure uniqueness
+        // 4) Ensure uniqueness per (owner, project)
         String uniqueSlug = ensureUniqueSlug(admin.getAdminId(), project.getId(), baseSlug);
 
-        // 5) Find existing link row
+        // 5) Find existing row by unique slug
         AdminUserProject link = linkRepo
                 .findByAdmin_AdminIdAndProject_IdAndSlug(admin.getAdminId(), project.getId(), uniqueSlug)
                 .orElse(null);
@@ -160,14 +155,14 @@ public class AdminUserProjectService {
             link.setLicenseId("LIC-" + admin.getAdminId() + "-" + project.getId() + "-" + now + "-" + uniqueSlug);
         }
 
-        // Reset build artifacts on assign
+        // Reset build artifacts on assign (clean slate)
         link.setApkUrl(null);
         link.setBundleUrl(null);
 
-        // ✅ SAVE FIRST, then use a stable variable (fixes "effectively final" issue)
+        // ✅ SAVE assignment row
         AdminUserProject savedLink = linkRepo.save(link);
 
-        // ✅ Upsert runtime config (Option A)
+        // ✅ Upsert runtime config
         AppRuntimeConfig cfg = runtimeRepo.findByApp_Id(savedLink.getId()).orElseGet(() -> {
             AppRuntimeConfig c = new AppRuntimeConfig();
             c.setApp(savedLink);
@@ -234,9 +229,6 @@ public class AdminUserProjectService {
     public void remove(Long adminId, Long projectId, String slug) {
         linkRepo.findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slugify(slug))
                 .ifPresent(linkRepo::delete);
-
-        // Optional: also delete runtime config if you have cascade off
-        // runtimeRepo.deleteByApp_Id(linkId) ... (depends on your schema/repo)
     }
 
     // ---------- helpers ----------
