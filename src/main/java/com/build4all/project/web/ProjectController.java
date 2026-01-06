@@ -163,4 +163,40 @@ public class ProjectController {
         }
     }
 
+    @Operation(summary = "List owners for a project (with appsCount)")
+    @GetMapping("/{id}/owners")
+    public ResponseEntity<?> ownersByProject(@RequestHeader("Authorization") String auth,
+                                            @PathVariable("id") Long projectId) {
+
+        String token = tokenFromAuth(auth);
+        if (token == null) return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
+
+        // This is your total-project admin area → admin token only (recommended)
+        if (!jwt.isAdminToken(token)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+
+        return ResponseEntity.ok(service.ownersByProject(projectId));
+    }
+    
+ 
+
+    @Operation(summary = "List apps for an owner inside a project")
+    @GetMapping("/{projectId}/owners/{adminId}/apps")
+    public ResponseEntity<?> appsByProjectAndOwner(
+            @RequestHeader("Authorization") String auth,
+            @PathVariable Long projectId,
+            @PathVariable Long adminId
+    ) {
+        String token = tokenFromAuth(auth);
+        if (token == null) return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
+
+        // Admin token only (recommended)
+        if (!jwt.isAdminToken(token)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+
+        return ResponseEntity.ok(service.appsByProjectAndOwner(projectId, adminId));
+    }
+
 }

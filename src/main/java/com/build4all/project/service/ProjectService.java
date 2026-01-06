@@ -6,6 +6,7 @@ import com.build4all.admin.repository.AdminUsersRepository;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.project.domain.Project;
 import com.build4all.project.domain.ProjectType;
+import com.build4all.project.dto.ProjectOwnerSummaryDTO;
 import com.build4all.project.repository.ProjectRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -155,4 +156,18 @@ public class ProjectService {
         }
         return candidate;
     }
+    
+    @Transactional(readOnly = true)
+    public List<ProjectOwnerSummaryDTO> ownersByProject(Long projectId) {
+        return linkRepo.findOwnersByProject(projectId);
+    }
+    
+
+    @Transactional(readOnly = true)
+    public List<com.build4all.project.dto.OwnerAppInProjectDTO> appsByProjectAndOwner(Long projectId, Long adminId) {
+        return linkRepo.findAppsByProjectAndOwner(projectId, adminId);
+    }
+
+
+
 }

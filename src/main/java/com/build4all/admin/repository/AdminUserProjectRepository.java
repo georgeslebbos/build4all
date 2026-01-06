@@ -3,6 +3,7 @@ package com.build4all.admin.repository;
 import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.dto.OwnerProjectView;
 import com.build4all.app.domain.AppRequest;
+import com.build4all.project.dto.ProjectOwnerSummaryDTO;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -89,4 +90,43 @@ public interface AdminUserProjectRepository extends JpaRepository<AdminUserProje
      * This is useful when an admin requests a record by ID while ensuring it matches their ownership.
      */
     Optional<AdminUserProject> findByIdAndAdmin_AdminId(Long id, Long ownerId);
+    
+    @Query("""
+    	    select new com.build4all.project.dto.ProjectOwnerSummaryDTO(
+    	        a.admin.adminId,
+    	        concat(a.admin.firstName, ' ', a.admin.lastName),
+    	        a.admin.email,
+    	        count(a.id)
+    	    )
+    	    from AdminUserProject a
+    	    where a.project.id = :projectId
+    	    group by a.admin.adminId, a.admin.firstName, a.admin.lastName, a.admin.email
+    	    order by count(a.id) desc
+    	""")
+    	List<ProjectOwnerSummaryDTO> findOwnersByProject(@Param("projectId") Long projectId);
+    
+    List<AdminUserProject> findByProject_IdAndAdmin_AdminId(Long projectId, Long adminId);
+    
+    
+    @Query("""
+    		  select new com.build4all.project.dto.OwnerAppInProjectDTO(
+    		    a.id,
+    		    a.slug,
+    		    a.appName,
+    		    a.status,
+    		    a.apkUrl,
+    		    a.ipaUrl,
+    		    a.bundleUrl
+    		  )
+    		  from AdminUserProject a
+    		  where a.project.id = :projectId
+    		    and a.admin.adminId = :adminId
+    		  order by a.createdAt desc
+    		""")
+    		List<com.build4all.project.dto.OwnerAppInProjectDTO> findAppsByProjectAndOwner(
+    		    @Param("projectId") Long projectId,
+    		    @Param("adminId") Long adminId
+    		);
+
+
 }
