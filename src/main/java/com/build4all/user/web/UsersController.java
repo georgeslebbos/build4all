@@ -148,46 +148,25 @@ public class UsersController {
             if (token == null || !token.startsWith("Bearer ")) {
                 return ResponseEntity.status(401).body("Missing or invalid token");
             }
-            token = token.substring(7).trim();
 
-            // No SQL: claim extraction
-            String contact = jwtUtil.extractUsername(token);
+            String jwt = token.substring(7).trim();
+            String role = jwtUtil.extractRole(jwt);
 
-            /**
-             * SQL (legacy/global lookup - NOT tenant-scoped):
-             * 1) usersRepository.findByEmail(contact)
-             *    SELECT * FROM users WHERE email = :contact LIMIT 1;
-             *
-             * 2) if null -> usersRepository.findByPhoneNumber(contact)
-             *    SELECT * FROM users WHERE phone_number = :contact LIMIT 1;
-             *
-             * ⚠️ Risk: in multi-tenant, same email/phone might exist across tenants.
-             * Better: require ownerProjectLinkId and use findByEmailAndOwnerProject_Id(...)
-             */
-            Users acting = usersRepository.findByEmail(contact);
-            if (acting == null) acting = usersRepository.findByPhoneNumber(contact);
-
-            String role = jwtUtil.extractRole(token);
-
-            // SUPER_ADMIN can delete any user (global route)
+            // ✅ SUPER_ADMIN can delete any user
             if ("SUPER_ADMIN".equalsIgnoreCase(role)) {
-
-                /**
-                 * SQL inside userService.deleteUserById(id):
-                 *  - userRepository.findById(id)
-                 *      SELECT * FROM users WHERE user_id = :id LIMIT 1;
-                 *  - if present -> userRepository.delete(u)
-                 *      DELETE FROM users WHERE user_id = :id;
-                 */
                 boolean deleted = userService.deleteUserById(id);
-
                 return deleted
                         ? ResponseEntity.ok("User deleted by SUPER_ADMIN successfully")
                         : ResponseEntity.status(404).body("User not found");
             }
 
-            // self-delete: must be the same user id
-            if (acting == null || !Objects.equals(acting.getId(), id)) {
+            // ✅ SELF delete: use userId from token (NOT email/phone)
+            Long tokenUserId = jwtUtil.extractId(jwt);
+            if (tokenUserId == null || tokenUserId <= 0) {
+                return ResponseEntity.status(401).body("Invalid token: missing user id");
+            }
+
+            if (!Objects.equals(tokenUserId, id)) {
                 return ResponseEntity.status(403).body("Access denied");
             }
 
@@ -196,14 +175,6 @@ public class UsersController {
                 return ResponseEntity.badRequest().body("Password is required");
             }
 
-            /**
-             * SQL inside userService.deleteUserByIdWithPassword(id, password):
-             * 1) SELECT user by PK
-             *    SELECT * FROM users WHERE user_id=:id LIMIT 1;
-             * 2) passwordEncoder.matches(...) -> no SQL
-             * 3) if ok -> DELETE user
-             *    DELETE FROM users WHERE user_id=:id;
-             */
             boolean deleted = userService.deleteUserByIdWithPassword(id, password);
 
             return deleted
@@ -360,59 +331,60 @@ public class UsersController {
             @RequestBody Map<String, String> body,
             @RequestHeader(HttpHeaders.AUTHORIZATION) String token
     ) {
-        if (token == null || !token.startsWith("Bearer ")) {
-            return ResponseEntity.status(401).body("Missing or invalid token");
+        try {
+            if (token == null || !token.startsWith("Bearer ")) {
+                return ResponseEntity.status(401).body("Missing or invalid token");
+            }
+
+            String jwt = token.substring(7).trim();
+
+            // ✅ Use userId from token
+            Long tokenUserId = jwtUtil.extractId(jwt);
+            if (tokenUserId == null || tokenUserId <= 0) {
+                return ResponseEntity.status(401).body("Invalid token: missing user id");
+            }
+
+            if (!Objects.equals(tokenUserId, id)) {
+                return ResponseEntity.status(403).body("Access denied");
+            }
+
+            // ✅ Fetch user by id (no email/phone guessing)
+            Users user = usersRepository.findById(id).orElse(null);
+            if (user == null) {
+                return ResponseEntity.status(404).body("User not found");
+            }
+
+            String statusStr = body.getOrDefault("status", "").trim();
+            String password = body.get("password");
+
+            if (statusStr.isBlank()) {
+                return ResponseEntity.badRequest().body("Status is required");
+            }
+
+            if ("INACTIVE".equalsIgnoreCase(statusStr)) {
+                if (password == null || password.isBlank()) {
+                    return ResponseEntity.badRequest().body("Password is required to deactivate account.");
+                }
+
+                if (!userService.checkPassword(user, password)) {
+                    return ResponseEntity.status(401).body("Incorrect password. Status not changed.");
+                }
+            }
+
+            Optional<UserStatus> newStatusOpt = userStatusRepository.findByNameIgnoreCase(statusStr);
+            if (newStatusOpt.isEmpty()) {
+                return ResponseEntity.badRequest().body("Invalid status value");
+            }
+
+            user.setStatus(newStatusOpt.get());
+            user.setUpdatedAt(LocalDateTime.now());
+            usersRepository.save(user);
+
+            return ResponseEntity.ok("User status updated to " + newStatusOpt.get().getName());
+
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body("Unexpected error: " + e.getMessage());
         }
-
-        // No SQL: JWT parsing
-        String contact = jwtUtil.extractUsername(token.substring(7).trim());
-
-        /**
-         * SQL (legacy/global; not tenant-scoped):
-         *   SELECT * FROM users WHERE email=:contact LIMIT 1;
-         *   OR
-         *   SELECT * FROM users WHERE phone_number=:contact LIMIT 1;
-         *
-         * ⚠️ Same tenant ambiguity risk. Prefer tenant-scoped endpoints using ownerProjectLinkId.
-         */
-        Users user = usersRepository.findByEmail(contact);
-        if (user == null) user = usersRepository.findByPhoneNumber(contact);
-
-        if (user == null || !Objects.equals(user.getId(), id)) {
-            return ResponseEntity.status(403).body("Access denied");
-        }
-
-        String statusStr = body.getOrDefault("status", "");
-        String password  = body.get("password");
-        if (statusStr.isBlank()) return ResponseEntity.badRequest().body("Status is required");
-
-        if ("INACTIVE".equalsIgnoreCase(statusStr)) {
-            if (password == null || password.isBlank())
-                return ResponseEntity.badRequest().body("Password is required to deactivate account.");
-
-            // No SQL: passwordEncoder.matches (hash compare)
-            if (!userService.checkPassword(user, password))
-                return ResponseEntity.status(401).body("Incorrect password. Status not changed.");
-        }
-
-        /**
-         * SQL:
-         *   SELECT * FROM user_status WHERE LOWER(name)=LOWER(:statusStr) LIMIT 1;
-         */
-        Optional<UserStatus> newStatusOpt = userStatusRepository.findByNameIgnoreCase(statusStr);
-        if (newStatusOpt.isEmpty()) return ResponseEntity.badRequest().body("Invalid status value");
-
-        // This becomes UPDATE on users
-        user.setStatus(newStatusOpt.get());
-        user.setUpdatedAt(LocalDateTime.now());
-
-        /**
-         * SQL:
-         *   UPDATE users SET status=:statusId, updated_at=:now WHERE user_id=:id;
-         */
-        usersRepository.save(user);
-
-        return ResponseEntity.ok("User status updated to " + newStatusOpt.get().getName());
     }
 
     /* =====================================================
@@ -550,41 +522,27 @@ public class UsersController {
                 return ResponseEntity.status(401).body("Missing or invalid token");
             }
 
-            // No SQL: JWT claim extraction
-            String contact = jwtUtil.extractUsername(token.substring(7).trim());
+            String jwt = token.substring(7).trim();
 
-            /**
-             * SQL (tenant-scoped):
-             *   SELECT * FROM users
-             *   WHERE email=:contact AND aup_id=:ownerProjectLinkId
-             *   LIMIT 1;
-             */
-            Users user = usersRepository.findByEmailAndOwnerProject_Id(contact, ownerProjectLinkId);
-
-            if (user == null) {
-                /**
-                 * SQL (tenant-scoped):
-                 *   SELECT * FROM users
-                 *   WHERE phone_number=:contact AND aup_id=:ownerProjectLinkId
-                 *   LIMIT 1;
-                 */
-                user = usersRepository.findByPhoneNumberAndOwnerProject_Id(contact, ownerProjectLinkId);
+           
+            Long userId = jwtUtil.extractId(jwt);
+            if (userId == null || userId <= 0) {
+                return ResponseEntity.status(401).body("Invalid token: missing user id");
             }
+
+            // ✅ tenant scoped by id + ownerProjectLinkId
+            Users user = usersRepository.findByIdAndOwnerProject_Id(userId, ownerProjectLinkId)
+                    .orElse(null);
 
             if (user == null) {
                 return ResponseEntity.status(404).body("User not found in this app");
             }
 
-            // UPDATE
             user.setIsPublicProfile(isPublic);
-
-            /**
-             * SQL:
-             *   UPDATE users SET is_public_profile=:isPublic WHERE user_id=:id;
-             */
             usersRepository.save(user);
 
             return ResponseEntity.ok("Profile visibility updated to " + (isPublic ? "PUBLIC" : "PRIVATE"));
+
         } catch (Exception e) {
             return ResponseEntity.status(500).body("Unexpected error: " + e.getMessage());
         }
