@@ -73,7 +73,7 @@ public class OwnerAppRequestController {
         }
     }
 
-    // ✅ AUTO flow
+    // ✅ AUTO flow (Android)
     @PostMapping(
             value = "/app-requests/auto",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
@@ -129,7 +129,7 @@ public class OwnerAppRequestController {
             );
 
             Map<String, Object> body = new HashMap<>();
-            body.put("message", "APK build started");
+            body.put("message", "Android build started");
             body.put("adminId", ownerId);
             body.put("projectId", projectId);
             body.put("ownerProjectLinkId", link.getId());
@@ -142,8 +142,14 @@ public class OwnerAppRequestController {
             body.put("endTo", link.getEndTo());
             body.put("logoUrl", nz(link.getLogoUrl()));
             body.put("apkUrl", nz(link.getApkUrl()));
+            body.put("bundleUrl", nz(link.getBundleUrl())); // if present later
             body.put("themeJson", themeJson);
             body.put("currencyId", currencyId);
+
+            // ✅ Version + package (very useful for debugging + UI)
+            body.put("androidVersionCode", link.getAndroidVersionCode());
+            body.put("androidVersionName", nz(link.getAndroidVersionName()));
+            body.put("androidPackageName", nz(link.getAndroidPackageName()));
 
             String manifestUrlGuess =
                     "https://raw.githubusercontent.com/fatimahh0/HobbySphereFlutter/main/builds/"
@@ -154,7 +160,9 @@ public class OwnerAppRequestController {
             body.put("callbackBase", nz(callbackBase));
 
             body.put("runtimeConfigUrl",
-                    "/api/public/runtime-config?ownerId=" + ownerId + "&projectId=" + projectId + "&slug=" + link.getSlug()
+                    "/api/public/runtime-config?ownerId=" + ownerId
+                            + "&projectId=" + projectId
+                            + "&slug=" + link.getSlug()
             );
 
             return ResponseEntity.ok(body);
@@ -168,6 +176,216 @@ public class OwnerAppRequestController {
             ));
         }
     }
+
+    // ✅ AUTO flow (iOS)
+    @PostMapping(
+            value = "/app-requests/auto/ios",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public ResponseEntity<?> createAndAutoApproveIos(
+            @RequestParam Long ownerId,
+            @RequestParam Long projectId,
+            @RequestParam String appName,
+            @RequestParam(required = false) String slug,
+            @RequestParam(required = false) Long themeId,
+            @RequestParam(required = false) String notes,
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            @RequestParam(value = "logo", required = false) MultipartFile logo,
+            @RequestParam(required = false) String primaryColor,
+            @RequestParam(required = false) String secondaryColor,
+            @RequestParam(required = false) String backgroundColor,
+            @RequestParam(required = false) String onBackgroundColor,
+            @RequestParam(required = false) String errorColor,
+            @RequestParam(required = false) Long currencyId,
+            @RequestParam(required = false) String navJson,
+            @RequestParam(required = false) String homeJson,
+            @RequestParam(required = false) String enabledFeaturesJson,
+            @RequestParam(required = false) String brandingJson,
+            @RequestParam(required = false) String apiBaseUrlOverride
+    ) {
+        try {
+            MultipartFile logoFile = (file != null) ? file : logo;
+
+            String themeJson = ThemeJsonBuilder.buildThemeJson(
+                    primaryColor,
+                    secondaryColor,
+                    backgroundColor,
+                    onBackgroundColor,
+                    errorColor
+            );
+
+            AdminUserProject link = service.createAndAutoApproveIos(
+                    ownerId,
+                    projectId,
+                    appName,
+                    slug,
+                    logoFile,
+                    themeId,
+                    notes,
+                    themeJson,
+                    currencyId,
+                    navJson,
+                    homeJson,
+                    enabledFeaturesJson,
+                    brandingJson,
+                    apiBaseUrlOverride
+            );
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("message", "iOS build started");
+            body.put("adminId", ownerId);
+            body.put("projectId", projectId);
+            body.put("ownerProjectLinkId", link.getId());
+            body.put("slug", nz(link.getSlug()));
+            body.put("appName", nz(link.getAppName()));
+            body.put("status", nz(link.getStatus()));
+            body.put("licenseId", nz(link.getLicenseId()));
+            body.put("themeId", link.getThemeId());
+            body.put("validFrom", link.getValidFrom());
+            body.put("endTo", link.getEndTo());
+            body.put("logoUrl", nz(link.getLogoUrl()));
+            body.put("ipaUrl", nz(link.getIpaUrl()));
+            body.put("themeJson", themeJson);
+            body.put("currencyId", currencyId);
+
+            // ✅ IMPORTANT: expose iOS version + bundle id
+            body.put("iosBuildNumber", link.getIosBuildNumber());
+            body.put("iosVersionName", nz(link.getIosVersionName()));
+            body.put("iosBundleId", nz(link.getIosBundleId()));
+
+            body.put("callbackBase", nz(callbackBase));
+
+            body.put("runtimeConfigUrl",
+                    "/api/public/runtime-config?ownerId=" + ownerId
+                            + "&projectId=" + projectId
+                            + "&slug=" + link.getSlug()
+            );
+
+            return ResponseEntity.ok(body);
+
+        } catch (IllegalArgumentException | IllegalStateException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "error", "Internal error",
+                    "details", ex.getClass().getSimpleName()
+            ));
+        }
+    }
+    
+    @PostMapping(
+            value = "/app-requests/auto/both",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public ResponseEntity<?> createAndAutoApproveBoth(
+            @RequestParam Long ownerId,
+            @RequestParam Long projectId,
+            @RequestParam String appName,
+            @RequestParam(required = false) String slug,
+            @RequestParam(required = false) Long themeId,
+            @RequestParam(required = false) String notes,
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            @RequestParam(value = "logo", required = false) MultipartFile logo,
+            @RequestParam(required = false) String primaryColor,
+            @RequestParam(required = false) String secondaryColor,
+            @RequestParam(required = false) String backgroundColor,
+            @RequestParam(required = false) String onBackgroundColor,
+            @RequestParam(required = false) String errorColor,
+            @RequestParam(required = false) Long currencyId,
+            @RequestParam(required = false) String navJson,
+            @RequestParam(required = false) String homeJson,
+            @RequestParam(required = false) String enabledFeaturesJson,
+            @RequestParam(required = false) String brandingJson,
+            @RequestParam(required = false) String apiBaseUrlOverride
+    ) {
+        try {
+            MultipartFile logoFile = (file != null) ? file : logo;
+
+            String themeJson = ThemeJsonBuilder.buildThemeJson(
+                    primaryColor,
+                    secondaryColor,
+                    backgroundColor,
+                    onBackgroundColor,
+                    errorColor
+            );
+
+            AdminUserProject link = service.createAndAutoApproveBoth(
+                    ownerId,
+                    projectId,
+                    appName,
+                    slug,
+                    logoFile,
+                    themeId,
+                    notes,
+                    themeJson,
+                    currencyId,
+                    navJson,
+                    homeJson,
+                    enabledFeaturesJson,
+                    brandingJson,
+                    apiBaseUrlOverride
+            );
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("message", "Android + iOS builds started");
+
+            // common
+            body.put("adminId", ownerId);
+            body.put("projectId", projectId);
+            body.put("ownerProjectLinkId", link.getId());
+            body.put("slug", nz(link.getSlug()));
+            body.put("appName", nz(link.getAppName()));
+            body.put("status", nz(link.getStatus()));
+            body.put("licenseId", nz(link.getLicenseId()));
+            body.put("themeId", link.getThemeId());
+            body.put("validFrom", link.getValidFrom());
+            body.put("endTo", link.getEndTo());
+            body.put("logoUrl", nz(link.getLogoUrl()));
+            body.put("themeJson", themeJson);
+            body.put("currencyId", currencyId);
+
+            // Android build info
+            body.put("apkUrl", nz(link.getApkUrl()));
+            body.put("bundleUrl", nz(link.getBundleUrl()));
+            body.put("androidVersionCode", link.getAndroidVersionCode());
+            body.put("androidVersionName", nz(link.getAndroidVersionName()));
+            body.put("androidPackageName", nz(link.getAndroidPackageName()));
+
+            // iOS build info
+            body.put("ipaUrl", nz(link.getIpaUrl()));
+            body.put("iosBuildNumber", link.getIosBuildNumber());
+            body.put("iosVersionName", nz(link.getIosVersionName()));
+            body.put("iosBundleId", nz(link.getIosBundleId()));
+
+            // Optional manifest hint (Android)
+            String manifestUrlGuess =
+                    "https://raw.githubusercontent.com/fatimahh0/HobbySphereFlutter/main/builds/"
+                            + ownerId + "/" + projectId + "/" + link.getSlug() + "/latest.json";
+            body.put("manifestUrlHint", manifestUrlGuess);
+
+            // ✅ Keep callbackBase only (never return token)
+            body.put("callbackBase", nz(callbackBase));
+
+            body.put("runtimeConfigUrl",
+                    "/api/public/runtime-config?ownerId=" + ownerId
+                            + "&projectId=" + projectId
+                            + "&slug=" + link.getSlug()
+            );
+
+            return ResponseEntity.ok(body);
+
+        } catch (IllegalArgumentException | IllegalStateException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "error", "Internal error",
+                    "details", ex.getClass().getSimpleName()
+            ));
+        }
+    }
+
 
     @GetMapping(value = "/app-requests", produces = MediaType.APPLICATION_JSON_VALUE)
     public List<AppRequest> myRequests(@RequestParam Long ownerId) {

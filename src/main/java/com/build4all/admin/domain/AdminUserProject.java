@@ -82,6 +82,16 @@ public class AdminUserProject {
 
     @Column(name = "android_package_name", length = 255, unique = true)
     private String androidPackageName;
+    
+    @Column(name = "ios_bundle_id", length = 255, unique = true)
+    private String iosBundleId;
+
+    @Column(name = "ios_build_number")
+    private Integer iosBuildNumber;
+
+    @Column(name = "ios_version_name", length = 32)
+    private String iosVersionName;
+
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
@@ -176,6 +186,40 @@ public class AdminUserProject {
             this.androidVersionName = "1.0.0";
         }
     }
+    
+    
+    public String ensureIosBundleId() {
+        if (this.iosBundleId == null || this.iosBundleId.isBlank()) {
+            if (this.id == null) {
+                throw new IllegalStateException("Cannot generate iosBundleId before ID exists");
+            }
+        
+            this.iosBundleId = "com.build4all.opl" + this.id + ".app";
+        }
+        return this.iosBundleId;
+    }
+
+
+    public void bumpIosVersion() {
+        if (this.iosBuildNumber == null) this.iosBuildNumber = 1;
+        else this.iosBuildNumber = this.iosBuildNumber + 1;
+
+        if (this.iosVersionName == null || this.iosVersionName.isBlank()) {
+            this.iosVersionName = "1.0.0";
+            return;
+        }
+
+        String[] parts = this.iosVersionName.split("\\.");
+        try {
+            int last = parts.length - 1;
+            int patch = Integer.parseInt(parts[last]);
+            patch++;
+            parts[last] = String.valueOf(patch);
+            this.iosVersionName = String.join(".", parts);
+        } catch (Exception e) {
+            this.iosVersionName = "1.0.0";
+        }
+    }
 
     // getters/setters
     public Long getId() { return id; }
@@ -231,12 +275,24 @@ public class AdminUserProject {
 
     public String getAndroidPackageName() { return androidPackageName; }
     public void setAndroidPackageName(String androidPackageName) { this.androidPackageName = androidPackageName; }
+    
+    public String getIosBundleId() { return iosBundleId; }
+    public void setIosBundleId(String iosBundleId) { this.iosBundleId = iosBundleId; }
+
+    public Integer getIosBuildNumber() { return iosBuildNumber; }
+    public void setIosBuildNumber(Integer iosBuildNumber) { this.iosBuildNumber = iosBuildNumber; }
+
+    public String getIosVersionName() { return iosVersionName; }
+    public void setIosVersionName(String iosVersionName) { this.iosVersionName = iosVersionName; }
+
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    
+    
 
     @Transient public Long getAdminId() { return admin != null ? admin.getAdminId() : null; }
     @Transient public Long getProjectId() { return project != null ? project.getId() : null; }
@@ -245,4 +301,8 @@ public class AdminUserProject {
     @Transient public boolean isSuspended() { return "SUSPENDED".equalsIgnoreCase(status); }
     @Transient public boolean isExpired() { return "EXPIRED".equalsIgnoreCase(status); }
     @Transient public boolean isDeleted() { return "DELETED".equalsIgnoreCase(status); }
+    
+    
+    
+    
 }

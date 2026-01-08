@@ -120,6 +120,8 @@ public class CiBuildService {
             return "";
         }
     }
+    
+    
 
     private static String b64(String s) {
         if (s == null || s.isBlank()) return "";
@@ -275,6 +277,140 @@ public class CiBuildService {
 
         } catch (Exception ex) {
             String msg = "repository_dispatch error: " + ex;
+            log.error(msg);
+            return new CiDispatchResult(false, -2, msg, buildId);
+        }
+    }
+    
+    public CiDispatchResult dispatchOwnerIosBuild(
+            long ownerId,
+            long projectId,
+            String ownerProjectLinkId,
+            String slug,
+            String appName,
+            String appType,
+            Long themeId,
+            String appLogoUrl,
+            String themeJson,
+            byte[] logoBytesOpt,
+            Long currencyIdForBuild,
+            String apiBaseUrlOverride,
+            String navJson,
+            String homeJson,
+            String enabledFeaturesJson,
+            String brandingJson,
+            Integer iosBuildNumber,
+            String iosVersionName,
+            String iosBundleId
+    ) {
+        if (!isConfigured()) {
+            String msg = "CI DISPATCH SKIPPED: ci.webhook.url/token not configured.";
+            log.warn(msg);
+            return new CiDispatchResult(false, 0, msg, "");
+        }
+
+        final String buildId = UUID.randomUUID().toString();
+        final String opl = notBlank(ownerProjectLinkId) ? ownerProjectLinkId : (ownerId + "-" + projectId);
+
+        // ✅ Validate bundle id early
+        String bundleId = (iosBundleId == null) ? "" : iosBundleId.trim();
+        if (bundleId.isBlank()) {
+            String msg = "IOS_BUNDLE_ID missing (iosBundleId).";
+            log.error(msg);
+            return new CiDispatchResult(false, 0, msg, buildId);
+        }
+
+        String themeJsonNorm    = nz(themeJson);
+        String navJsonNorm      = nz(navJson);
+        String homeJsonNorm     = nz(homeJson);
+        String enabledJsonNorm  = nz(enabledFeaturesJson);
+        String brandingJsonNorm = nz(brandingJson);
+
+        String effectiveApiBaseUrl = notBlank(apiBaseUrlOverride)
+                ? apiBaseUrlOverride.trim()
+                : mobileApiBaseUrl;
+
+        String themeB64    = b64(themeJsonNorm);
+        String navB64      = b64(navJsonNorm);
+        String homeB64     = b64(homeJsonNorm);
+        String enabledB64  = b64(enabledJsonNorm);
+        String brandingB64 = b64(brandingJsonNorm);
+
+        String logoPath = nz(appLogoUrl);
+
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("OWNER_ID", ownerId);
+        config.put("PROJECT_ID", projectId);
+        config.put("OWNER_PROJECT_LINK_ID", opl);
+        config.put("SLUG", nz(slug));
+
+        config.put("APP_NAME", nz(appName));
+        config.put("APP_TYPE", nz(appType));
+
+        config.put("THEME_ID", themeId);
+        config.put("THEME_JSON", themeJsonNorm);
+        config.put("THEME_JSON_B64", themeB64);
+
+        config.put("CURRENCY_ID", currencyIdForBuild);
+
+        config.put("API_BASE_URL_OVERRIDE", nz(apiBaseUrlOverride));
+        config.put("API_BASE_URL", nz(effectiveApiBaseUrl));
+
+        // ✅ raw + B64 (same as Android)
+        config.put("NAV_JSON", navJsonNorm);
+        config.put("HOME_JSON", homeJsonNorm);
+        config.put("ENABLED_FEATURES_JSON", enabledJsonNorm);
+        config.put("BRANDING_JSON", brandingJsonNorm);
+
+        config.put("NAV_JSON_B64", navB64);
+        config.put("HOME_JSON_B64", homeB64);
+        config.put("ENABLED_FEATURES_JSON_B64", enabledB64);
+        config.put("BRANDING_JSON_B64", brandingB64);
+
+        config.put("LOGO_PATH", logoPath);
+        config.put("WS_PATH", nz(mobileWsPath));
+        config.put("OWNER_ATTACH_MODE", nz(mobileOwnerAttachMode));
+        config.put("APP_ROLE", nz(mobileAppRole));
+
+        // ✅ iOS versioning + bundle id
+        config.put("IOS_BUILD_NUMBER", iosBuildNumber);
+        config.put("IOS_VERSION_NAME", nz(iosVersionName));
+        config.put("IOS_BUNDLE_ID", bundleId);
+
+        Map<String, Object> clientPayload = new LinkedHashMap<>();
+        clientPayload.put("BUILD_ID", buildId);
+        clientPayload.put("CONFIG", config);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("event_type", "owner_app_build_ios");
+        payload.put("client_payload", clientPayload);
+
+        try {
+            ClientResponse resp = web.post()
+                    .uri(webhookUrl)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + webhookToken)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(payload)
+                    .exchange()
+                    .block();
+
+            if (resp == null) {
+                String msg = "repository_dispatch -> null response";
+                log.error(msg);
+                return new CiDispatchResult(false, -1, msg, buildId);
+            }
+
+            int code = resp.statusCode().value();
+            String body = resp.bodyToMono(String.class).blockOptional().orElse("");
+
+            boolean ok = code >= 200 && code < 300;
+            if (ok) log.info("iOS repository_dispatch OK (BUILD_ID={}, HTTP {})", buildId, code);
+            else log.error("iOS repository_dispatch FAILED (BUILD_ID={}, HTTP {}): {}", buildId, code, body);
+
+            return new CiDispatchResult(ok, code, body, buildId);
+
+        } catch (Exception ex) {
+            String msg = "iOS repository_dispatch error: " + ex;
             log.error(msg);
             return new CiDispatchResult(false, -2, msg, buildId);
         }

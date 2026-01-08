@@ -131,6 +131,302 @@ public class AppRequestService {
         );
     }
 
+    @Transactional
+    public AdminUserProject createAndAutoApproveIos(
+            Long ownerId, Long projectId,
+            String appName, String slug,
+            MultipartFile logoFile,
+            Long themeId, String notes,
+            String themeJson,
+            Long currencyId,
+            String navJson,
+            String homeJson,
+            String enabledFeaturesJson,
+            String brandingJson,
+            String apiBaseUrlOverride
+    ) throws IOException {
+
+        String base = (slug != null && !slug.isBlank()) ? slugify(slug) : slugify(appName);
+        String uniqueSlug = ensureUniqueSlug(ownerId, projectId, base);
+
+        String logoUrl = null;
+        byte[] logoBytes = null;
+        if (logoFile != null && !logoFile.isEmpty()) {
+            logoUrl = saveOwnerAppLogoToUploads(ownerId, projectId, uniqueSlug, logoFile);
+            logoBytes = logoFile.getBytes();
+        }
+
+        Long chosenThemeId = resolveThemeIdFromRaw(themeId);
+
+        AppRequest r = new AppRequest();
+        r.setOwnerId(ownerId);
+        r.setProjectId(projectId);
+        r.setAppName(appName);
+        r.setSlug(uniqueSlug);
+        r.setLogoUrl(logoUrl);
+        r.setThemeId(chosenThemeId);
+        r.setNotes(notes);
+        r.setStatus("APPROVED");
+        r.setThemeJson(themeJson);
+        r.setCurrencyId(currencyId);
+        r = appRequestRepo.save(r);
+
+        return provisionAndTriggerIos(
+                r,
+                logoBytes,
+                navJson,
+                homeJson,
+                enabledFeaturesJson,
+                brandingJson,
+                apiBaseUrlOverride
+        );
+    }
+    
+    @Transactional
+    public AdminUserProject createAndAutoApproveBoth(
+            Long ownerId, Long projectId,
+            String appName, String slug,
+            MultipartFile logoFile,
+            Long themeId, String notes,
+            String themeJson,
+            Long currencyId,
+            String navJson,
+            String homeJson,
+            String enabledFeaturesJson,
+            String brandingJson,
+            String apiBaseUrlOverride
+    ) throws IOException {
+
+       
+        String base = (slug != null && !slug.isBlank()) ? slugify(slug) : slugify(appName);
+        String uniqueSlug = ensureUniqueSlug(ownerId, projectId, base);
+
+        String logoUrl = null;
+        byte[] logoBytes = null;
+        if (logoFile != null && !logoFile.isEmpty()) {
+            logoUrl = saveOwnerAppLogoToUploads(ownerId, projectId, uniqueSlug, logoFile);
+            logoBytes = logoFile.getBytes();
+        }
+
+        Long chosenThemeId = resolveThemeIdFromRaw(themeId);
+
+        AppRequest r = new AppRequest();
+        r.setOwnerId(ownerId);
+        r.setProjectId(projectId);
+        r.setAppName(appName);
+        r.setSlug(uniqueSlug);
+        r.setLogoUrl(logoUrl);
+        r.setThemeId(chosenThemeId);
+        r.setNotes(notes);
+        r.setStatus("APPROVED");
+        r.setThemeJson(themeJson);
+        r.setCurrencyId(currencyId);
+        r = appRequestRepo.save(r);
+
+        AdminUserProject link = provisionAndTrigger(
+                r, logoBytes,
+                navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride
+        );
+
+       
+        triggerIosForExistingLink(
+                link, r, logoBytes,
+                navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride
+        );
+
+        return link;
+    }
+
+    private void triggerIosForExistingLink(
+            AdminUserProject link,
+            AppRequest req,
+            byte[] logoBytesOpt,
+            String navJson,
+            String homeJson,
+            String enabledFeaturesJson,
+            String brandingJson,
+            String apiBaseUrlOverride
+    ) {
+        AdminUser owner = adminRepo.findById(req.getOwnerId())
+                .orElseThrow(() -> new IllegalArgumentException("Owner(admin) not found"));
+
+        Project project = projectRepo.findById(req.getProjectId())
+                .orElseThrow(() -> new IllegalArgumentException("Project not found"));
+
+        // bump iOS version + ensure bundle id (needs ID)
+        link.bumpIosVersion();
+        link.ensureIosBundleId();
+
+        // reset only IPA each time iOS build requested
+        link.setIpaUrl(null);
+
+        // save
+        link = aupRepo.save(link);
+
+        // runtime config upsert (same)
+        upsertRuntimeConfig(link, navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride);
+
+        String ownerProjectLinkId = String.valueOf(link.getId());
+        Long currencyIdForBuild = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
+
+        Long chosenThemeId = link.getThemeId();
+        String themeJson = (req.getThemeJson() != null && !req.getThemeJson().isBlank())
+                ? req.getThemeJson()
+                : resolveThemeJson(chosenThemeId, "{}");
+
+        String appType = (project.getProjectType() != null)
+                ? project.getProjectType().name()
+                : "ECOMMERCE";
+
+        CiDispatchResult res = ciBuildService.dispatchOwnerIosBuild(
+                owner.getAdminId(),
+                project.getId(),
+                ownerProjectLinkId,
+                link.getSlug(),
+                link.getAppName(),
+                appType,
+                chosenThemeId,
+                link.getLogoUrl(),
+                themeJson,
+                logoBytesOpt,
+                currencyIdForBuild,
+                apiBaseUrlOverride,
+                navJson,
+                homeJson,
+                enabledFeaturesJson,
+                brandingJson,
+                link.getIosBuildNumber(),
+                link.getIosVersionName(),
+                link.getIosBundleId()
+        );
+
+        if (!res.ok()) {
+            String msg = "CI iOS dispatch failed (HTTP " + res.httpCode() + "): " + res.responseBody();
+            log.error("{}", msg);
+            throw new IllegalStateException(msg);
+        }
+    }
+
+
+    private AdminUserProject provisionAndTriggerIos(
+            AppRequest req,
+            byte[] logoBytesOpt,
+            String navJson,
+            String homeJson,
+            String enabledFeaturesJson,
+            String brandingJson,
+            String apiBaseUrlOverride
+    ) {
+
+        AdminUser owner = adminRepo.findById(req.getOwnerId())
+                .orElseThrow(() -> new IllegalArgumentException("Owner(admin) not found"));
+
+        Project project = projectRepo.findById(req.getProjectId())
+                .orElseThrow(() -> new IllegalArgumentException("Project not found"));
+
+        Long chosenThemeId = resolveThemeId(req);
+
+        String desiredSlug = (req.getSlug() != null && !req.getSlug().isBlank())
+                ? req.getSlug().trim().toLowerCase()
+                : slugify(req.getAppName());
+
+        String uniqueSlug = ensureUniqueSlug(owner.getAdminId(), project.getId(), desiredSlug);
+
+        LocalDate now = LocalDate.now();
+        LocalDate end = now.plusMonths(1);
+
+        AdminUserProject link = aupRepo
+                .findByAdmin_AdminIdAndProject_IdAndSlug(owner.getAdminId(), project.getId(), uniqueSlug)
+                .orElseGet(() -> {
+                    AdminUserProject n = new AdminUserProject(owner, project, null, now, end);
+                    n.setSlug(uniqueSlug);
+                    return n;
+                });
+
+        // ---- base fields ----
+        link.setStatus("ACTIVE");
+        link.setAppName(req.getAppName());
+        link.setLogoUrl(req.getLogoUrl());
+        link.setValidFrom(now);
+        link.setEndTo(end);
+        link.setThemeId(chosenThemeId);
+
+        // ---- currency ----
+        Long currencyId = req.getCurrencyId();
+        if (currencyId != null) {
+            Currency c = currencyRepo.findById(currencyId)
+                    .orElseThrow(() -> new IllegalArgumentException("Currency not found: " + currencyId));
+            link.setCurrency(c);
+        }
+
+        // ---- license ----
+        if (link.getLicenseId() == null || link.getLicenseId().isBlank()) {
+            link.setLicenseId("LIC-" + owner.getAdminId() + "-" + project.getId() + "-" + now + "-" + uniqueSlug);
+        }
+
+        // ✅ iOS build should NOT bump Android version & should NOT touch android package.
+        // Only reset IPA url (keep existing APK/AAB if already built).
+        link.setIpaUrl(null);
+
+        // ✅ Save first (important: link now definitely has ID)
+        link = aupRepo.save(link);
+
+        // ✅ bump iOS version + ensure bundle id (may require ID)
+        link.bumpIosVersion();
+        link.ensureIosBundleId();
+
+        // Save again after bump/ensure
+        link = aupRepo.save(link);
+
+        // ---- runtime config ----
+        upsertRuntimeConfig(link, navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride);
+
+        String ownerProjectLinkId = String.valueOf(link.getId());
+        Long currencyIdForBuild = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
+
+        String themeJson = (req.getThemeJson() != null && !req.getThemeJson().isBlank())
+                ? req.getThemeJson()
+                : resolveThemeJson(chosenThemeId, "{}");
+
+        String appType = (project.getProjectType() != null)
+                ? project.getProjectType().name()
+                : "ECOMMERCE";
+
+        // ✅ NEW iOS dispatch signature (with version + bundle id)
+        CiDispatchResult res = ciBuildService.dispatchOwnerIosBuild(
+                owner.getAdminId(),
+                project.getId(),
+                ownerProjectLinkId,
+                uniqueSlug,
+                link.getAppName(),
+                appType,
+                chosenThemeId,
+                link.getLogoUrl(),
+                themeJson,
+                logoBytesOpt,
+                currencyIdForBuild,
+                apiBaseUrlOverride,
+                navJson,
+                homeJson,
+                enabledFeaturesJson,
+                brandingJson,
+                link.getIosBuildNumber(),
+                link.getIosVersionName(),
+                link.getIosBundleId()
+        );
+
+        if (!res.ok()) {
+            String msg = "CI iOS dispatch failed (HTTP " + res.httpCode() + "): " + res.responseBody();
+            log.error("{}", msg);
+            throw new IllegalStateException(msg);
+        }
+
+        log.info("CI iOS dispatch OK (buildId={}, ownerId={}, projectId={}, linkId={}, slug={}, bundleId={})",
+                res.buildId(), owner.getAdminId(), project.getId(), link.getId(), uniqueSlug, link.getIosBundleId());
+
+        return link;
+    }
+
     // ---------------- internal ----------------
 
     private AdminUserProject provisionAndTrigger(AppRequest req,
