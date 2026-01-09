@@ -42,4 +42,11 @@ public interface OwnerProjectView {
 
     // Additional artifact URL (e.g., bundle / AAB / web bundle depending on pipeline).
     String getBundleUrl();
+    
+    String getIosBundleId();
+    
+   String getAndroidPackageName();
+    
+    
+    
 }

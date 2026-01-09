@@ -52,15 +52,20 @@ public class SecurityConfig implements WebMvcConfigurer {
      *   file saved at:   uploads/owner/1/2/app/logo.png
      *   accessible via:  http://<host>/uploads/owner/1/2/app/logo.png
      */
-    @Override
-    public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // Absolute filesystem location of the "uploads" directory (converted to a "file:" URI)
-        String uploadPath = Paths.get("uploads").toAbsolutePath().toUri().toString();
+	@Override
+	public void addResourceHandlers(ResourceHandlerRegistry registry) {
 
-        registry
-                .addResourceHandler("/uploads/**")     // URL path pattern
-                .addResourceLocations(uploadPath);     // filesystem folder as static resource root
-    }
+	    // ✅ 1) /uploads/**  -> ./uploads/
+	    String uploadsPath = Paths.get("uploads").toAbsolutePath().toUri().toString();
+	    registry.addResourceHandler("/uploads/**")
+	            .addResourceLocations(uploadsPath);
+
+	    // ✅ 2) /uploadsPublish/** -> ./uploadsPublish/
+	    String uploadsPublishPath = Paths.get("uploadsPublish").toAbsolutePath().toUri().toString();
+	    registry.addResourceHandler("/uploadsPublish/**")
+	            .addResourceLocations(uploadsPublishPath);
+	}
+
 
     /* =========================================================
      * 2) PasswordEncoder bean
@@ -158,6 +163,7 @@ public class SecurityConfig implements WebMvcConfigurer {
                                 "/api/auth/user/login-phone", // login, register, OTP, etc.
                                 "/api/ci/**",     // CI callbacks or build webhooks
                                 "/uploads/**",    // serve uploaded images/files
+                                "/uploadsPublish/**",
                                 "/ws-chat/**",    // websocket endpoint (handshake might be public)
                                 "/error",// Spring default error endpoint (avoids weird blocking)
                                 "/api/public/runtime-config/**",
