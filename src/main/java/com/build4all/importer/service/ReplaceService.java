@@ -1,4 +1,3 @@
-// File: src/main/java/com/build4all/feeders/importer/ReplaceService.java
 package com.build4all.importer.service;
 
 import com.build4all.catalog.repository.CategoryRepository;
@@ -11,6 +10,12 @@ import com.build4all.tax.repository.TaxRuleRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Replace existing data before import.
+ *
+ * TENANT: deletes tenant-scoped entities (safe)
+ * FULL: also deletes project-scoped category/itemType (use carefully)
+ */
 @Service
 public class ReplaceService {
 
@@ -19,7 +24,6 @@ public class ReplaceService {
     private final ShippingMethodRepository shippingRepo;
     private final CouponRepository couponRepo;
 
-    // Only used in FULL scope:
     private final ItemTypeRepository itemTypeRepo;
     private final CategoryRepository categoryRepo;
 
@@ -41,14 +45,14 @@ public class ReplaceService {
 
     @Transactional
     public void replace(Long projectId, Long ownerProjectId, ReplaceScope scope) {
-        // Tenant-scoped delete (safe)
-        /*couponRepo.deleteByOwnerProjectId(ownerProjectId);
+
+        // ✅ Tenant-scoped delete
+     /*   couponRepo.deleteByOwnerProjectId(ownerProjectId);
         shippingRepo.deleteByOwnerProject_Id(ownerProjectId);
         taxRuleRepo.deleteByOwnerProject_Id(ownerProjectId);
         productRepo.deleteByOwnerProject_Id(ownerProjectId);
 
         if (scope == ReplaceScope.FULL) {
-            // Project-scoped delete (danger if multiple tenants share project)
             itemTypeRepo.deleteByCategory_Project_Id(projectId);
             categoryRepo.deleteByProject_Id(projectId);
         }*/

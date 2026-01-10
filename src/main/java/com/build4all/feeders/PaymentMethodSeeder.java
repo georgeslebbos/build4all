@@ -16,9 +16,10 @@ public class PaymentMethodSeeder implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-     //   upsert("STRIPE");
-      //  upsert("CASH");
-      //  upsert("PAYPAL"); // plugin exists (template). You can keep it enabled/disabled.
+        upsert("STRIPE");
+        upsert("CASH");
+        upsert("PAYPAL");
+        upsert("VISA"); // plugin exists (template). You can keep it enabled/disabled.
     }
 
     private void upsert(String name) {

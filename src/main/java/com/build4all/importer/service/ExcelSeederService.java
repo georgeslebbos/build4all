@@ -1,25 +1,30 @@
-// File: src/main/java/com/build4all/feeders/importer/ExcelSeederService.java
 package com.build4all.importer.service;
 
-import com.build4all.importer.dto.SeedDataset;
 import com.build4all.catalog.domain.Country;
 import com.build4all.catalog.domain.Region;
 import com.build4all.catalog.repository.CountryRepository;
 import com.build4all.catalog.repository.RegionRepository;
+import com.build4all.features.ecommerce.domain.ProductType;
+import com.build4all.importer.dto.SeedDataset;
 import com.build4all.importer.model.ExcelImportResult;
 import com.build4all.importer.model.ExcelValidationResult;
 import com.build4all.importer.model.ImportOptions;
 import com.build4all.importer.parser.ExcelSeedDatasetParser;
-import com.build4all.project.domain.ProjectType;
-import com.build4all.features.ecommerce.domain.ProductType;
-import com.build4all.shipping.domain.ShippingMethodType;
 import com.build4all.promo.domain.CouponDiscountType;
+import com.build4all.shipping.domain.ShippingMethodType;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.*;
 
+/**
+ * ✅ SETUP is NOT required (and can be removed from Excel completely).
+ * Validation focuses on:
+ * - FK integrity between sheets
+ * - enums correctness
+ * - country/region correctness
+ */
 @Service
 public class ExcelSeederService {
 
@@ -46,12 +51,11 @@ public class ExcelSeederService {
         List<String> errors = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
 
-        req(errors, data.projectName, "SETUP.projectName is required");
-        req(errors, data.tenant != null ? data.tenant.slug : null, "SETUP.tenant_slug is required");
-        req(errors, data.tenant != null ? data.tenant.currencyCode : null, "SETUP.tenant_currencyCode is required");
-        req(errors, data.owner != null ? data.owner.email : null, "SETUP.owner_email is required");
-
-        checkEnum(errors, "SETUP.projectType", data.projectType, ProjectType.class, false);
+        // ✅ IMPORTANT CHANGE:
+        // No SETUP requirements anymore.
+        // req(errors, data.projectName, ...)  => removed
+        // req(errors, data.tenant.slug, ...)  => removed
+        // req(errors, data.owner.email, ...)  => removed
 
         // FK checks
         Set<String> categories = new HashSet<>();
@@ -95,11 +99,12 @@ public class ExcelSeederService {
                     data.coupons.get(i).type, CouponDiscountType.class, false);
         }
 
-        // Country/region checks
         validateCountryRegion(errors, "TAX_RULES", data);
         validateCountryRegion(errors, "SHIPPING_METHODS", data);
 
-        ExcelValidationResult res = errors.isEmpty() ? ExcelValidationResult.ok() : ExcelValidationResult.fail(errors, warnings);
+        ExcelValidationResult res = errors.isEmpty()
+                ? ExcelValidationResult.ok()
+                : ExcelValidationResult.fail(errors, warnings);
 
         res.categories = data.categories.size();
         res.itemTypes = data.itemTypes.size();
@@ -113,7 +118,7 @@ public class ExcelSeederService {
     }
 
     @Transactional
-    public ExcelImportResult importExcel(MultipartFile file, ImportOptions opts) throws Exception {
+    public ExcelImportResult importExcel(MultipartFile file, ImportOptions opts, Long ownerProjectId) throws Exception {
         ExcelValidationResult vr = validateExcel(file);
         if (!vr.valid) {
             ExcelImportResult fail = ExcelImportResult.fail("Validation failed. No data imported.", vr.errors);
@@ -122,7 +127,7 @@ public class ExcelSeederService {
         }
 
         SeedDataset data = parser.parse(file.getInputStream());
-        return importCore.importDataset(data, opts);
+        return importCore.importDataset(data, opts, ownerProjectId);
     }
 
     // ---------------- helpers ----------------
@@ -157,10 +162,6 @@ public class ExcelSeederService {
                 errors.add(sheetName + ".row#" + rowNum + ": regionCode not found for " + iso2 + ": " + regionCode);
             }
         }
-    }
-
-    private static void req(List<String> errors, String v, String msg) {
-        if (v == null || v.isBlank()) errors.add(msg);
     }
 
     private static boolean blank(String s) { return s == null || s.trim().isEmpty(); }

@@ -1,4 +1,3 @@
-// File: src/main/java/com/build4all/feeders/importer/ExcelImportCore.java
 package com.build4all.importer.service;
 
 import com.build4all.importer.dto.SeedDataset;
@@ -8,15 +7,22 @@ import com.build4all.importer.model.ImportOptions;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Core importer orchestration for existing tenant.
+ *
+ * ✅ resolves tenant by ownerProjectId (not Excel)
+ * ✅ optional replace
+ * ✅ import dataset
+ */
 @Service
 public class ExcelImportCore {
 
-    private final TenantResolver tenantResolver;
+    private final ExistingTenantResolver tenantResolver;
     private final ReplaceService replaceService;
     private final DatasetImporter datasetImporter;
 
     public ExcelImportCore(
-            TenantResolver tenantResolver,
+            ExistingTenantResolver tenantResolver,
             ReplaceService replaceService,
             DatasetImporter datasetImporter
     ) {
@@ -26,8 +32,9 @@ public class ExcelImportCore {
     }
 
     @Transactional
-    public ExcelImportResult importDataset(SeedDataset data, ImportOptions opts) {
-        TenantResolver.Resolved resolved = tenantResolver.resolveOrCreate(data);
+    public ExcelImportResult importDataset(SeedDataset data, ImportOptions opts, Long ownerProjectId) {
+
+        ExistingTenantResolver.Resolved resolved = tenantResolver.resolveExisting(ownerProjectId);
 
         if (opts.replace()) {
             replaceService.replace(resolved.projectId(), resolved.ownerProjectId(), opts.replaceScope());

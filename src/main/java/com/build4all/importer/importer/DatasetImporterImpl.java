@@ -1,24 +1,15 @@
-// File: src/main/java/com/build4all/feeders/importer/DatasetImporterImpl.java
 package com.build4all.importer.importer;
 
 import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.repository.AdminUserProjectRepository;
-import com.build4all.catalog.domain.Category;
-import com.build4all.catalog.domain.Country;
-import com.build4all.catalog.domain.Currency;
-import com.build4all.catalog.domain.ItemType;
-import com.build4all.catalog.domain.Region;
-import com.build4all.catalog.repository.CategoryRepository;
-import com.build4all.catalog.repository.CountryRepository;
-import com.build4all.catalog.repository.CurrencyRepository;
-import com.build4all.catalog.repository.ItemTypeRepository;
-import com.build4all.catalog.repository.RegionRepository;
-import com.build4all.importer.dto.SeedDataset;
+import com.build4all.catalog.domain.*;
+import com.build4all.catalog.repository.*;
 import com.build4all.features.ecommerce.domain.Product;
 import com.build4all.features.ecommerce.domain.ProductType;
 import com.build4all.features.ecommerce.repository.ProductRepository;
+import com.build4all.importer.dto.SeedDataset;
 import com.build4all.importer.model.ExcelImportResult;
-import com.build4all.importer.service.TenantResolver;
+import com.build4all.importer.service.ExistingTenantResolver;
 import com.build4all.promo.domain.Coupon;
 import com.build4all.promo.domain.CouponDiscountType;
 import com.build4all.promo.repository.CouponRepository;
@@ -27,6 +18,7 @@ import com.build4all.shipping.domain.ShippingMethodType;
 import com.build4all.shipping.repository.ShippingMethodRepository;
 import com.build4all.tax.domain.TaxRule;
 import com.build4all.tax.repository.TaxRuleRepository;
+import  com.build4all.catalog.domain.Currency;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -74,16 +66,15 @@ public class DatasetImporterImpl implements DatasetImporter {
     }
 
     @Override
-    public ExcelImportResult importAll(SeedDataset data, TenantResolver.Resolved resolved) {
+    public ExcelImportResult importAll(SeedDataset data, ExistingTenantResolver.Resolved resolved) {
 
         AdminUserProject aup = aupRepo.findById(resolved.ownerProjectId())
                 .orElseThrow(() -> new IllegalStateException("AdminUserProject not found: " + resolved.ownerProjectId()));
 
         ExcelImportResult res = ExcelImportResult.ok("Imported successfully");
 
-        // Currency
-        Currency currency = currencyRepo.findByCodeIgnoreCase(data.tenant.currencyCode)
-                .orElseThrow(() -> new IllegalStateException("Currency not found: " + data.tenant.currencyCode));
+        // ✅ Currency: SETUP removed. We must get currency from DB or use a fallback.
+        Currency currency = resolveTenantCurrencyOrDefault(aup);
 
         // 1) Categories (project-scoped)
         Map<String, Category> categoriesByName = new HashMap<>();
@@ -97,7 +88,6 @@ public class DatasetImporterImpl implements DatasetImporter {
                         created.setName(cs.name);
                         created.setIconName(cs.iconName);
                         created.setIconLibrary(cs.iconLibrary);
-                        // if you have includeInMenu/weight fields in Category entity, set them here
                         return categoryRepo.save(created);
                     });
 
@@ -124,7 +114,6 @@ public class DatasetImporterImpl implements DatasetImporter {
                         return itemTypeRepo.save(created);
                     });
 
-            // ensure correct cat/default
             boolean dirty = false;
             if (t.getCategory() == null || !Objects.equals(t.getCategory().getId(), cat.getId())) {
                 t.setCategory(cat);
@@ -159,7 +148,6 @@ public class DatasetImporterImpl implements DatasetImporter {
             p.setOwnerProject(aup);
             p.setItemType(itemType);
 
-            // Your entity uses either setName or setItemName. In your seeder you used setItemName.
             p.setItemName(ps.name);
             p.setDescription(ps.description);
 
@@ -170,7 +158,9 @@ public class DatasetImporterImpl implements DatasetImporter {
             p.setStatus(ps.status != null ? ps.status : "Active");
             p.setImageUrl(ps.imageUrl);
             p.setSku(ps.sku);
-            p.setProductType(ps.productType != null ? ProductType.valueOf(ps.productType.trim().toUpperCase()) : ProductType.SIMPLE);
+            p.setProductType(ps.productType != null
+                    ? ProductType.valueOf(ps.productType.trim().toUpperCase())
+                    : ProductType.SIMPLE);
 
             p.setVirtualProduct(Boolean.TRUE.equals(ps.virtualProduct));
             p.setDownloadable(Boolean.TRUE.equals(ps.downloadable));
@@ -280,6 +270,19 @@ public class DatasetImporterImpl implements DatasetImporter {
         }
 
         return res;
+    }
+
+    /**
+     * Currency resolution strategy:
+     * 1) If you store currency on AUP somewhere => use it here (preferred)
+     * 2) else fallback to USD
+     */
+    private Currency resolveTenantCurrencyOrDefault(AdminUserProject aup) {
+        // TODO: If you have a field like aup.getCurrencyCode() or aup.getCurrency(), use it.
+
+        // Fallback:
+        return currencyRepo.findByCodeIgnoreCase("USD")
+                .orElseThrow(() -> new IllegalStateException("Default currency USD not found in DB"));
     }
 
     private Country resolveCountry(String iso2, String iso3) {

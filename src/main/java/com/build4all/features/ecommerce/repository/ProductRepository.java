@@ -25,6 +25,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             Long ownerProjectId,
             LocalDateTime fromDate
     );
+    boolean existsBySkuIgnoreCase(String sku);
 
     List<Product> findByOwnerProject_IdAndItemType_Id(Long ownerProjectId, Long itemTypeId);
 

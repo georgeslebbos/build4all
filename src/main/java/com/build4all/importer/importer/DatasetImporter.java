@@ -1,10 +1,13 @@
-// File: src/main/java/com/build4all/feeders/importer/DatasetImporter.java
 package com.build4all.importer.importer;
 
 import com.build4all.importer.dto.SeedDataset;
 import com.build4all.importer.model.ExcelImportResult;
-import com.build4all.importer.service.TenantResolver;
+import com.build4all.importer.service.ExistingTenantResolver;
 
 public interface DatasetImporter {
-    ExcelImportResult importAll(SeedDataset data, TenantResolver.Resolved resolved);
+
+    /**
+     * Import dataset into an existing tenant (AdminUserProject)
+     */
+    ExcelImportResult importAll(SeedDataset data, ExistingTenantResolver.Resolved resolved);
 }
