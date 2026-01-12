@@ -103,16 +103,18 @@ public class DatasetImporterImpl implements DatasetImporter {
             Category cat = categoriesByName.get(its.categoryName.trim().toUpperCase());
             if (cat == null) throw new IllegalStateException("Missing category for itemType: " + its.name);
 
-            ItemType t = itemTypeRepo.findByName(its.name)
-                    .orElseGet(() -> {
-                        ItemType created = new ItemType();
-                        created.setName(its.name);
-                        created.setIcon(its.iconName);
-                        created.setIconLibrary(its.iconLibrary);
-                        created.setCategory(cat);
-                        created.setDefaultForCategory(Boolean.TRUE.equals(its.defaultForCategory));
-                        return itemTypeRepo.save(created);
-                    });
+            ItemType t = itemTypeRepo
+            	    .findByNameIgnoreCaseAndCategory_Project_Id(its.name.trim(), aup.getProject().getId())
+            	    .orElseGet(() -> {
+            	        ItemType created = new ItemType();
+            	        created.setName(its.name.trim());
+            	        created.setIcon(its.iconName);
+            	        created.setIconLibrary(its.iconLibrary);
+            	        created.setCategory(cat);
+            	        created.setDefaultForCategory(Boolean.TRUE.equals(its.defaultForCategory));
+            	        return itemTypeRepo.save(created);
+            	    });
+
 
             boolean dirty = false;
             if (t.getCategory() == null || !Objects.equals(t.getCategory().getId(), cat.getId())) {
@@ -139,11 +141,14 @@ public class DatasetImporterImpl implements DatasetImporter {
             if (ps == null || blank(ps.name)) continue;
 
             String skuKey = ps.sku != null ? ps.sku.trim().toUpperCase() : null;
-            if (skuKey != null && existingSkus.contains(skuKey)) continue;
+         
+            
 
             ItemType itemType = itemTypesByName.get(ps.itemTypeName.trim().toLowerCase());
             if (itemType == null) throw new IllegalStateException("Missing itemType for product: " + ps.name);
 
+            String finalSku = ensureUniqueSku(ps.sku, ps.name, existingSkus);
+            
             Product p = new Product();
             p.setOwnerProject(aup);
             p.setItemType(itemType);
@@ -157,7 +162,7 @@ public class DatasetImporterImpl implements DatasetImporter {
 
             p.setStatus(ps.status != null ? ps.status : "Active");
             p.setImageUrl(ps.imageUrl);
-            p.setSku(ps.sku);
+            p.setSku(finalSku);
             p.setProductType(ps.productType != null
                     ? ProductType.valueOf(ps.productType.trim().toUpperCase())
                     : ProductType.SIMPLE);
@@ -297,4 +302,27 @@ public class DatasetImporterImpl implements DatasetImporter {
     }
 
     private static boolean blank(String s) { return s == null || s.trim().isEmpty(); }
+    
+    
+    private String ensureUniqueSku(String rawSku, String name, Set<String> used) {
+        String base = (rawSku != null && !rawSku.trim().isEmpty())
+                ? rawSku.trim()
+                : slugSku(name);
+
+        String candidate = base.toUpperCase();
+        if (!used.contains(candidate)) return candidate;
+
+        int i = 2;
+        while (used.contains((candidate + "-" + i))) i++;
+        return candidate + "-" + i;
+    }
+
+    private String slugSku(String name) {
+        if (name == null) return "SKU";
+        String s = name.trim().toUpperCase();
+        s = s.replaceAll("[^A-Z0-9]+", "-");
+        s = s.replaceAll("(^-+|-+$)", "");
+        return s.isBlank() ? "SKU" : s;
+    }
+
 }

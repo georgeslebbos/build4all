@@ -20,4 +20,7 @@ public interface ItemTypeRepository extends JpaRepository<ItemType, Long> {
 
     // 🔴 NEW: find the "default" ItemType for a given category
     Optional<ItemType> findByCategory_IdAndDefaultForCategoryTrue(Long categoryId);
+    
+    Optional<ItemType> findByNameIgnoreCaseAndCategory_Project_Id(String name, Long projectId);
+
 }
