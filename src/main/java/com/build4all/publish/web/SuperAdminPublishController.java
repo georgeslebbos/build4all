@@ -3,6 +3,7 @@ package com.build4all.publish.web;
 import com.build4all.publish.domain.AppPublishRequest;
 import com.build4all.publish.domain.PublishStatus;
 import com.build4all.publish.dto.AdminDecisionDto;
+import com.build4all.publish.dto.AppPublishAdminMapper;
 import com.build4all.publish.service.AppPublishService;
 import com.build4all.security.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
@@ -10,7 +11,6 @@ import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -25,7 +25,6 @@ public class SuperAdminPublishController {
         this.jwtUtil = jwtUtil;
     }
 
-    // ✅ SUPER_ADMIN: list by status
     @GetMapping
     public ResponseEntity<?> listByStatus(
             HttpServletRequest request,
@@ -38,12 +37,9 @@ public class SuperAdminPublishController {
         }
 
         var list = publishService.listByStatusForAdmin(status);
-
         return ResponseEntity.ok(Map.of("message", "OK", "data", list));
     }
 
-
-    // ✅ SUPER_ADMIN: approve
     @PostMapping("/{requestId}/approve")
     public ResponseEntity<?> approve(
             HttpServletRequest request,
@@ -63,11 +59,10 @@ public class SuperAdminPublishController {
 
         return ResponseEntity.ok(Map.of(
                 "message", "Approved",
-                "data", out
+                "data", AppPublishAdminMapper.toDto(out) // ✅ DTO not entity
         ));
     }
 
-    // ✅ SUPER_ADMIN: reject
     @PostMapping("/{requestId}/reject")
     public ResponseEntity<?> reject(
             HttpServletRequest request,
@@ -87,7 +82,7 @@ public class SuperAdminPublishController {
 
         return ResponseEntity.ok(Map.of(
                 "message", "Rejected",
-                "data", out
+                "data", AppPublishAdminMapper.toDto(out) // ✅ DTO not entity
         ));
     }
 }

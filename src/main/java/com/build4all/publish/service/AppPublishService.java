@@ -268,10 +268,11 @@ public class AppPublishService {
     // =========================
     @Transactional(readOnly = true)
     public List<AppPublishRequestAdminDto> listByStatusForAdmin(PublishStatus status) {
-        return publishRepo.findByStatusOrderByRequestedAtDesc(status)
-                .stream()
-                .map(AppPublishAdminMapper::toDto)
-                .toList();
+    	return publishRepo.findByStatusForAdminWithJoins(status)
+    	        .stream()
+    	        .map(AppPublishAdminMapper::toDto)
+    	        .toList();
+
     }
 
     // =========================

@@ -36,10 +36,81 @@ public class AppPublishRequestAdminDto {
     private String adminNotes;
 
     private PublisherProfileDto publisherProfile;
+    
+ // from AUP
+    private Integer androidVersionCode;
+    private String androidVersionName;
 
-    // getters/setters (generate in IDE)
-    // ... (don’t forget to generate them)
-    public Long getId() { return id; }
+    private Integer iosBuildNumber;
+    private String iosVersionName;
+    
+ // --- AUP build artifacts ---
+    private String apkUrl;
+    private String bundleUrl;   // AAB
+    private String ipaUrl;
+    private String logoUrl;
+
+    // --- identity ---
+    private String requestedByName;
+    private String reviewedByName;
+
+    // --- timestamps ---
+    private LocalDateTime updatedAt;     // request last update
+    private LocalDateTime submittedAt;   // if exists
+
+
+
+   
+
+    public String getApkUrl() {
+		return apkUrl;
+	}
+	public void setApkUrl(String apkUrl) {
+		this.apkUrl = apkUrl;
+	}
+	public String getBundleUrl() {
+		return bundleUrl;
+	}
+	public void setBundleUrl(String bundleUrl) {
+		this.bundleUrl = bundleUrl;
+	}
+	public String getIpaUrl() {
+		return ipaUrl;
+	}
+	public void setIpaUrl(String ipaUrl) {
+		this.ipaUrl = ipaUrl;
+	}
+	public String getLogoUrl() {
+		return logoUrl;
+	}
+	public void setLogoUrl(String logoUrl) {
+		this.logoUrl = logoUrl;
+	}
+	public String getRequestedByName() {
+		return requestedByName;
+	}
+	public void setRequestedByName(String requestedByName) {
+		this.requestedByName = requestedByName;
+	}
+	public String getReviewedByName() {
+		return reviewedByName;
+	}
+	public void setReviewedByName(String reviewedByName) {
+		this.reviewedByName = reviewedByName;
+	}
+	public LocalDateTime getUpdatedAt() {
+		return updatedAt;
+	}
+	public void setUpdatedAt(LocalDateTime updatedAt) {
+		this.updatedAt = updatedAt;
+	}
+	public LocalDateTime getSubmittedAt() {
+		return submittedAt;
+	}
+	public void setSubmittedAt(LocalDateTime submittedAt) {
+		this.submittedAt = submittedAt;
+	}
+	public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
     public Long getAupId() { return aupId; }
@@ -101,4 +172,30 @@ public class AppPublishRequestAdminDto {
 
     public PublisherProfileDto getPublisherProfile() { return publisherProfile; }
     public void setPublisherProfile(PublisherProfileDto publisherProfile) { this.publisherProfile = publisherProfile; }
+	public Integer getAndroidVersionCode() {
+		return androidVersionCode;
+	}
+	public void setAndroidVersionCode(Integer androidVersionCode) {
+		this.androidVersionCode = androidVersionCode;
+	}
+	public String getAndroidVersionName() {
+		return androidVersionName;
+	}
+	public void setAndroidVersionName(String androidVersionName) {
+		this.androidVersionName = androidVersionName;
+	}
+	public Integer getIosBuildNumber() {
+		return iosBuildNumber;
+	}
+	public void setIosBuildNumber(Integer iosBuildNumber) {
+		this.iosBuildNumber = iosBuildNumber;
+	}
+	public String getIosVersionName() {
+		return iosVersionName;
+	}
+	public void setIosVersionName(String iosVersionName) {
+		this.iosVersionName = iosVersionName;
+	}
+    
+    
 }

@@ -11,9 +11,20 @@ public class AppPublishAdminMapper {
         AppPublishRequestAdminDto dto = new AppPublishRequestAdminDto();
         dto.setId(r.getId());
 
+      
+        
         if (r.getAdminUserProject() != null) {
-            dto.setAupId(r.getAdminUserProject().getId());
-            dto.setAppName(r.getAdminUserProject().getAppName());
+            var aup = r.getAdminUserProject();
+
+            dto.setAupId(aup.getId());
+            dto.setAppName(aup.getAppName());
+
+            //  versions from AUP
+            dto.setAndroidVersionCode(aup.getAndroidVersionCode());
+            dto.setAndroidVersionName(aup.getAndroidVersionName());
+
+            dto.setIosBuildNumber(aup.getIosBuildNumber());
+            dto.setIosVersionName(aup.getIosVersionName());
         }
 
         dto.setPlatform(r.getPlatform());

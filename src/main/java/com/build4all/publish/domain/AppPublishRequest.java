@@ -31,7 +31,9 @@ public class AppPublishRequest {
     // Global publisher profile (superadmin store account)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "publisher_profile_id", nullable = false)
+    @JsonIgnore 
     private StorePublisherProfile publisherProfile;
+
 
     @Enumerated(EnumType.STRING)
     @Column(name = "platform", nullable = false, length = 10)
