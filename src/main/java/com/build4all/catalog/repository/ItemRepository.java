@@ -1,6 +1,8 @@
 package com.build4all.catalog.repository;
 
 import com.build4all.catalog.dto.AdminItemDTO;
+import com.build4all.catalog.dto.ItemDetailsDTO;
+import com.build4all.ai.dto.AiItemContextDTO;
 import com.build4all.catalog.domain.Item;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -103,4 +105,27 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
     	       WHERE i.ownerProject.id = :aupId
     	       """)
     	List<Item> findByOwnerProjectId(@Param("aupId") Long aupId);
+    
+
+
+ // ItemRepository.java
+    @Query("""
+    		   select i
+    		   from Item i
+    		   join fetch i.itemType it
+    		   left join fetch i.business b
+    		   left join fetch i.currency c
+    		   where i.id = :itemId
+    		     and i.ownerProject.id = :aupId
+    		""")
+    		Optional<Item> findByTenantWithJoins(@Param("aupId") Long aupId,
+    		                                    @Param("itemId") Long itemId);
+
+
+
+
+
+
+
+
 }

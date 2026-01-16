@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Long> {
@@ -46,4 +47,20 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
            ORDER BY p.createdAt DESC
            """)
     List<Product> findActiveDiscountedByOwnerProject(@Param("ownerProjectId") Long ownerProjectId);
+    
+ // ProductRepository.java
+    @Query("""
+       select p
+       from Product p
+       join fetch p.itemType it
+       left join fetch p.business b
+       left join fetch p.currency c
+       where p.id = :itemId
+         and p.ownerProject.id = :aupId
+    """)
+    java.util.Optional<Product> findByIdAndTenant(@Param("itemId") Long itemId,
+                                                 @Param("aupId") Long aupId);
+
+
+
 }

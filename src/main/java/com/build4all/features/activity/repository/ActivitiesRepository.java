@@ -109,4 +109,20 @@ public interface ActivitiesRepository extends JpaRepository<Activity, Long> {
 
     @Query("select a from Activity a join fetch a.itemType it join fetch a.business b where a.ownerProject.id = :aupId")
     List<Activity> findAllByAupWithJoins(Long aupId);
+    
+ // ActivitiesRepository.java
+    @Query("""
+       select a
+       from Activity a
+       join fetch a.itemType it
+       left join fetch a.business b
+       left join fetch a.currency c
+       where a.id = :itemId
+         and a.ownerProject.id = :aupId
+    """)
+    java.util.Optional<Activity> findByIdAndTenant(@Param("itemId") Long itemId,
+                                                  @Param("aupId") Long aupId);
+
+
+
 }

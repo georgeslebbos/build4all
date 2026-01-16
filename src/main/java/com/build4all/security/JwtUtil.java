@@ -422,6 +422,25 @@ public class JwtUtil {
         }
     }
 
+    public Long extractOwnerProjectIdClaim(String token) {
+        String jwt = normalize(token);
+        try {
+            Object val = Jwts.parserBuilder()
+                    .setSigningKey(key)
+                    .build()
+                    .parseClaimsJws(jwt)
+                    .getBody()
+                    .get("ownerProjectId");
+
+            if (val == null) return null;
+            if (val instanceof Integer i) return i.longValue();
+            if (val instanceof Long l) return l;
+            return Long.parseLong(val.toString());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     /**
      * (Optional utility) Extract tenant scope for BUSINESS tokens.
      * Useful for business-scoped endpoints.

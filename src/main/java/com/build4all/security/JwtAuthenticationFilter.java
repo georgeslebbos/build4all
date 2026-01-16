@@ -77,6 +77,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         // Extract raw JWT string (remove "Bearer ")
         String token = authHeader.substring(7).trim();
+        //  set tenant early
+        Long ownerProjectId = jwtUtil.extractOwnerProjectIdClaim(token);
+        if (ownerProjectId != null) {
+            TenantContext.setOwnerProjectId(ownerProjectId);
+        }
 
         try {
             // subject = identifier stored in JWT subject:
@@ -87,6 +92,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             // role = claim "role" inside JWT (e.g. USER, SUPER_ADMIN, BUSINESS, OWNER, MANAGER)
             String roleName = jwtUtil.extractRole(token);
+            
+            
 
             // DEBUG: If you are getting 403, this print helps confirm if token is valid and parsed.
             // NOTE: Keep it during dev only.
