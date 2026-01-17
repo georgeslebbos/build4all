@@ -129,4 +129,25 @@ public interface AdminUserProjectRepository extends JpaRepository<AdminUserProje
     		);
 
 
+    @Query("""
+    		  select a.admin.aiEnabled
+    		  from AdminUserProject a
+    		  where a.id = :linkId
+    		""")
+    		Optional<Boolean> isOwnerAiEnabledByLinkId(@Param("linkId") Long linkId);
+
+    		@Query("""
+    		  select a.admin.adminId
+    		  from AdminUserProject a
+    		  where a.id = :linkId
+    		""")
+    		Optional<Long> findOwnerIdByLinkId(@Param("linkId") Long linkId);
+
+    		@Query("""
+    		  select concat(a.admin.firstName, ' ', a.admin.lastName)
+    		  from AdminUserProject a
+    		  where a.id = :linkId
+    		""")
+    		Optional<String> findOwnerNameByLinkId(@Param("linkId") Long linkId);
+
 }

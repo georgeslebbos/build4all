@@ -19,7 +19,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
 @Entity
-@Table(name = "AdminUser")
+@Table(name = "admin_user")
 /**
  * AdminUser represents a back-office/admin account in the system.
  * It implements Spring Security's UserDetails so it can be used directly by authentication/authorization.
@@ -49,6 +49,9 @@ public class AdminUser implements UserDetails {
 
     @Column(name = "email", nullable = false)
     private String email;
+    
+    @Column(name = "ai_enabled")
+    private boolean aiEnabled = false;
 
     /**
      * The hashed password stored in DB.
@@ -166,6 +169,9 @@ public class AdminUser implements UserDetails {
     public Set<AdminUserProject> getProjectLinks() { return projectLinks; }
     public void setProjectLinks(Set<AdminUserProject> projectLinks) { this.projectLinks = projectLinks; }
 
+
+public boolean isAiEnabled() { return aiEnabled; }
+public void setAiEnabled(boolean aiEnabled) { this.aiEnabled = aiEnabled; }
     // --- UserDetails implementation ---
 
     @Override

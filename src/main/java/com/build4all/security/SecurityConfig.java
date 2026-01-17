@@ -168,7 +168,8 @@ public class SecurityConfig implements WebMvcConfigurer {
                                 "/error",// Spring default error endpoint (avoids weird blocking)
                                 "/api/public/runtime-config/**",
                                 "/api/public/runtime-config",
-                                "/api/public/runtime-config/by-link"
+                                "/api/public/runtime-config/by-link",
+                                "/api/public/ai/status/**"
                         ).permitAll()
 
                         // Any other endpoint requires authentication (JWT must be valid).
