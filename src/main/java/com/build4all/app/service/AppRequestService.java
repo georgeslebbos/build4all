@@ -81,6 +81,7 @@ public class AppRequestService {
         return appRequestRepo.save(r);
     }
 
+    
     @Transactional
     public AdminUserProject createAndAutoApprove(Long ownerId, Long projectId,
                                                  String appName, String slug,
@@ -236,6 +237,199 @@ public class AppRequestService {
 
         return link;
     }
+    
+    @Transactional
+    public AdminUserProject rebuildAndroidBundleSamePackage(
+            Long linkId,
+            boolean bumpVersion, // ✅ you decide
+            String apiBaseUrlOverride, // optional
+            String navJson,
+            String homeJson,
+            String enabledFeaturesJson,
+            String brandingJson
+    ) {
+        AdminUserProject link = aupRepo.findById(linkId)
+                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
+
+        AdminUser owner = link.getAdmin();
+        Project project = link.getProject();
+
+        if (link.getAndroidPackageName() == null || link.getAndroidPackageName().isBlank()) {
+            throw new IllegalStateException("androidPackageName is missing. Run initial build first.");
+        }
+
+        // ✅ bump only if requested
+        if (bumpVersion) {
+            link.bumpAndroidVersion();
+        }
+
+        // ✅ reset only the AAB (bundle)
+        link.setBundleUrl(null);
+
+        // ✅ keep APK/IPA untouched
+        // link.setApkUrl(link.getApkUrl());
+        // link.setIpaUrl(link.getIpaUrl());
+
+        link = aupRepo.save(link);
+
+        // ✅ upsert runtime config if any
+        upsertRuntimeConfig(link, navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride);
+
+        Long chosenThemeId = link.getThemeId();
+        String themeJson = resolveThemeJson(chosenThemeId, "{}");
+
+        String appType = (project.getProjectType() != null)
+                ? project.getProjectType().name()
+                : "ECOMMERCE";
+
+        Long currencyIdForBuild = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
+
+        CiDispatchResult res = ciBuildService.dispatchOwnerAndroidBuild(
+                owner.getAdminId(),
+                project.getId(),
+                String.valueOf(link.getId()),
+                link.getSlug(),                 // ✅ same slug
+                link.getAppName(),
+                appType,
+                chosenThemeId,
+                link.getLogoUrl(),
+                themeJson,
+                null,                           // logoBytesOpt (optional)
+                currencyIdForBuild,
+                apiBaseUrlOverride,
+                navJson,
+                homeJson,
+                enabledFeaturesJson,
+                brandingJson,
+                link.getAndroidVersionCode(),
+                link.getAndroidVersionName(),
+                link.getAndroidPackageName()    // ✅ same package
+        );
+
+        if (!res.ok()) {
+            String msg = "CI Android rebuild bundle failed (HTTP " + res.httpCode() + "): " + res.responseBody();
+            log.error("{}", msg);
+            throw new IllegalStateException(msg);
+        }
+
+        log.info("CI Android bundle rebuild dispatched OK (buildId={}, linkId={}, package={})",
+                res.buildId(), link.getId(), link.getAndroidPackageName());
+
+        return link;
+    }
+
+    @Transactional
+    public AdminUserProject rebuildIosIpaSameBundle(
+            Long linkId,
+            boolean bumpVersion,
+            String apiBaseUrlOverride,
+            String navJson,
+            String homeJson,
+            String enabledFeaturesJson,
+            String brandingJson
+    ) {
+        AdminUserProject link = aupRepo.findById(linkId)
+                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
+
+        AdminUser owner = link.getAdmin();
+        Project project = link.getProject();
+
+        if (link.getIosBundleId() == null || link.getIosBundleId().isBlank()) {
+            // if you rely on ID, ensure it exists
+            link.ensureIosBundleId();
+        }
+
+        if (bumpVersion) {
+            link.bumpIosVersion();
+        }
+
+        // reset only IPA
+        link.setIpaUrl(null);
+
+        link = aupRepo.save(link);
+
+        upsertRuntimeConfig(link, navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride);
+
+        Long chosenThemeId = link.getThemeId();
+        String themeJson = resolveThemeJson(chosenThemeId, "{}");
+
+        String appType = (project.getProjectType() != null)
+                ? project.getProjectType().name()
+                : "ECOMMERCE";
+
+        Long currencyIdForBuild = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
+
+        CiDispatchResult res = ciBuildService.dispatchOwnerIosBuild(
+                owner.getAdminId(),
+                project.getId(),
+                String.valueOf(link.getId()),
+                link.getSlug(),
+                link.getAppName(),
+                appType,
+                chosenThemeId,
+                link.getLogoUrl(),
+                themeJson,
+                null, // logoBytesOpt optional
+                currencyIdForBuild,
+                apiBaseUrlOverride,
+                navJson,
+                homeJson,
+                enabledFeaturesJson,
+                brandingJson,
+                link.getIosBuildNumber(),
+                link.getIosVersionName(),
+                link.getIosBundleId()
+        );
+
+        if (!res.ok()) {
+            String msg = "CI iOS rebuild failed (HTTP " + res.httpCode() + "): " + res.responseBody();
+            log.error("{}", msg);
+            throw new IllegalStateException(msg);
+        }
+
+        log.info("CI iOS rebuild dispatched OK (buildId={}, linkId={}, bundleId={})",
+                res.buildId(), link.getId(), link.getIosBundleId());
+
+        return link;
+    }
+
+    @Transactional
+    public AdminUserProject rebuildAndroidAndIos(
+            Long linkId,
+            boolean bumpAndroid,
+            boolean bumpIos,
+            String apiBaseUrlOverride,
+            String navJson,
+            String homeJson,
+            String enabledFeaturesJson,
+            String brandingJson
+    ) {
+        // Android bundle rebuild
+        AdminUserProject link = rebuildAndroidBundleSamePackage(
+                linkId,
+                bumpAndroid,
+                apiBaseUrlOverride,
+                navJson,
+                homeJson,
+                enabledFeaturesJson,
+                brandingJson
+        );
+
+        // iOS IPA rebuild (same link)
+        rebuildIosIpaSameBundle(
+                linkId,
+                bumpIos,
+                apiBaseUrlOverride,
+                navJson,
+                homeJson,
+                enabledFeaturesJson,
+                brandingJson
+        );
+
+        // return latest (in case iOS bumped)
+        return aupRepo.findById(linkId).orElseThrow();
+    }
+
 
     private void triggerIosForExistingLink(
             AdminUserProject link,

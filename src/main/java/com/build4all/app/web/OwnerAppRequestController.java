@@ -386,6 +386,107 @@ public class OwnerAppRequestController {
         }
     }
 
+    @PostMapping(
+            value = "/apps/{linkId}/rebuild-bundle",
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public ResponseEntity<?> rebuildBundleSamePackage(
+            @PathVariable Long linkId,
+            @RequestParam(defaultValue = "true") boolean bumpVersion,
+            @RequestParam(required = false) String apiBaseUrlOverride,
+            @RequestParam(required = false) String navJson,
+            @RequestParam(required = false) String homeJson,
+            @RequestParam(required = false) String enabledFeaturesJson,
+            @RequestParam(required = false) String brandingJson
+    ) {
+        try {
+            AdminUserProject link = service.rebuildAndroidBundleSamePackage(
+                    linkId,
+                    bumpVersion,
+                    apiBaseUrlOverride,
+                    navJson,
+                    homeJson,
+                    enabledFeaturesJson,
+                    brandingJson
+            );
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("message", "Bundle rebuild started");
+            body.put("ownerProjectLinkId", link.getId());
+            body.put("slug", nz(link.getSlug()));
+            body.put("appName", nz(link.getAppName()));
+            body.put("androidPackageName", nz(link.getAndroidPackageName()));
+            body.put("androidVersionCode", link.getAndroidVersionCode());
+            body.put("androidVersionName", nz(link.getAndroidVersionName()));
+            body.put("bundleUrl", nz(link.getBundleUrl())); // will be "" because you reset it
+            body.put("apkUrl", nz(link.getApkUrl())); // unchanged
+            return ResponseEntity.ok(body);
+
+        } catch (IllegalArgumentException | IllegalStateException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "error", "Internal error",
+                    "details", ex.getClass().getSimpleName()
+            ));
+        }
+    }
+
+    @PostMapping(
+            value = "/apps/{linkId}/rebuild-both",
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public ResponseEntity<?> rebuildAndroidAndIos(
+            @PathVariable Long linkId,
+            @RequestParam(defaultValue = "true") boolean bumpAndroid,
+            @RequestParam(defaultValue = "true") boolean bumpIos,
+            @RequestParam(required = false) String apiBaseUrlOverride,
+            @RequestParam(required = false) String navJson,
+            @RequestParam(required = false) String homeJson,
+            @RequestParam(required = false) String enabledFeaturesJson,
+            @RequestParam(required = false) String brandingJson
+    ) {
+        try {
+            AdminUserProject link = service.rebuildAndroidAndIos(
+                    linkId,
+                    bumpAndroid,
+                    bumpIos,
+                    apiBaseUrlOverride,
+                    navJson,
+                    homeJson,
+                    enabledFeaturesJson,
+                    brandingJson
+            );
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("message", "Android + iOS rebuild started");
+            body.put("ownerProjectLinkId", link.getId());
+            body.put("slug", nz(link.getSlug()));
+            body.put("appName", nz(link.getAppName()));
+
+            body.put("androidPackageName", nz(link.getAndroidPackageName()));
+            body.put("androidVersionCode", link.getAndroidVersionCode());
+            body.put("androidVersionName", nz(link.getAndroidVersionName()));
+            body.put("bundleUrl", nz(link.getBundleUrl()));
+
+            body.put("iosBundleId", nz(link.getIosBundleId()));
+            body.put("iosBuildNumber", link.getIosBuildNumber());
+            body.put("iosVersionName", nz(link.getIosVersionName()));
+            body.put("ipaUrl", nz(link.getIpaUrl()));
+
+            return ResponseEntity.ok(body);
+
+        } catch (IllegalArgumentException | IllegalStateException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "error", "Internal error",
+                    "details", ex.getClass().getSimpleName()
+            ));
+        }
+    }
+
+
 
     @GetMapping(value = "/app-requests", produces = MediaType.APPLICATION_JSON_VALUE)
     public List<AppRequest> myRequests(@RequestParam Long ownerId) {
