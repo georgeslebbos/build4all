@@ -3,11 +3,14 @@ package com.build4all.app.web;
 import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.dto.OwnerProjectView;
 import com.build4all.admin.repository.AdminUserProjectRepository;
+import com.build4all.admin.repository.AdminUsersRepository;
 import com.build4all.app.domain.AppRequest;
 import com.build4all.app.dto.CreateAppRequestDto;
 import com.build4all.app.repository.AppRequestRepository;
 import com.build4all.app.service.AppRequestService;
 import com.build4all.app.service.ThemeJsonBuilder;
+import com.build4all.security.JwtUtil;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -25,18 +28,23 @@ public class OwnerAppRequestController {
     private final AppRequestService service;
     private final AppRequestRepository appRequestRepo;
     private final AdminUserProjectRepository aupRepo;
+    private final JwtUtil jwtUtil;
+    private final AdminUsersRepository adminRepo;
 
     @Value("${ci.callbackUrl:}")
     private String callbackBase;
 
     public OwnerAppRequestController(AppRequestService service,
-                                     AppRequestRepository appRequestRepo,
-                                     AdminUserProjectRepository aupRepo) {
-        this.service = service;
-        this.appRequestRepo = appRequestRepo;
-        this.aupRepo = aupRepo;
-    }
-
+            AppRequestRepository appRequestRepo,
+            AdminUserProjectRepository aupRepo,
+            JwtUtil jwtUtil,
+            AdminUsersRepository adminRepo) {
+this.service = service;
+this.appRequestRepo = appRequestRepo;
+this.aupRepo = aupRepo;
+this.jwtUtil = jwtUtil;
+this.adminRepo = adminRepo;
+}
     // Legacy JSON create (kept)
     @PostMapping(
             value = "/app-requests",
@@ -202,9 +210,15 @@ public class OwnerAppRequestController {
             @RequestParam(required = false) String homeJson,
             @RequestParam(required = false) String enabledFeaturesJson,
             @RequestParam(required = false) String brandingJson,
-            @RequestParam(required = false) String apiBaseUrlOverride
+            @RequestParam(required = false) String apiBaseUrlOverride,
+            @RequestHeader("Authorization") String authHeader
+
     ) {
         try {
+        	String token = authHeader.replace("Bearer ", "").trim();
+        	String ownerEmail = jwtUtil.extractUsername(token); // subject = email (OWNER token)
+        	String ownerName  = extractOwnerNameFromToken(token);
+
             MultipartFile logoFile = (file != null) ? file : logo;
 
             String themeJson = ThemeJsonBuilder.buildThemeJson(
@@ -229,7 +243,9 @@ public class OwnerAppRequestController {
                     homeJson,
                     enabledFeaturesJson,
                     brandingJson,
-                    apiBaseUrlOverride
+                    apiBaseUrlOverride,
+                    ownerEmail,
+                    ownerName
             );
 
             Map<String, Object> body = new HashMap<>();
@@ -298,9 +314,15 @@ public class OwnerAppRequestController {
             @RequestParam(required = false) String homeJson,
             @RequestParam(required = false) String enabledFeaturesJson,
             @RequestParam(required = false) String brandingJson,
-            @RequestParam(required = false) String apiBaseUrlOverride
+            @RequestParam(required = false) String apiBaseUrlOverride,
+            @RequestHeader("Authorization") String authHeader
+
     ) {
         try {
+        	
+        	String token = authHeader.replace("Bearer ", "").trim();
+        	String ownerEmail = jwtUtil.extractUsername(token);
+        	String ownerName  = extractOwnerNameFromToken(token);
             MultipartFile logoFile = (file != null) ? file : logo;
 
             String themeJson = ThemeJsonBuilder.buildThemeJson(
@@ -325,7 +347,9 @@ public class OwnerAppRequestController {
                     homeJson,
                     enabledFeaturesJson,
                     brandingJson,
-                    apiBaseUrlOverride
+                    apiBaseUrlOverride,
+                    ownerEmail,
+                    ownerName
             );
 
             Map<String, Object> body = new HashMap<>();
@@ -444,9 +468,14 @@ public class OwnerAppRequestController {
             @RequestParam(required = false) String navJson,
             @RequestParam(required = false) String homeJson,
             @RequestParam(required = false) String enabledFeaturesJson,
-            @RequestParam(required = false) String brandingJson
+            @RequestParam(required = false) String brandingJson,
+            @RequestHeader("Authorization") String authHeader
     ) {
         try {
+            String token = authHeader.replace("Bearer ", "").trim();
+            String ownerEmail = jwtUtil.extractUsername(token);
+            String ownerName  = extractOwnerNameFromToken(token);
+
             AdminUserProject link = service.rebuildAndroidAndIos(
                     linkId,
                     bumpAndroid,
@@ -455,7 +484,9 @@ public class OwnerAppRequestController {
                     navJson,
                     homeJson,
                     enabledFeaturesJson,
-                    brandingJson
+                    brandingJson,
+                    ownerEmail,
+                    ownerName
             );
 
             Map<String, Object> body = new HashMap<>();
@@ -486,8 +517,6 @@ public class OwnerAppRequestController {
         }
     }
 
-
-
     @GetMapping(value = "/app-requests", produces = MediaType.APPLICATION_JSON_VALUE)
     public List<AppRequest> myRequests(@RequestParam Long ownerId) {
         return appRequestRepo.findByOwnerIdOrderByCreatedAtDesc(ownerId);
@@ -499,4 +528,23 @@ public class OwnerAppRequestController {
     }
 
     private static String nz(String s) { return (s == null) ? "" : s; }
+    
+    private String extractOwnerNameFromToken(String token) {
+        try {
+            Long adminId = jwtUtil.extractAdminId(token);
+            return adminRepo.findById(adminId)
+                .map(admin -> {
+                    String first = admin.getFirstName() != null ? admin.getFirstName() : "";
+                    String last  = admin.getLastName() != null ? admin.getLastName() : "";
+                    String full = (first + " " + last).trim();
+                    return full.isBlank() ? admin.getUsername() : full;
+                })
+                .orElse("Owner");
+        } catch (Exception e) {
+            return "Owner";
+        }
+    }
+
+    
+    
 }

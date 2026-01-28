@@ -144,7 +144,9 @@ public class AppRequestService {
             String homeJson,
             String enabledFeaturesJson,
             String brandingJson,
-            String apiBaseUrlOverride
+            String apiBaseUrlOverride,
+            String ownerEmail,
+            String ownerName
     ) throws IOException {
 
         String base = (slug != null && !slug.isBlank()) ? slugify(slug) : slugify(appName);
@@ -179,7 +181,9 @@ public class AppRequestService {
                 homeJson,
                 enabledFeaturesJson,
                 brandingJson,
-                apiBaseUrlOverride
+                apiBaseUrlOverride,
+                ownerEmail,
+                ownerName
         );
     }
     
@@ -195,7 +199,9 @@ public class AppRequestService {
             String homeJson,
             String enabledFeaturesJson,
             String brandingJson,
-            String apiBaseUrlOverride
+            String apiBaseUrlOverride,
+            String ownerEmail,
+            String ownerName
     ) throws IOException {
 
        
@@ -232,7 +238,8 @@ public class AppRequestService {
        
         triggerIosForExistingLink(
                 link, r, logoBytes,
-                navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride
+                navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride, ownerEmail,
+                ownerName
         );
 
         return link;
@@ -326,7 +333,9 @@ public class AppRequestService {
             String navJson,
             String homeJson,
             String enabledFeaturesJson,
-            String brandingJson
+            String brandingJson,
+            String ownerEmail,
+            String ownerName
     ) {
         AdminUserProject link = aupRepo.findById(linkId)
                 .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
@@ -378,7 +387,9 @@ public class AppRequestService {
                 brandingJson,
                 link.getIosBuildNumber(),
                 link.getIosVersionName(),
-                link.getIosBundleId()
+                link.getIosBundleId(),
+                 ownerEmail,
+              ownerName
         );
 
         if (!res.ok()) {
@@ -402,7 +413,9 @@ public class AppRequestService {
             String navJson,
             String homeJson,
             String enabledFeaturesJson,
-            String brandingJson
+            String brandingJson,
+            String ownerEmail,
+            String ownerName
     ) {
         // Android bundle rebuild
         AdminUserProject link = rebuildAndroidBundleSamePackage(
@@ -423,7 +436,8 @@ public class AppRequestService {
                 navJson,
                 homeJson,
                 enabledFeaturesJson,
-                brandingJson
+                brandingJson,ownerEmail,
+                ownerName
         );
 
         // return latest (in case iOS bumped)
@@ -439,7 +453,9 @@ public class AppRequestService {
             String homeJson,
             String enabledFeaturesJson,
             String brandingJson,
-            String apiBaseUrlOverride
+            String apiBaseUrlOverride,
+            String ownerEmail,
+            String ownerName
     ) {
         AdminUser owner = adminRepo.findById(req.getOwnerId())
                 .orElseThrow(() -> new IllegalArgumentException("Owner(admin) not found"));
@@ -491,7 +507,9 @@ public class AppRequestService {
                 brandingJson,
                 link.getIosBuildNumber(),
                 link.getIosVersionName(),
-                link.getIosBundleId()
+                link.getIosBundleId(),
+                 ownerEmail,
+                 ownerName
         );
 
         if (!res.ok()) {
@@ -509,7 +527,9 @@ public class AppRequestService {
             String homeJson,
             String enabledFeaturesJson,
             String brandingJson,
-            String apiBaseUrlOverride
+            String apiBaseUrlOverride, 
+            String ownerEmail,
+            String ownerName
     ) {
 
         AdminUser owner = adminRepo.findById(req.getOwnerId())
@@ -606,7 +626,9 @@ public class AppRequestService {
                 brandingJson,
                 link.getIosBuildNumber(),
                 link.getIosVersionName(),
-                link.getIosBundleId()
+                link.getIosBundleId(),
+                ownerEmail,
+                ownerName
         );
 
         if (!res.ok()) {

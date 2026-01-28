@@ -301,11 +301,19 @@ public class CiBuildService {
             String brandingJson,
             Integer iosBuildNumber,
             String iosVersionName,
-            String iosBundleId
+            String iosBundleId,
+            String ownerEmail,
+            String ownerName
     ) {
         if (!isConfigured()) {
             String msg = "CI DISPATCH SKIPPED: ci.webhook.url/token not configured.";
             log.warn(msg);
+            return new CiDispatchResult(false, 0, msg, "");
+        }
+        
+        if (ownerEmail == null || ownerEmail.trim().isEmpty()) {
+            String msg = "ownerEmail is required for iOS build dispatch";
+            log.error(msg);
             return new CiDispatchResult(false, 0, msg, "");
         }
 
@@ -346,6 +354,9 @@ public class CiBuildService {
 
         config.put("APP_NAME", nz(appName));
         config.put("APP_TYPE", nz(appType));
+        
+        config.put("ownerEmail", nz(ownerEmail));
+        config.put("ownerName", notBlank(ownerName) ? ownerName.trim() : "Owner");
 
         config.put("THEME_ID", themeId);
         config.put("THEME_JSON", themeJsonNorm);
