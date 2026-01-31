@@ -28,6 +28,7 @@ import com.build4all.security.JwtUtil;
 import com.build4all.user.domain.UserStatus;
 import com.build4all.user.domain.Users;
 import com.build4all.user.repository.UserStatusRepository;
+import com.build4all.user.repository.UsersRepository;
 import com.build4all.user.service.UserService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -77,6 +78,8 @@ public class AuthController {
     @Autowired private UserService userService;
     @Autowired private BusinessService businessService;
     @Autowired private AdminUserService adminUserService;
+    @Autowired private UsersRepository userRepository;
+
 
     @Autowired private RoleRepository roleRepository;
 
@@ -222,6 +225,7 @@ public class AuthController {
         }
     }
 
+    
     /* =====================================================================================
      *  USER LOGIN (OWNER-LINKED / TENANT-AWARE)
      * ===================================================================================== */
@@ -1091,6 +1095,102 @@ public class AuthController {
             ));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    @Operation(summary = "Create demo account for Apple Review (CI only)")
+    @PostMapping("/demo/create-apple-review-account")
+    public ResponseEntity<?> createAppleReviewDemoAccount(
+            @RequestParam Long ownerProjectLinkId,
+            @RequestHeader(value = "X-Auth-Token", required = false) String authToken
+    ) {
+        try {
+            // ✅ Protect endpoint (CI only)
+            String expectedToken = System.getenv("CI_RUNTIME_TOKEN");
+            if (expectedToken == null || authToken == null || !expectedToken.equals(authToken)) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Unauthorized: Invalid CI token"));
+            }
+
+            if (ownerProjectLinkId == null) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "ownerProjectLinkId is required"));
+            }
+
+            // ✅ Ideally load from env (safer for review)
+            String demoEmail = Optional.ofNullable(System.getenv("APPLE_REVIEW_DEMO_EMAIL"))
+                    .orElse("demo@applereview.com");
+
+            String demoPassword = Optional.ofNullable(System.getenv("APPLE_REVIEW_DEMO_PASSWORD"))
+                    .orElse("AppleReview2026!");
+
+            String demoUsernameBase = Optional.ofNullable(System.getenv("APPLE_REVIEW_DEMO_USERNAME"))
+                    .orElse("apple_reviewer");
+
+            // ✅ If exists, ensure ACTIVE and return it
+            Users existingUser = userService.findByEmail(demoEmail, ownerProjectLinkId);
+            if (existingUser != null) {
+
+                String statusName = existingUser.getStatus() != null ? existingUser.getStatus().getName() : "";
+                if (!"ACTIVE".equalsIgnoreCase(statusName)) {
+                    UserStatus activeStatus = userStatusRepository.findByNameIgnoreCase("ACTIVE")
+                            .orElseThrow(() -> new RuntimeException("Status ACTIVE not found"));
+                    existingUser.setStatus(activeStatus);
+                    existingUser.setUpdatedAt(LocalDateTime.now());
+                    userService.save(existingUser);
+                }
+
+                return ResponseEntity.ok(Map.of(
+                        "message", "Demo account already exists and is active",
+                        "email", demoEmail,
+                        "userId", existingUser.getId(),
+                        "ownerProjectLinkId", ownerProjectLinkId
+                ));
+            }
+
+            // ✅ Validate tenant link exists (AdminUserProject)
+            AdminUserProject link = adminUserProjectRepo.findById(ownerProjectLinkId)
+                    .orElseThrow(() -> new RuntimeException("AdminUserProject not found: " + ownerProjectLinkId));
+
+            UserStatus activeStatus = userStatusRepository.findByNameIgnoreCase("ACTIVE")
+                    .orElseThrow(() -> new RuntimeException("Status ACTIVE not found"));
+
+            // ✅ Make username unique per tenant
+            int suffix = 0;
+            String finalUsername = demoUsernameBase;
+
+            while (userRepository.existsByUsernameIgnoreCaseAndOwnerProject_Id(finalUsername, ownerProjectLinkId)) {
+                suffix++;
+                finalUsername = demoUsernameBase + suffix;
+            }
+
+            Users demoUser = new Users();
+            demoUser.setOwnerProject(link);
+            demoUser.setUsername(finalUsername);
+            demoUser.setFirstName("Apple");
+            demoUser.setLastName("Reviewer");
+            demoUser.setEmail(demoEmail);
+            demoUser.setPasswordHash(passwordEncoder.encode(demoPassword));
+            demoUser.setStatus(activeStatus);
+            demoUser.setIsPublicProfile(true); // keep only if your entity has this setter
+            demoUser.setCreatedAt(LocalDateTime.now());
+            demoUser.setUpdatedAt(LocalDateTime.now());
+
+            userService.save(demoUser);
+
+            return ResponseEntity.ok(Map.of(
+                    "message", "Demo account created successfully",
+                    "email", demoEmail,
+                    "password", demoPassword, // optional: remove if you don't want to return it
+                    "username", finalUsername,
+                    "userId", demoUser.getId(),
+                    "ownerProjectLinkId", ownerProjectLinkId
+            ));
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to create demo account: " + e.getMessage()));
         }
     }
 
