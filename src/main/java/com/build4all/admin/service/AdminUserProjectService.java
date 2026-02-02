@@ -127,7 +127,7 @@ public class AdminUserProjectService {
                     req.getValidFrom() != null ? req.getValidFrom() : now,
                     req.getEndTo() != null ? req.getEndTo() : now.plusMonths(1)
             );
-            link.setStatus("ACTIVE");
+            link.setStatus("TEST");
             link.setSlug(uniqueSlug);
         } else {
             if (req.getLicenseId() != null) link.setLicenseId(req.getLicenseId());

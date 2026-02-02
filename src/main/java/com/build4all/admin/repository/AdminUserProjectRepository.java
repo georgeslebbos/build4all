@@ -67,22 +67,26 @@ public interface AdminUserProjectRepository extends JpaRepository<AdminUserProje
      * Only selects the needed fields for listing (faster and lighter than loading full entities).
      */
     @Query("""
-      select 
-        l.id           as linkId,
-        p.id           as projectId,
-        p.projectName  as projectName,
-        l.slug         as slug,
-        l.appName      as appName,
-        l.status       as status,
-        l.apkUrl       as apkUrl,
-        l.ipaUrl       as ipaUrl,
-        l.bundleUrl    as bundleUrl
-      from AdminUserProject l
-      join l.project p
-      where l.admin.adminId = :ownerId
-      order by l.createdAt desc
-    """)
-    List<OwnerProjectView> findOwnerProjectsSlim(@Param("ownerId") Long ownerId);
+    		  select 
+    		    l.id                 as linkId,
+    		    p.id                 as projectId,
+    		    p.projectName        as projectName,
+    		    l.slug               as slug,
+    		    l.appName            as appName,
+    		    l.status             as status,
+    		    l.apkUrl             as apkUrl,
+    		    l.ipaUrl             as ipaUrl,
+    		    l.bundleUrl          as bundleUrl,
+    		    l.logoUrl            as logoUrl,
+    		    l.androidPackageName as androidPackageName,
+    		    l.iosBundleId        as iosBundleId
+    		  from AdminUserProject l
+    		  join l.project p
+    		  where l.admin.adminId = :ownerId
+    		  order by l.createdAt desc
+    		""")
+    		List<OwnerProjectView> findOwnerProjectsSlim(@Param("ownerId") Long ownerId);
+
 
     // ✅ Keep this
     /**

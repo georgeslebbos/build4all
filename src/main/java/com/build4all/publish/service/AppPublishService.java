@@ -181,14 +181,28 @@ public class AppPublishService {
         AdminUser admin = adminRepo.findByAdminId(superAdminId)
                 .orElseThrow(() -> new RuntimeException("Admin not found"));
 
-
+        // ✅ 1) approve request
         req.setStatus(PublishStatus.APPROVED);
         req.setReviewedBy(admin);
         req.setReviewedAt(LocalDateTime.now());
         req.setAdminNotes(notes);
 
+        // ✅ 2) flip app status to PRODUCTION
+        AdminUserProject aup = req.getAdminUserProject();
+        if (aup == null || aup.getId() == null) {
+            throw new RuntimeException("AdminUserProject missing on publish request");
+        }
+
+        // optional: only flip if currently TEST
+        String current = (aup.getStatus() == null) ? "" : aup.getStatus().trim().toUpperCase();
+        if (!"PRODUCTION".equals(current)) {
+            aup.setStatus("PRODUCTION");
+            aupRepo.save(aup);
+        }
+
         return publishRepo.save(req);
     }
+
 
     @Transactional
     public AppPublishRequest uploadAssets(

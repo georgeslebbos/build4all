@@ -14,39 +14,27 @@ package com.build4all.admin.dto;
  *        "p.projectName as projectName" -> getProjectName()
  * - This is used for faster listing screens (dashboard tables/cards).
  */
+
+
 public interface OwnerProjectView {
 
-    // NEW: the AdminUserProject link row identifier (aup_id).
-    Long getLinkId();
+ Long getLinkId();
 
-    // The project identifier.
-    Long getProjectId();
+ Long getProjectId();
+ String getProjectName();
 
-    // Human-readable project name.
-    String getProjectName();
+ String getSlug();
+ String getAppName();
 
-    // The app slug used for routing/tenant identification.
-    String getSlug();
+ String getStatus();
 
-    // Display name of the app instance.
-    String getAppName();
+ String getApkUrl();
+ String getIpaUrl();
+ String getBundleUrl();
 
-    // NEW: status of the app assignment (ACTIVE / SUSPENDED / EXPIRED / DELETED).
-    String getStatus();
+ // ✅ ADD THESE
+ String getLogoUrl();
 
-    // Latest Android build artifact URL.
-    String getApkUrl();
-
-    // Latest iOS build artifact URL.
-    String getIpaUrl();
-
-    // Additional artifact URL (e.g., bundle / AAB / web bundle depending on pipeline).
-    String getBundleUrl();
-    
-    String getIosBundleId();
-    
-   String getAndroidPackageName();
-    
-    
-    
+ String getAndroidPackageName();
+ String getIosBundleId();
 }
