@@ -1098,26 +1098,21 @@ public class AuthController {
         }
     }
     
-    @Operation(summary = "Create demo account for Apple Review (CI only)")
     @PostMapping("/demo/create-apple-review-account")
     public ResponseEntity<?> createAppleReviewDemoAccount(
-            @RequestParam Long ownerProjectLinkId,
-            @RequestHeader(value = "X-Auth-Token", required = false) String authToken
+            @RequestHeader(value = "X-Auth-Token", required = false) String authToken,
+            @RequestParam Long ownerProjectLinkId
     ) {
-        try {
-            // ✅ Protect endpoint (CI only)
-            String expectedToken = System.getenv("CI_RUNTIME_TOKEN");
-            if (expectedToken == null || authToken == null || !expectedToken.equals(authToken)) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", "Unauthorized: Invalid CI token"));
-            }
-
+    	try {
+    		
+    		  ResponseEntity<?> gate = requireCiTokenUnlessLocal(authToken);
+    	        if (gate != null) return gate;
+    	        
             if (ownerProjectLinkId == null) {
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "ownerProjectLinkId is required"));
             }
 
-            // ✅ Ideally load from env (safer for review)
             String demoEmail = Optional.ofNullable(System.getenv("APPLE_REVIEW_DEMO_EMAIL"))
                     .orElse("demo@applereview.com");
 
@@ -1152,8 +1147,12 @@ public class AuthController {
             AdminUserProject link = adminUserProjectRepo.findById(ownerProjectLinkId)
                     .orElseThrow(() -> new RuntimeException("AdminUserProject not found: " + ownerProjectLinkId));
 
+            // ✅ Required statuses + role
             UserStatus activeStatus = userStatusRepository.findByNameIgnoreCase("ACTIVE")
                     .orElseThrow(() -> new RuntimeException("Status ACTIVE not found"));
+
+            Role userRole = roleRepository.findByName("USER")
+                    .orElseThrow(() -> new RuntimeException("Role USER not found"));
 
             // ✅ Make username unique per tenant
             int suffix = 0;
@@ -1172,7 +1171,11 @@ public class AuthController {
             demoUser.setEmail(demoEmail);
             demoUser.setPasswordHash(passwordEncoder.encode(demoPassword));
             demoUser.setStatus(activeStatus);
-            demoUser.setIsPublicProfile(true); // keep only if your entity has this setter
+
+            // ✅ THE FIX: role_id cannot be null
+            demoUser.setRole(userRole);
+
+            demoUser.setIsPublicProfile(true);
             demoUser.setCreatedAt(LocalDateTime.now());
             demoUser.setUpdatedAt(LocalDateTime.now());
 
@@ -1181,7 +1184,7 @@ public class AuthController {
             return ResponseEntity.ok(Map.of(
                     "message", "Demo account created successfully",
                     "email", demoEmail,
-                    "password", demoPassword, // optional: remove if you don't want to return it
+                    "password", demoPassword,
                     "username", finalUsername,
                     "userId", demoUser.getId(),
                     "ownerProjectLinkId", ownerProjectLinkId
@@ -1193,6 +1196,99 @@ public class AuthController {
                     .body(Map.of("error", "Failed to create demo account: " + e.getMessage()));
         }
     }
+
+
+    @PostMapping("/demo/seed-apple-review-account-all")
+    public ResponseEntity<?> seedAppleReviewDemoAccountForAllApps(
+            @RequestHeader(value = "X-Auth-Token", required = false) String authToken
+    ) {
+        try {
+
+            // ✅ PROTECT endpoint (CI only) unless local
+            ResponseEntity<?> gate = requireCiTokenUnlessLocal(authToken);
+            if (gate != null) return gate;
+
+            String demoEmail = Optional.ofNullable(System.getenv("APPLE_REVIEW_DEMO_EMAIL"))
+                    .orElse("demo@applereview.com");
+            String demoPassword = Optional.ofNullable(System.getenv("APPLE_REVIEW_DEMO_PASSWORD"))
+                    .orElse("AppleReview2026!");
+            String demoUsernameBase = Optional.ofNullable(System.getenv("APPLE_REVIEW_DEMO_USERNAME"))
+                    .orElse("apple_reviewer");
+
+            UserStatus activeStatus = userStatusRepository.findByNameIgnoreCase("ACTIVE")
+                    .orElseThrow(() -> new RuntimeException("Status ACTIVE not found"));
+
+            // ✅ THE FIX: role_id cannot be null
+            Role userRole = roleRepository.findByName("USER")
+                    .orElseThrow(() -> new RuntimeException("Role USER not found"));
+
+            List<AdminUserProject> apps = adminUserProjectRepo.findAll();
+            if (apps.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(Map.of("error", "No apps found in AdminUserProject"));
+            }
+
+            int created = 0;
+            int updated = 0;
+
+            for (AdminUserProject link : apps) {
+                Long ownerProjectLinkId = link.getId();
+
+                Users existingUser = userService.findByEmail(demoEmail, ownerProjectLinkId);
+                if (existingUser != null) {
+                    String statusName = existingUser.getStatus() != null ? existingUser.getStatus().getName() : "";
+                    if (!"ACTIVE".equalsIgnoreCase(statusName)) {
+                        existingUser.setStatus(activeStatus);
+                        existingUser.setUpdatedAt(LocalDateTime.now());
+                        userService.save(existingUser);
+                    }
+                    updated++;
+                    continue;
+                }
+
+                int suffix = 0;
+                String finalUsername = demoUsernameBase;
+                while (userRepository.existsByUsernameIgnoreCaseAndOwnerProject_Id(finalUsername, ownerProjectLinkId)) {
+                    suffix++;
+                    finalUsername = demoUsernameBase + suffix;
+                }
+
+                Users demoUser = new Users();
+                demoUser.setOwnerProject(link);
+                demoUser.setUsername(finalUsername);
+                demoUser.setFirstName("Apple");
+                demoUser.setLastName("Reviewer");
+                demoUser.setEmail(demoEmail);
+                demoUser.setPasswordHash(passwordEncoder.encode(demoPassword));
+                demoUser.setStatus(activeStatus);
+
+                // ✅ MUST SET ROLE
+                demoUser.setRole(userRole);
+
+                demoUser.setIsPublicProfile(true);
+                demoUser.setCreatedAt(LocalDateTime.now());
+                demoUser.setUpdatedAt(LocalDateTime.now());
+
+                userService.save(demoUser);
+                created++;
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "message", "Seed completed",
+                    "email", demoEmail,
+                    "appsTotal", apps.size(),
+                    "created", created,
+                    "updated", updated
+            ));
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed: " + e.getMessage()));
+        }
+    }
+
+
 
     /* ========= Helpers ========= */
 
@@ -1213,4 +1309,30 @@ public class AuthController {
         m.put("businessBanner", business.getBusinessBannerUrl());
         return m;
     }
+    
+    private boolean isLocalProfile() {
+        // Works if you run with: -Dspring.profiles.active=local
+        String active = System.getProperty("spring.profiles.active", "");
+        if (active != null && active.toLowerCase().contains("local")) return true;
+
+        // Works if you run with env var: SPRING_PROFILES_ACTIVE=local
+        String envActive = System.getenv("SPRING_PROFILES_ACTIVE");
+        return envActive != null && envActive.toLowerCase().contains("local");
+    }
+
+    private ResponseEntity<?> requireCiTokenUnlessLocal(String authToken) {
+        if (isLocalProfile()) return null; // ✅ local bypass
+
+        String expectedToken = System.getenv("CI_RUNTIME_TOKEN");
+        if (expectedToken == null || expectedToken.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Unauthorized: CI_RUNTIME_TOKEN is not set"));
+        }
+        if (authToken == null || authToken.isBlank() || !expectedToken.equals(authToken)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Unauthorized: Invalid CI token"));
+        }
+        return null;
+    }
+
 }
