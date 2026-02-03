@@ -107,7 +107,7 @@ public class ProjectService {
         String uniqueSlug = ensureUniqueSlug(adminId, projectId, baseSlug);
 
         AdminUserProject link = new AdminUserProject(owner, project, null, now, now.plusMonths(1));
-        link.setStatus("ACTIVE");
+        link.setStatus("TEST");
         link.setSlug(uniqueSlug);
         link.setAppName(project.getProjectName()); // display name; harmless
         link.setLicenseId("LIC-" + adminId + "-" + projectId + "-" + now + "-" + uniqueSlug);

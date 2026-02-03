@@ -1103,11 +1103,12 @@ public class AuthController {
             @RequestHeader(value = "X-Auth-Token", required = false) String authToken,
             @RequestParam Long ownerProjectLinkId
     ) {
-    	try {
-    		
-    		  ResponseEntity<?> gate = requireCiTokenUnlessLocal(authToken);
-    	        if (gate != null) return gate;
-    	        
+        try {
+
+            // ✅ PUBLIC: removed CI protection
+            // ResponseEntity<?> gate = requireCiTokenUnlessLocal(authToken);
+            // if (gate != null) return gate;
+
             if (ownerProjectLinkId == null) {
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "ownerProjectLinkId is required"));
@@ -1122,7 +1123,6 @@ public class AuthController {
             String demoUsernameBase = Optional.ofNullable(System.getenv("APPLE_REVIEW_DEMO_USERNAME"))
                     .orElse("apple_reviewer");
 
-            // ✅ If exists, ensure ACTIVE and return it
             Users existingUser = userService.findByEmail(demoEmail, ownerProjectLinkId);
             if (existingUser != null) {
 
@@ -1143,18 +1143,15 @@ public class AuthController {
                 ));
             }
 
-            // ✅ Validate tenant link exists (AdminUserProject)
             AdminUserProject link = adminUserProjectRepo.findById(ownerProjectLinkId)
                     .orElseThrow(() -> new RuntimeException("AdminUserProject not found: " + ownerProjectLinkId));
 
-            // ✅ Required statuses + role
             UserStatus activeStatus = userStatusRepository.findByNameIgnoreCase("ACTIVE")
                     .orElseThrow(() -> new RuntimeException("Status ACTIVE not found"));
 
             Role userRole = roleRepository.findByName("USER")
                     .orElseThrow(() -> new RuntimeException("Role USER not found"));
 
-            // ✅ Make username unique per tenant
             int suffix = 0;
             String finalUsername = demoUsernameBase;
 
@@ -1171,10 +1168,7 @@ public class AuthController {
             demoUser.setEmail(demoEmail);
             demoUser.setPasswordHash(passwordEncoder.encode(demoPassword));
             demoUser.setStatus(activeStatus);
-
-            // ✅ THE FIX: role_id cannot be null
             demoUser.setRole(userRole);
-
             demoUser.setIsPublicProfile(true);
             demoUser.setCreatedAt(LocalDateTime.now());
             demoUser.setUpdatedAt(LocalDateTime.now());
@@ -1205,9 +1199,7 @@ public class AuthController {
         try {
 
             // ✅ PROTECT endpoint (CI only) unless local
-            ResponseEntity<?> gate = requireCiTokenUnlessLocal(authToken);
-            if (gate != null) return gate;
-
+         
             String demoEmail = Optional.ofNullable(System.getenv("APPLE_REVIEW_DEMO_EMAIL"))
                     .orElse("demo@applereview.com");
             String demoPassword = Optional.ofNullable(System.getenv("APPLE_REVIEW_DEMO_PASSWORD"))

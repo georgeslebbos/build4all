@@ -558,7 +558,8 @@ public class AppRequestService {
                 });
 
         // ---- base fields ----
-        link.setStatus("ACTIVE");
+        link.setStatus("TEST");
+
         link.setAppName(req.getAppName());
         link.setLogoUrl(req.getLogoUrl());
         link.setValidFrom(now);
@@ -678,7 +679,7 @@ public class AppRequestService {
                     return n;
                 });
 
-        link.setStatus("ACTIVE");
+        link.setStatus("TEST");
         link.setAppName(req.getAppName());
         link.setLogoUrl(req.getLogoUrl());
         link.setValidFrom(now);
