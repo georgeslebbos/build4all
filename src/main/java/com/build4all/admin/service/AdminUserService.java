@@ -322,17 +322,20 @@ public class AdminUserService {
      */
     public AdminUserProfileDTO toProfileDTO(AdminUser a) {
         return new AdminUserProfileDTO(
-                a.getAdminId(),
-                a.getUsername(),
-                a.getFirstName(),
-                a.getLastName(),
-                a.getEmail(),
-                a.getRole() != null ? a.getRole().getName() : null,
-                a.getBusiness() != null ? a.getBusiness().getId() : null,
-                a.getNotifyItemUpdates(),
-                a.getNotifyUserFeedback(),
-                a.getCreatedAt(),
-                a.getUpdatedAt()
+            a.getAdminId(),
+            a.getUsername(),
+            a.getFirstName(),
+            a.getLastName(),
+            a.getEmail(),
+            a.getPhoneNumber(), // ✅ keep null if null
+            a.getRole() != null ? a.getRole().getName() : null,
+            a.getBusiness() != null ? a.getBusiness().getId() : null,
+            a.getNotifyItemUpdates(),
+            a.getNotifyUserFeedback(),
+            a.getCreatedAt(),
+            a.getUpdatedAt()
         );
     }
+
+
 }

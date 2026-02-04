@@ -814,6 +814,7 @@ public class AuthController {
             description = "Registers a new AdminUser with the role SUPER_ADMIN")
     @PostMapping("/admin/register")
     public ResponseEntity<?> registerSuperAdmin(@RequestBody AdminRegisterRequest request) {
+
         if (adminUserService.findByUsernameOrEmail(request.getEmail()).isPresent()) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", "Username or email already in use"));
@@ -829,6 +830,11 @@ public class AuthController {
         newAdmin.setEmail(request.getEmail());
         newAdmin.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         newAdmin.setRole(role);
+
+        // ✅ optional phone
+        if (request.getPhoneNumber() != null && !request.getPhoneNumber().isBlank()) {
+            newAdmin.setPhoneNumber(request.getPhoneNumber().trim());
+        }
 
         adminUserService.save(newAdmin);
 
@@ -1041,22 +1047,36 @@ public class AuthController {
         }
     }
 
-    @Operation(summary = "Owner signup: complete profile and create account")
+    @Operation(summary = "Owner signup: complete profile and create OWNER account (no tenant yet)")
     @PostMapping("/owner/complete-profile")
-    public ResponseEntity<?> ownerCompleteProfile(@RequestBody Map<String, String> req) {
+    public ResponseEntity<?> ownerCompleteProfile(@RequestBody Map<String, Object> req) {
         try {
-            String registrationToken = req.get("registrationToken");
-            String username   = req.get("username");
-            String firstName  = req.get("firstName");
-            String lastName   = req.get("lastName");
+            String registrationToken = asString(req.get("registrationToken"));
+            String username   = asString(req.get("username"));
+            String firstName  = asString(req.get("firstName"));
+            String lastName   = asString(req.get("lastName"));
+            String phoneNumber = asString(req.get("phoneNumber")); // optional
 
-            if (registrationToken == null || username == null || firstName == null || lastName == null) {
-                return ResponseEntity.badRequest().body(Map.of("error", "registrationToken, username, firstName, lastName are required"));
+            if (isBlank(registrationToken) || isBlank(username) || isBlank(firstName) || isBlank(lastName)) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "error", "registrationToken, username, firstName, and lastName are required"
+                ));
             }
 
+            // ✅ Read email + passwordHash from reg token
             Map<String, Object> claims = jwtUtil.parseOwnerRegistrationToken(registrationToken);
             String email = (String) claims.get("email");
             String passwordHash = (String) claims.get("passwordHash");
+
+            if (isBlank(email) || isBlank(passwordHash)) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", "Invalid registration token"));
+            }
+
+            username = username.trim();
+            firstName = firstName.trim();
+            lastName = lastName.trim();
+            email = email.trim();
+            phoneNumber = isBlank(phoneNumber) ? null : phoneNumber.trim();
 
             if (adminUserService.findByUsername(username).isPresent()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Username already in use"));
@@ -1065,7 +1085,7 @@ public class AuthController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Email already in use"));
             }
 
-            var ownerRole = roleRepository.findByName("OWNER")
+            Role ownerRole = roleRepository.findByName("OWNER")
                     .orElseThrow(() -> new RuntimeException("Role OWNER not found"));
 
             AdminUser owner = new AdminUser();
@@ -1075,29 +1095,35 @@ public class AuthController {
             owner.setEmail(email);
             owner.setPasswordHash(passwordHash);
             owner.setRole(ownerRole);
+            owner.setPhoneNumber(phoneNumber);
 
             adminUserService.save(owner);
 
-            String token = jwtUtil.generateToken(owner);
-
-            Map<String, Object> ownerData = new HashMap<>();
-            ownerData.put("id", owner.getAdminId());
-            ownerData.put("username", owner.getUsername());
-            ownerData.put("firstName", owner.getFirstName());
-            ownerData.put("lastName", owner.getLastName());
-            ownerData.put("email", owner.getEmail());
-            ownerData.put("role", "OWNER");
-
+            // ✅ IMPORTANT: DO NOT mint JWT here (no project yet)
             return ResponseEntity.ok(Map.of(
-                    "message", "Owner registered successfully",
-                    "token", token,
-                    "owner", ownerData
+                    "message", "Owner registered successfully. Please login.",
+                    "ownerId", owner.getAdminId()
             ));
+
         } catch (Exception e) {
+            e.printStackTrace();
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
         }
     }
-    
+
+
+
+ /* ===================== Helpers (put inside AuthController) ===================== */
+
+ private String asString(Object v) {
+     return v == null ? null : v.toString();
+ }
+
+ private boolean isBlank(String s) {
+     return s == null || s.trim().isEmpty();
+ }
+
+
     @PostMapping("/demo/create-apple-review-account")
     public ResponseEntity<?> createAppleReviewDemoAccount(
             @RequestHeader(value = "X-Auth-Token", required = false) String authToken,

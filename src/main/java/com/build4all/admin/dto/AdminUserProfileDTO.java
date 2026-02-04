@@ -22,6 +22,8 @@ public class AdminUserProfileDTO {
     private String firstName;
     private String lastName;
     private String email;
+    private String phoneNumber;
+
 
     // Role name only (e.g., "SUPER_ADMIN", "OWNER", "MANAGER") instead of returning the full Role entity.
     private String role;
@@ -46,18 +48,20 @@ public class AdminUserProfileDTO {
             String firstName,
             String lastName,
             String email,
+            String phoneNumber,
             String role,
             Long businessId,
             Boolean notifyItemUpdates,
             Boolean notifyUserFeedback,
             LocalDateTime createdAt,
             LocalDateTime updatedAt) {
-        // All fields are assigned directly; no logic here (pure data container).
+
         this.adminId = adminId;
         this.username = username;
         this.firstName = firstName;
         this.lastName = lastName;
         this.email = email;
+        this.phoneNumber = phoneNumber;
         this.role = role;
         this.businessId = businessId;
         this.notifyItemUpdates = notifyItemUpdates;
@@ -65,6 +69,7 @@ public class AdminUserProfileDTO {
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
     }
+
 
     // getters/setters
     public Long getAdminId() { return adminId; }
@@ -102,6 +107,12 @@ public class AdminUserProfileDTO {
         // Role name string (e.g., "SUPER_ADMIN") so frontend can display/decide UI permissions.
         this.role = role;
     }
+    
+    public String getPhoneNumber() { return phoneNumber; }
+    public void setPhoneNumber(String phoneNumber) {
+        this.phoneNumber = phoneNumber;
+    }
+
 
     public Long getBusinessId() { return businessId; }
     public void setBusinessId(Long businessId) {

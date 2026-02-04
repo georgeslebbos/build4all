@@ -64,6 +64,10 @@ public class AdminUser implements UserDetails {
     @JsonProperty("password")
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
+    
+    @Column(name = "phone_number",nullable = true)
+    private String phoneNumber;
+
 
     /**
      * Role of the admin user (e.g., SUPER_ADMIN, OWNER, MANAGER).
@@ -168,6 +172,9 @@ public class AdminUser implements UserDetails {
 
     public Set<AdminUserProject> getProjectLinks() { return projectLinks; }
     public void setProjectLinks(Set<AdminUserProject> projectLinks) { this.projectLinks = projectLinks; }
+
+    public String getPhoneNumber() { return phoneNumber; }
+    public void setPhoneNumber(String phoneNumber) { this.phoneNumber = phoneNumber; }
 
 
 public boolean isAiEnabled() { return aiEnabled; }
