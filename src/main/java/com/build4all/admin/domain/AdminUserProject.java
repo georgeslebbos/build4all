@@ -153,7 +153,7 @@ public class AdminUserProject {
             if (this.id == null) {
                 throw new IllegalStateException("Cannot generate androidPackageName before ID exists");
             }
-            this.androidPackageName = "com.build4all.opl" + this.id;
+            this.androidPackageName = "com.build4all.opl" + this.id + ".test";
         }
         return this.androidPackageName;
     }
@@ -194,7 +194,7 @@ public class AdminUserProject {
                 throw new IllegalStateException("Cannot generate iosBundleId before ID exists");
             }
         
-            this.iosBundleId = "com.build4all.opl" + this.id + ".app";
+            this.iosBundleId = "com.build4all.opl" + this.id + ".test";
         }
         return this.iosBundleId;
     }
