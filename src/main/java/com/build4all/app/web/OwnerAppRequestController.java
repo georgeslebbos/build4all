@@ -10,12 +10,13 @@ import com.build4all.app.repository.AppRequestRepository;
 import com.build4all.app.service.AppRequestService;
 import com.build4all.app.service.ThemeJsonBuilder;
 import com.build4all.security.JwtUtil;
-
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
 import java.util.List;
@@ -35,25 +36,31 @@ public class OwnerAppRequestController {
     private String callbackBase;
 
     public OwnerAppRequestController(AppRequestService service,
-            AppRequestRepository appRequestRepo,
-            AdminUserProjectRepository aupRepo,
-            JwtUtil jwtUtil,
-            AdminUsersRepository adminRepo) {
-this.service = service;
-this.appRequestRepo = appRequestRepo;
-this.aupRepo = aupRepo;
-this.jwtUtil = jwtUtil;
-this.adminRepo = adminRepo;
-}
+                                     AppRequestRepository appRequestRepo,
+                                     AdminUserProjectRepository aupRepo,
+                                     JwtUtil jwtUtil,
+                                     AdminUsersRepository adminRepo) {
+        this.service = service;
+        this.appRequestRepo = appRequestRepo;
+        this.aupRepo = aupRepo;
+        this.jwtUtil = jwtUtil;
+        this.adminRepo = adminRepo;
+    }
+
     // Legacy JSON create (kept)
     @PostMapping(
             value = "/app-requests",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE
     )
-    public ResponseEntity<?> create(@RequestParam Long ownerId,
-                                    @RequestBody CreateAppRequestDto dto) {
+    public ResponseEntity<?> create(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestParam Long ownerId,
+            @RequestBody CreateAppRequestDto dto
+    ) {
         try {
+            requireOwnerId(authHeader, ownerId);
+
             AppRequest r = service.createRequest(
                     ownerId,
                     dto.projectId(),
@@ -73,6 +80,8 @@ this.adminRepo = adminRepo;
             body.put("slug", nz(r.getSlug()));
             return ResponseEntity.ok(body);
 
+        } catch (ResponseStatusException ex) {
+            return ResponseEntity.status(ex.getStatusCode()).body(Map.of("error", ex.getReason()));
         } catch (Exception ex) {
             return ResponseEntity.internalServerError().body(Map.of(
                     "error", "Internal error",
@@ -81,13 +90,14 @@ this.adminRepo = adminRepo;
         }
     }
 
-    // ✅ AUTO flow (Android)
+    // ✅ AUTO flow (Android)  -> لازم Auth
     @PostMapping(
             value = "/app-requests/auto",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE
     )
     public ResponseEntity<?> createAndAutoApprove(
+            @RequestHeader("Authorization") String authHeader,
             @RequestParam Long ownerId,
             @RequestParam Long projectId,
             @RequestParam String appName,
@@ -109,6 +119,8 @@ this.adminRepo = adminRepo;
             @RequestParam(required = false) String apiBaseUrlOverride
     ) {
         try {
+            requireOwnerId(authHeader, ownerId);
+
             MultipartFile logoFile = (file != null) ? file : logo;
 
             String themeJson = ThemeJsonBuilder.buildThemeJson(
@@ -150,11 +162,10 @@ this.adminRepo = adminRepo;
             body.put("endTo", link.getEndTo());
             body.put("logoUrl", nz(link.getLogoUrl()));
             body.put("apkUrl", nz(link.getApkUrl()));
-            body.put("bundleUrl", nz(link.getBundleUrl())); // if present later
+            body.put("bundleUrl", nz(link.getBundleUrl()));
             body.put("themeJson", themeJson);
             body.put("currencyId", currencyId);
 
-            // ✅ Version + package (very useful for debugging + UI)
             body.put("androidVersionCode", link.getAndroidVersionCode());
             body.put("androidVersionName", nz(link.getAndroidVersionName()));
             body.put("androidPackageName", nz(link.getAndroidPackageName()));
@@ -164,7 +175,6 @@ this.adminRepo = adminRepo;
                             + ownerId + "/" + projectId + "/" + link.getSlug() + "/latest.json";
             body.put("manifestUrlHint", manifestUrlGuess);
 
-            // ✅ Keep callbackBase only (token must NEVER be returned)
             body.put("callbackBase", nz(callbackBase));
 
             body.put("runtimeConfigUrl",
@@ -175,6 +185,8 @@ this.adminRepo = adminRepo;
 
             return ResponseEntity.ok(body);
 
+        } catch (ResponseStatusException ex) {
+            return ResponseEntity.status(ex.getStatusCode()).body(Map.of("error", ex.getReason()));
         } catch (IllegalArgumentException | IllegalStateException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         } catch (Exception ex) {
@@ -192,6 +204,7 @@ this.adminRepo = adminRepo;
             produces = MediaType.APPLICATION_JSON_VALUE
     )
     public ResponseEntity<?> createAndAutoApproveIos(
+            @RequestHeader("Authorization") String authHeader,
             @RequestParam Long ownerId,
             @RequestParam Long projectId,
             @RequestParam String appName,
@@ -210,14 +223,14 @@ this.adminRepo = adminRepo;
             @RequestParam(required = false) String homeJson,
             @RequestParam(required = false) String enabledFeaturesJson,
             @RequestParam(required = false) String brandingJson,
-            @RequestParam(required = false) String apiBaseUrlOverride,
-            @RequestHeader("Authorization") String authHeader
-
+            @RequestParam(required = false) String apiBaseUrlOverride
     ) {
         try {
-        	String token = authHeader.replace("Bearer ", "").trim();
-        	String ownerEmail = jwtUtil.extractUsername(token); // subject = email (OWNER token)
-        	String ownerName  = extractOwnerNameFromToken(token);
+            requireOwnerId(authHeader, ownerId);
+
+            String token = extractToken(authHeader);
+            String ownerEmail = jwtUtil.extractUsername(token);
+            String ownerName = extractOwnerNameFromToken(token);
 
             MultipartFile logoFile = (file != null) ? file : logo;
 
@@ -248,6 +261,9 @@ this.adminRepo = adminRepo;
                     ownerName
             );
 
+            // refresh (احتياط)
+            link = aupRepo.findById(link.getId()).orElse(link);
+
             Map<String, Object> body = new HashMap<>();
             body.put("message", "iOS build started");
             body.put("adminId", ownerId);
@@ -265,7 +281,6 @@ this.adminRepo = adminRepo;
             body.put("themeJson", themeJson);
             body.put("currencyId", currencyId);
 
-            // ✅ IMPORTANT: expose iOS version + bundle id
             body.put("iosBuildNumber", link.getIosBuildNumber());
             body.put("iosVersionName", nz(link.getIosVersionName()));
             body.put("iosBundleId", nz(link.getIosBundleId()));
@@ -280,6 +295,8 @@ this.adminRepo = adminRepo;
 
             return ResponseEntity.ok(body);
 
+        } catch (ResponseStatusException ex) {
+            return ResponseEntity.status(ex.getStatusCode()).body(Map.of("error", ex.getReason()));
         } catch (IllegalArgumentException | IllegalStateException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         } catch (Exception ex) {
@@ -289,13 +306,15 @@ this.adminRepo = adminRepo;
             ));
         }
     }
-    
+
+    // ✅ AUTO flow (Android + iOS)
     @PostMapping(
             value = "/app-requests/auto/both",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE
     )
     public ResponseEntity<?> createAndAutoApproveBoth(
+            @RequestHeader("Authorization") String authHeader,
             @RequestParam Long ownerId,
             @RequestParam Long projectId,
             @RequestParam String appName,
@@ -314,15 +333,15 @@ this.adminRepo = adminRepo;
             @RequestParam(required = false) String homeJson,
             @RequestParam(required = false) String enabledFeaturesJson,
             @RequestParam(required = false) String brandingJson,
-            @RequestParam(required = false) String apiBaseUrlOverride,
-            @RequestHeader("Authorization") String authHeader
-
+            @RequestParam(required = false) String apiBaseUrlOverride
     ) {
         try {
-        	
-        	String token = authHeader.replace("Bearer ", "").trim();
-        	String ownerEmail = jwtUtil.extractUsername(token);
-        	String ownerName  = extractOwnerNameFromToken(token);
+            requireOwnerId(authHeader, ownerId);
+
+            String token = extractToken(authHeader);
+            String ownerEmail = jwtUtil.extractUsername(token);
+            String ownerName = extractOwnerNameFromToken(token);
+
             MultipartFile logoFile = (file != null) ? file : logo;
 
             String themeJson = ThemeJsonBuilder.buildThemeJson(
@@ -352,10 +371,12 @@ this.adminRepo = adminRepo;
                     ownerName
             );
 
+            // ✅ أهم سطر: refresh لحتى يجي iOS fields مظبوطين
+            link = aupRepo.findById(link.getId()).orElse(link);
+
             Map<String, Object> body = new HashMap<>();
             body.put("message", "Android + iOS builds started");
 
-            // common
             body.put("adminId", ownerId);
             body.put("projectId", projectId);
             body.put("ownerProjectLinkId", link.getId());
@@ -370,26 +391,22 @@ this.adminRepo = adminRepo;
             body.put("themeJson", themeJson);
             body.put("currencyId", currencyId);
 
-            // Android build info
             body.put("apkUrl", nz(link.getApkUrl()));
             body.put("bundleUrl", nz(link.getBundleUrl()));
             body.put("androidVersionCode", link.getAndroidVersionCode());
             body.put("androidVersionName", nz(link.getAndroidVersionName()));
             body.put("androidPackageName", nz(link.getAndroidPackageName()));
 
-            // iOS build info
             body.put("ipaUrl", nz(link.getIpaUrl()));
             body.put("iosBuildNumber", link.getIosBuildNumber());
             body.put("iosVersionName", nz(link.getIosVersionName()));
             body.put("iosBundleId", nz(link.getIosBundleId()));
 
-            // Optional manifest hint (Android)
             String manifestUrlGuess =
                     "https://raw.githubusercontent.com/fatimahh0/HobbySphereFlutter/main/builds/"
                             + ownerId + "/" + projectId + "/" + link.getSlug() + "/latest.json";
             body.put("manifestUrlHint", manifestUrlGuess);
 
-            // ✅ Keep callbackBase only (never return token)
             body.put("callbackBase", nz(callbackBase));
 
             body.put("runtimeConfigUrl",
@@ -400,6 +417,8 @@ this.adminRepo = adminRepo;
 
             return ResponseEntity.ok(body);
 
+        } catch (ResponseStatusException ex) {
+            return ResponseEntity.status(ex.getStatusCode()).body(Map.of("error", ex.getReason()));
         } catch (IllegalArgumentException | IllegalStateException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         } catch (Exception ex) {
@@ -410,11 +429,10 @@ this.adminRepo = adminRepo;
         }
     }
 
-    @PostMapping(
-            value = "/apps/{linkId}/rebuild-bundle",
-            produces = MediaType.APPLICATION_JSON_VALUE
-    )
+    // ✅ rebuild only Android bundle -> لازم Auth + check owner of link
+    @PostMapping(value = "/apps/{linkId}/rebuild-bundle", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> rebuildBundleSamePackage(
+            @RequestHeader("Authorization") String authHeader,
             @PathVariable Long linkId,
             @RequestParam(defaultValue = "true") boolean bumpVersion,
             @RequestParam(required = false) String apiBaseUrlOverride,
@@ -424,6 +442,8 @@ this.adminRepo = adminRepo;
             @RequestParam(required = false) String brandingJson
     ) {
         try {
+            requireOwnerLinkAccess(authHeader, linkId);
+
             AdminUserProject link = service.rebuildAndroidBundleSamePackage(
                     linkId,
                     bumpVersion,
@@ -442,10 +462,12 @@ this.adminRepo = adminRepo;
             body.put("androidPackageName", nz(link.getAndroidPackageName()));
             body.put("androidVersionCode", link.getAndroidVersionCode());
             body.put("androidVersionName", nz(link.getAndroidVersionName()));
-            body.put("bundleUrl", nz(link.getBundleUrl())); // will be "" because you reset it
-            body.put("apkUrl", nz(link.getApkUrl())); // unchanged
+            body.put("bundleUrl", nz(link.getBundleUrl()));
+            body.put("apkUrl", nz(link.getApkUrl()));
             return ResponseEntity.ok(body);
 
+        } catch (ResponseStatusException ex) {
+            return ResponseEntity.status(ex.getStatusCode()).body(Map.of("error", ex.getReason()));
         } catch (IllegalArgumentException | IllegalStateException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         } catch (Exception ex) {
@@ -456,11 +478,10 @@ this.adminRepo = adminRepo;
         }
     }
 
-    @PostMapping(
-            value = "/apps/{linkId}/rebuild-both",
-            produces = MediaType.APPLICATION_JSON_VALUE
-    )
+    // ✅ rebuild both -> Auth + check owner of link
+    @PostMapping(value = "/apps/{linkId}/rebuild-both", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> rebuildAndroidAndIos(
+            @RequestHeader("Authorization") String authHeader,
             @PathVariable Long linkId,
             @RequestParam(defaultValue = "true") boolean bumpAndroid,
             @RequestParam(defaultValue = "true") boolean bumpIos,
@@ -468,13 +489,14 @@ this.adminRepo = adminRepo;
             @RequestParam(required = false) String navJson,
             @RequestParam(required = false) String homeJson,
             @RequestParam(required = false) String enabledFeaturesJson,
-            @RequestParam(required = false) String brandingJson,
-            @RequestHeader("Authorization") String authHeader
+            @RequestParam(required = false) String brandingJson
     ) {
         try {
-            String token = authHeader.replace("Bearer ", "").trim();
+            String token = extractToken(authHeader);
             String ownerEmail = jwtUtil.extractUsername(token);
-            String ownerName  = extractOwnerNameFromToken(token);
+            String ownerName = extractOwnerNameFromToken(token);
+
+            requireOwnerLinkAccess(authHeader, linkId);
 
             AdminUserProject link = service.rebuildAndroidAndIos(
                     linkId,
@@ -507,6 +529,8 @@ this.adminRepo = adminRepo;
 
             return ResponseEntity.ok(body);
 
+        } catch (ResponseStatusException ex) {
+            return ResponseEntity.status(ex.getStatusCode()).body(Map.of("error", ex.getReason()));
         } catch (IllegalArgumentException | IllegalStateException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         } catch (Exception ex) {
@@ -518,33 +542,74 @@ this.adminRepo = adminRepo;
     }
 
     @GetMapping(value = "/app-requests", produces = MediaType.APPLICATION_JSON_VALUE)
-    public List<AppRequest> myRequests(@RequestParam Long ownerId) {
+    public List<AppRequest> myRequests(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestParam Long ownerId
+    ) {
+        requireOwnerId(authHeader, ownerId);
         return appRequestRepo.findByOwnerIdOrderByCreatedAtDesc(ownerId);
     }
 
     @GetMapping(value = "/my-apps", produces = MediaType.APPLICATION_JSON_VALUE)
-    public List<OwnerProjectView> myApps(@RequestParam Long ownerId) {
+    public List<OwnerProjectView> myApps(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestParam Long ownerId
+    ) {
+        requireOwnerId(authHeader, ownerId);
         return aupRepo.findOwnerProjectsSlim(ownerId);
     }
 
-    private static String nz(String s) { return (s == null) ? "" : s; }
-    
+    private static String nz(String s) {
+        return (s == null) ? "" : s;
+    }
+
     private String extractOwnerNameFromToken(String token) {
         try {
             Long adminId = jwtUtil.extractAdminId(token);
             return adminRepo.findById(adminId)
-                .map(admin -> {
-                    String first = admin.getFirstName() != null ? admin.getFirstName() : "";
-                    String last  = admin.getLastName() != null ? admin.getLastName() : "";
-                    String full = (first + " " + last).trim();
-                    return full.isBlank() ? admin.getUsername() : full;
-                })
-                .orElse("Owner");
+                    .map(admin -> {
+                        String first = admin.getFirstName() != null ? admin.getFirstName() : "";
+                        String last = admin.getLastName() != null ? admin.getLastName() : "";
+                        String full = (first + " " + last).trim();
+                        return full.isBlank() ? admin.getUsername() : full;
+                    })
+                    .orElse("Owner");
         } catch (Exception e) {
             return "Owner";
         }
     }
 
-    
-    
+    private String extractToken(String authHeader) {
+        if (authHeader == null || authHeader.isBlank() || !authHeader.startsWith("Bearer ")) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing/invalid Authorization header");
+        }
+        return authHeader.replace("Bearer ", "").trim();
+    }
+
+    private Long requireOwnerId(String authHeader, Long ownerIdParam) {
+        String token = extractToken(authHeader);
+        Long tokenAdminId = jwtUtil.extractAdminId(token);
+
+        if (ownerIdParam == null || !ownerIdParam.equals(tokenAdminId)) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Forbidden: ownerId does not match token"
+            );
+        }
+        return tokenAdminId;
+    }
+
+  
+    private void requireOwnerLinkAccess(String authHeader, Long linkId) {
+        String token = extractToken(authHeader);
+        Long tokenAdminId = jwtUtil.extractAdminId(token);
+
+        AdminUserProject link = aupRepo.findById(linkId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Link not found"));
+
+        Long linkOwnerId = (link.getAdmin() != null) ? link.getAdmin().getAdminId() : null;
+        if (linkOwnerId == null || !linkOwnerId.equals(tokenAdminId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden: link does not belong to this owner");
+        }
+    }
 }

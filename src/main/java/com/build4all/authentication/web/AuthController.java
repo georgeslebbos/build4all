@@ -16,7 +16,7 @@ import com.build4all.business.domain.Businesses;
 import com.build4all.business.repository.BusinessStatusRepository;
 import com.build4all.business.repository.BusinessesRepository;
 import com.build4all.business.service.BusinessService;
-
+import com.build4all.licensing.service.LicensingService;
 import com.build4all.project.domain.Project;
 import com.build4all.project.repository.ProjectRepository;
 
@@ -101,6 +101,8 @@ public class AuthController {
     // ✅ Needed only for OWNER signup to create the first AdminUserProject row
     // because AdminUserProject.project is non-nullable in your entity.
     @Autowired private ProjectRepository projectRepository;
+    @Autowired private LicensingService licensingService;
+
 
     /* =====================================================================================
      *  USER REGISTRATION (OWNER-LINKED / MULTI-TENANT)
@@ -187,6 +189,8 @@ public class AuthController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Username already in use in this app"));
             }
 
+            licensingService.requireUserSlotAvailable(ownerProjectLinkId);
+            
             boolean updated = userService.completeUserProfile(
                     pendingId, username, firstName, lastName, profileImage, isPublicProfile, ownerProjectLinkId
             );
@@ -216,10 +220,10 @@ public class AuthController {
                     "message", "Profile completed successfully.",
                     "user", userData
             ));
-        } catch (BadRequestException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+        } catch (RuntimeException e) {
+            // if licensing throws
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
-            e.printStackTrace();
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Server error: " + e.getMessage()));
         }
@@ -406,6 +410,8 @@ public class AuthController {
             return ResponseEntity.badRequest().body(Map.of("error", "User is not inactive"));
         }
 
+        licensingService.requireUserSlotAvailable(ownerProjectLinkId);
+        
         UserStatus activeStatus = userStatusRepository.findByNameIgnoreCase("ACTIVE")
                 .orElseThrow(() -> new RuntimeException("Status 'ACTIVE' not found"));
 

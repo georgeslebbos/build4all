@@ -416,4 +416,8 @@ public interface UsersRepository extends JpaRepository<Users, Long> {
     Optional<Users> findByEmailIgnoreCaseAndOwnerProject_Id(String email, Long ownerProjectId);
 
     Optional<Users> findByUsernameIgnoreCaseAndOwnerProject_Id(String username, Long ownerProjectId);
+    
+ // ✅ counts ACTIVE users inside ONE app (aup_id)
+    long countByOwnerProject_IdAndStatus_NameIgnoreCase(Long ownerProjectLinkId, String statusName);
+
 }

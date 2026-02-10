@@ -11,6 +11,7 @@ import com.build4all.app.repository.AppRequestRepository;
 import com.build4all.app.repository.AppRuntimeConfigRepository;
 import com.build4all.catalog.domain.Currency;
 import com.build4all.catalog.repository.CurrencyRepository;
+import com.build4all.licensing.service.LicensingService;
 import com.build4all.project.domain.Project;
 import com.build4all.project.repository.ProjectRepository;
 import com.build4all.theme.domain.Theme;
@@ -20,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -44,6 +46,8 @@ public class AppRequestService {
     private final CiBuildService ciBuildService;
     private final CurrencyRepository currencyRepo;
     private final AppRuntimeConfigRepository runtimeRepo;
+    private final LicensingService licensingService;
+
 
     public AppRequestService(AppRequestRepository appRequestRepo,
                              AdminUserProjectRepository aupRepo,
@@ -52,7 +56,8 @@ public class AppRequestService {
                              ThemeRepository themeRepo,
                              CiBuildService ciBuildService,
                              CurrencyRepository currencyRepo,
-                             AppRuntimeConfigRepository runtimeRepo) {
+                             AppRuntimeConfigRepository runtimeRepo,
+                             LicensingService licensingService) {
         this.appRequestRepo = appRequestRepo;
         this.aupRepo = aupRepo;
         this.adminRepo = adminRepo;
@@ -61,6 +66,7 @@ public class AppRequestService {
         this.ciBuildService = ciBuildService;
         this.currencyRepo = currencyRepo;
         this.runtimeRepo = runtimeRepo;
+        this.licensingService = licensingService;
     }
 
     /** Legacy JSON create (kept). */
@@ -257,6 +263,8 @@ public class AppRequestService {
     ) {
         AdminUserProject link = aupRepo.findById(linkId)
                 .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
+        
+        enforceLicenseForBuild(link);
 
         AdminUser owner = link.getAdmin();
         Project project = link.getProject();
@@ -339,6 +347,7 @@ public class AppRequestService {
     ) {
         AdminUserProject link = aupRepo.findById(linkId)
                 .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
+        enforceLicenseForBuild(link);
 
         AdminUser owner = link.getAdmin();
         Project project = link.getProject();
@@ -444,6 +453,18 @@ public class AppRequestService {
         return aupRepo.findById(linkId).orElseThrow();
     }
 
+    
+    private void enforceLicenseForBuild(AdminUserProject link) {
+     
+            // ✅ 1) if app has no subscription yet => create FREE
+            licensingService.ensureSubscriptionExists(link);
+
+            // ✅ 2) block build if expired / missing / dedicated infra not ready
+            licensingService.requireBuildAllowed(link.getId());
+
+     
+    }
+
 
     private void triggerIosForExistingLink(
             AdminUserProject link,
@@ -472,6 +493,9 @@ public class AppRequestService {
 
         // save
         link = aupRepo.save(link);
+        
+        enforceLicenseForBuild(link);
+
 
         // runtime config upsert (same)
         upsertRuntimeConfig(link, navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride);
@@ -592,6 +616,9 @@ public class AppRequestService {
 
         // Save again after bump/ensure
         link = aupRepo.save(link);
+        
+        enforceLicenseForBuild(link);
+
 
         // ---- runtime config ----
         upsertRuntimeConfig(link, navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride);
@@ -709,6 +736,9 @@ public class AppRequestService {
         link = aupRepo.save(link);
         link.ensureAndroidPackageName();
         link = aupRepo.save(link);
+        
+        enforceLicenseForBuild(link);
+
 
         // Save runtime JSON configs if provided
         upsertRuntimeConfig(link, navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride);
