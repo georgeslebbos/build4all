@@ -2,14 +2,11 @@ package com.build4all.app.web;
 
 import com.build4all.app.config.AppEnvProperties;
 import com.build4all.admin.repository.AdminUserProjectRepository;
-
-import com.build4all.theme.domain.Theme;
 import com.build4all.theme.service.ThemeService;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/public")
@@ -29,12 +26,13 @@ public class PublicAppConfigController {
 
     @GetMapping("/app-config")
     public Map<String, Object> getAppConfig() {
-        return Map.of(
-            "ownerProjectLinkId", props.getOwnerProjectLinkId(),
-            "wsPath", props.getWsPath()
-        );
+        // ❌ Map.of(...) explodes if any value is null
+        // ✅ HashMap allows null values without throwing
+        Map<String, Object> body = new HashMap<>();
+
+        body.put("ownerProjectLinkId", props.getOwnerProjectLinkId());
+        body.put("wsPath", props.getWsPath());
+
+        return body;
     }
-
-
-
 }

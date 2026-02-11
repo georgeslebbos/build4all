@@ -21,7 +21,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -48,6 +47,8 @@ public class AppRequestService {
     private final AppRuntimeConfigRepository runtimeRepo;
     private final LicensingService licensingService;
 
+    // ✅ last-step: track jobs
+    private final AppBuildJobService buildJobService;
 
     public AppRequestService(AppRequestRepository appRequestRepo,
                              AdminUserProjectRepository aupRepo,
@@ -57,7 +58,8 @@ public class AppRequestService {
                              CiBuildService ciBuildService,
                              CurrencyRepository currencyRepo,
                              AppRuntimeConfigRepository runtimeRepo,
-                             LicensingService licensingService) {
+                             LicensingService licensingService,
+                             AppBuildJobService buildJobService) {
         this.appRequestRepo = appRequestRepo;
         this.aupRepo = aupRepo;
         this.adminRepo = adminRepo;
@@ -67,6 +69,7 @@ public class AppRequestService {
         this.currencyRepo = currencyRepo;
         this.runtimeRepo = runtimeRepo;
         this.licensingService = licensingService;
+        this.buildJobService = buildJobService;
     }
 
     /** Legacy JSON create (kept). */
@@ -87,7 +90,6 @@ public class AppRequestService {
         return appRequestRepo.save(r);
     }
 
-    
     @Transactional
     public AdminUserProject createAndAutoApprove(Long ownerId, Long projectId,
                                                  String appName, String slug,
@@ -192,7 +194,7 @@ public class AppRequestService {
                 ownerName
         );
     }
-    
+
     @Transactional
     public AdminUserProject createAndAutoApproveBoth(
             Long ownerId, Long projectId,
@@ -210,7 +212,6 @@ public class AppRequestService {
             String ownerName
     ) throws IOException {
 
-       
         String base = (slug != null && !slug.isBlank()) ? slugify(slug) : slugify(appName);
         String uniqueSlug = ensureUniqueSlug(ownerId, projectId, base);
 
@@ -241,21 +242,20 @@ public class AppRequestService {
                 navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride
         );
 
-       
         triggerIosForExistingLink(
                 link, r, logoBytes,
-                navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride, ownerEmail,
-                ownerName
+                navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride,
+                ownerEmail, ownerName
         );
 
         return link;
     }
-    
+
     @Transactional
     public AdminUserProject rebuildAndroidBundleSamePackage(
             Long linkId,
-            boolean bumpVersion, // ✅ you decide
-            String apiBaseUrlOverride, // optional
+            boolean bumpVersion,
+            String apiBaseUrlOverride,
             String navJson,
             String homeJson,
             String enabledFeaturesJson,
@@ -263,7 +263,7 @@ public class AppRequestService {
     ) {
         AdminUserProject link = aupRepo.findById(linkId)
                 .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
-        
+
         enforceLicenseForBuild(link);
 
         AdminUser owner = link.getAdmin();
@@ -273,21 +273,13 @@ public class AppRequestService {
             throw new IllegalStateException("androidPackageName is missing. Run initial build first.");
         }
 
-        // ✅ bump only if requested
         if (bumpVersion) {
             link.bumpAndroidVersion();
         }
 
-        // ✅ reset only the AAB (bundle)
         link.setBundleUrl(null);
-
-        // ✅ keep APK/IPA untouched
-        // link.setApkUrl(link.getApkUrl());
-        // link.setIpaUrl(link.getIpaUrl());
-
         link = aupRepo.save(link);
 
-        // ✅ upsert runtime config if any
         upsertRuntimeConfig(link, navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride);
 
         Long chosenThemeId = link.getThemeId();
@@ -303,13 +295,13 @@ public class AppRequestService {
                 owner.getAdminId(),
                 project.getId(),
                 String.valueOf(link.getId()),
-                link.getSlug(),                 // ✅ same slug
+                link.getSlug(),
                 link.getAppName(),
                 appType,
                 chosenThemeId,
                 link.getLogoUrl(),
                 themeJson,
-                null,                           // logoBytesOpt (optional)
+                null,
                 currencyIdForBuild,
                 apiBaseUrlOverride,
                 navJson,
@@ -318,7 +310,7 @@ public class AppRequestService {
                 brandingJson,
                 link.getAndroidVersionCode(),
                 link.getAndroidVersionName(),
-                link.getAndroidPackageName()    // ✅ same package
+                link.getAndroidPackageName()
         );
 
         if (!res.ok()) {
@@ -326,6 +318,9 @@ public class AppRequestService {
             log.error("{}", msg);
             throw new IllegalStateException(msg);
         }
+
+        // ✅ last-step: record job
+        buildJobService.recordAndroidDispatch(link, res.buildId());
 
         log.info("CI Android bundle rebuild dispatched OK (buildId={}, linkId={}, package={})",
                 res.buildId(), link.getId(), link.getAndroidPackageName());
@@ -347,13 +342,13 @@ public class AppRequestService {
     ) {
         AdminUserProject link = aupRepo.findById(linkId)
                 .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
+
         enforceLicenseForBuild(link);
 
         AdminUser owner = link.getAdmin();
         Project project = link.getProject();
 
         if (link.getIosBundleId() == null || link.getIosBundleId().isBlank()) {
-            // if you rely on ID, ensure it exists
             link.ensureIosBundleId();
         }
 
@@ -361,9 +356,7 @@ public class AppRequestService {
             link.bumpIosVersion();
         }
 
-        // reset only IPA
         link.setIpaUrl(null);
-
         link = aupRepo.save(link);
 
         upsertRuntimeConfig(link, navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride);
@@ -387,7 +380,7 @@ public class AppRequestService {
                 chosenThemeId,
                 link.getLogoUrl(),
                 themeJson,
-                null, // logoBytesOpt optional
+                null,
                 currencyIdForBuild,
                 apiBaseUrlOverride,
                 navJson,
@@ -397,8 +390,8 @@ public class AppRequestService {
                 link.getIosBuildNumber(),
                 link.getIosVersionName(),
                 link.getIosBundleId(),
-                 ownerEmail,
-              ownerName
+                ownerEmail,
+                ownerName
         );
 
         if (!res.ok()) {
@@ -406,6 +399,9 @@ public class AppRequestService {
             log.error("{}", msg);
             throw new IllegalStateException(msg);
         }
+
+        // ✅ last-step: record job
+        buildJobService.recordIosDispatch(link, res.buildId());
 
         log.info("CI iOS rebuild dispatched OK (buildId={}, linkId={}, bundleId={})",
                 res.buildId(), link.getId(), link.getIosBundleId());
@@ -426,7 +422,6 @@ public class AppRequestService {
             String ownerEmail,
             String ownerName
     ) {
-        // Android bundle rebuild
         AdminUserProject link = rebuildAndroidBundleSamePackage(
                 linkId,
                 bumpAndroid,
@@ -437,7 +432,6 @@ public class AppRequestService {
                 brandingJson
         );
 
-        // iOS IPA rebuild (same link)
         rebuildIosIpaSameBundle(
                 linkId,
                 bumpIos,
@@ -445,26 +439,18 @@ public class AppRequestService {
                 navJson,
                 homeJson,
                 enabledFeaturesJson,
-                brandingJson,ownerEmail,
+                brandingJson,
+                ownerEmail,
                 ownerName
         );
 
-        // return latest (in case iOS bumped)
         return aupRepo.findById(linkId).orElseThrow();
     }
 
-    
     private void enforceLicenseForBuild(AdminUserProject link) {
-     
-            // ✅ 1) if app has no subscription yet => create FREE
-            licensingService.ensureSubscriptionExists(link);
-
-            // ✅ 2) block build if expired / missing / dedicated infra not ready
-            licensingService.requireBuildAllowed(link.getId());
-
-     
+        licensingService.ensureSubscriptionExists(link);
+        licensingService.requireBuildAllowed(link.getId());
     }
-
 
     private void triggerIosForExistingLink(
             AdminUserProject link,
@@ -484,23 +470,16 @@ public class AppRequestService {
         Project project = projectRepo.findById(req.getProjectId())
                 .orElseThrow(() -> new IllegalArgumentException("Project not found"));
 
-        // bump iOS version + ensure bundle id (needs ID)
         link.bumpIosVersion();
         link.ensureIosBundleId();
-
-        // reset only IPA each time iOS build requested
         link.setIpaUrl(null);
 
-        // save
         link = aupRepo.save(link);
-        
+
         enforceLicenseForBuild(link);
 
-
-        // runtime config upsert (same)
         upsertRuntimeConfig(link, navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride);
 
-        String ownerProjectLinkId = String.valueOf(link.getId());
         Long currencyIdForBuild = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
 
         Long chosenThemeId = link.getThemeId();
@@ -515,7 +494,7 @@ public class AppRequestService {
         CiDispatchResult res = ciBuildService.dispatchOwnerIosBuild(
                 owner.getAdminId(),
                 project.getId(),
-                ownerProjectLinkId,
+                String.valueOf(link.getId()),
                 link.getSlug(),
                 link.getAppName(),
                 appType,
@@ -532,8 +511,8 @@ public class AppRequestService {
                 link.getIosBuildNumber(),
                 link.getIosVersionName(),
                 link.getIosBundleId(),
-                 ownerEmail,
-                 ownerName
+                ownerEmail,
+                ownerName
         );
 
         if (!res.ok()) {
@@ -541,8 +520,10 @@ public class AppRequestService {
             log.error("{}", msg);
             throw new IllegalStateException(msg);
         }
-    }
 
+        // ✅ last-step: record job
+        buildJobService.recordIosDispatch(link, res.buildId());
+    }
 
     private AdminUserProject provisionAndTriggerIos(
             AppRequest req,
@@ -551,11 +532,10 @@ public class AppRequestService {
             String homeJson,
             String enabledFeaturesJson,
             String brandingJson,
-            String apiBaseUrlOverride, 
+            String apiBaseUrlOverride,
             String ownerEmail,
             String ownerName
     ) {
-
         AdminUser owner = adminRepo.findById(req.getOwnerId())
                 .orElseThrow(() -> new IllegalArgumentException("Owner(admin) not found"));
 
@@ -581,16 +561,13 @@ public class AppRequestService {
                     return n;
                 });
 
-        // ---- base fields ----
         link.setStatus("TEST");
-
         link.setAppName(req.getAppName());
         link.setLogoUrl(req.getLogoUrl());
         link.setValidFrom(now);
         link.setEndTo(end);
         link.setThemeId(chosenThemeId);
 
-        // ---- currency ----
         Long currencyId = req.getCurrencyId();
         if (currencyId != null) {
             Currency c = currencyRepo.findById(currencyId)
@@ -598,32 +575,21 @@ public class AppRequestService {
             link.setCurrency(c);
         }
 
-        // ---- license ----
         if (link.getLicenseId() == null || link.getLicenseId().isBlank()) {
             link.setLicenseId("LIC-" + owner.getAdminId() + "-" + project.getId() + "-" + now + "-" + uniqueSlug);
         }
 
-        // ✅ iOS build should NOT bump Android version & should NOT touch android package.
-        // Only reset IPA url (keep existing APK/AAB if already built).
         link.setIpaUrl(null);
 
-        // ✅ Save first (important: link now definitely has ID)
         link = aupRepo.save(link);
-
-        // ✅ bump iOS version + ensure bundle id (may require ID)
         link.bumpIosVersion();
         link.ensureIosBundleId();
-
-        // Save again after bump/ensure
         link = aupRepo.save(link);
-        
+
         enforceLicenseForBuild(link);
 
-
-        // ---- runtime config ----
         upsertRuntimeConfig(link, navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride);
 
-        String ownerProjectLinkId = String.valueOf(link.getId());
         Long currencyIdForBuild = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
 
         String themeJson = (req.getThemeJson() != null && !req.getThemeJson().isBlank())
@@ -634,11 +600,10 @@ public class AppRequestService {
                 ? project.getProjectType().name()
                 : "ECOMMERCE";
 
-        // ✅ NEW iOS dispatch signature (with version + bundle id)
         CiDispatchResult res = ciBuildService.dispatchOwnerIosBuild(
                 owner.getAdminId(),
                 project.getId(),
-                ownerProjectLinkId,
+                String.valueOf(link.getId()),
                 uniqueSlug,
                 link.getAppName(),
                 appType,
@@ -665,13 +630,14 @@ public class AppRequestService {
             throw new IllegalStateException(msg);
         }
 
+        // ✅ last-step: record job
+        buildJobService.recordIosDispatch(link, res.buildId());
+
         log.info("CI iOS dispatch OK (buildId={}, ownerId={}, projectId={}, linkId={}, slug={}, bundleId={})",
                 res.buildId(), owner.getAdminId(), project.getId(), link.getId(), uniqueSlug, link.getIosBundleId());
 
         return link;
     }
-
-    // ---------------- internal ----------------
 
     private AdminUserProject provisionAndTrigger(AppRequest req,
                                                  byte[] logoBytesOpt,
@@ -724,26 +690,19 @@ public class AppRequestService {
             link.setLicenseId("LIC-" + owner.getAdminId() + "-" + project.getId() + "-" + now + "-" + uniqueSlug);
         }
 
-        // bump version each time a build is requested
         link.bumpAndroidVersion();
-
-        // reset build artifacts
         link.setApkUrl(null);
         link.setIpaUrl(null);
         link.setBundleUrl(null);
 
-        // ✅ save -> ensure package (needs ID) -> save again
         link = aupRepo.save(link);
         link.ensureAndroidPackageName();
         link = aupRepo.save(link);
-        
+
         enforceLicenseForBuild(link);
 
-
-        // Save runtime JSON configs if provided
         upsertRuntimeConfig(link, navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride);
 
-        String ownerProjectLinkId = String.valueOf(link.getId());
         Long currencyIdForBuild = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
 
         String themeJson = (req.getThemeJson() != null && !req.getThemeJson().isBlank())
@@ -754,12 +713,10 @@ public class AppRequestService {
                 ? project.getProjectType().name()
                 : "ECOMMERCE";
 
-        String androidPackageName = link.getAndroidPackageName();
-
         CiDispatchResult res = ciBuildService.dispatchOwnerAndroidBuild(
                 owner.getAdminId(),
                 project.getId(),
-                ownerProjectLinkId,
+                String.valueOf(link.getId()),
                 uniqueSlug,
                 req.getAppName(),
                 appType,
@@ -775,7 +732,7 @@ public class AppRequestService {
                 brandingJson,
                 link.getAndroidVersionCode(),
                 link.getAndroidVersionName(),
-                androidPackageName
+                link.getAndroidPackageName()
         );
 
         if (!res.ok()) {
@@ -783,6 +740,9 @@ public class AppRequestService {
             log.error("{}", msg);
             throw new IllegalStateException(msg);
         }
+
+        // ✅ last-step: record job
+        buildJobService.recordAndroidDispatch(link, res.buildId());
 
         log.info("CI dispatch OK (buildId={}, ownerId={}, projectId={}, linkId={}, slug={})",
                 res.buildId(), owner.getAdminId(), project.getId(), link.getId(), uniqueSlug);
@@ -898,17 +858,6 @@ public class AppRequestService {
 
     // ---------------- RESTORED METHODS (needed by CiCallbackController) ----------------
 
-    /** Save APK URL by (ownerId, projectId, slug). */
-    @Transactional
-    public AdminUserProject setApkUrl(Long adminId, Long projectId, String slug, String apkUrl) {
-        AdminUserProject link = aupRepo
-                .findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slugify(slug))
-                .orElseThrow(() -> new IllegalArgumentException("OwnerProject app not found"));
-        link.setApkUrl(apkUrl);
-        return aupRepo.save(link);
-    }
-
-    /** Save APK URL by AdminUserProject primary key (CI callback). */
     @Transactional
     public void setApkUrlByLinkId(Long linkId, String apkUrl) {
         AdminUserProject link = aupRepo.findById(linkId)
@@ -917,7 +866,6 @@ public class AppRequestService {
         aupRepo.save(link);
     }
 
-    /** Save AAB URL by AdminUserProject primary key. */
     @Transactional
     public void setBundleUrlByLinkId(Long linkId, String bundleUrl) {
         AdminUserProject link = aupRepo.findById(linkId)
@@ -926,7 +874,6 @@ public class AppRequestService {
         aupRepo.save(link);
     }
 
-    /** Save IPA URL by AdminUserProject primary key. */
     @Transactional
     public void setIpaUrlByLinkId(Long linkId, String ipaUrl) {
         AdminUserProject link = aupRepo.findById(linkId)
@@ -943,7 +890,9 @@ public class AppRequestService {
     }
 
     private String ensureUniqueSlug(Long ownerId, Long projectId, String baseSlug) {
+        baseSlug = slugify(baseSlug);
         if (baseSlug == null || baseSlug.isBlank()) baseSlug = "app";
+
         String candidate = baseSlug;
         int i = 2;
         while (aupRepo.existsByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, candidate)) {
@@ -956,8 +905,9 @@ public class AppRequestService {
 
     private static String slugify(String s) {
         if (s == null) return "app";
-        return s.trim().toLowerCase()
+        String out = s.trim().toLowerCase()
                 .replaceAll("[^a-z0-9]+", "-")
                 .replaceAll("(^-|-$)", "");
+        return (out == null || out.isBlank()) ? "app" : out;
     }
 }

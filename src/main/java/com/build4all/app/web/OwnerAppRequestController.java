@@ -4,8 +4,11 @@ import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.dto.OwnerProjectView;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.admin.repository.AdminUsersRepository;
+import com.build4all.app.domain.AppBuildJob;
 import com.build4all.app.domain.AppRequest;
+import com.build4all.app.domain.BuildPlatform;
 import com.build4all.app.dto.CreateAppRequestDto;
+import com.build4all.app.repository.AppBuildJobRepository;
 import com.build4all.app.repository.AppRequestRepository;
 import com.build4all.app.service.AppRequestService;
 import com.build4all.app.service.ThemeJsonBuilder;
@@ -18,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,23 +35,32 @@ public class OwnerAppRequestController {
     private final AdminUserProjectRepository aupRepo;
     private final JwtUtil jwtUtil;
     private final AdminUsersRepository adminRepo;
+    private final AppBuildJobRepository buildJobRepo;
 
     @Value("${ci.callbackUrl:}")
     private String callbackBase;
 
-    public OwnerAppRequestController(AppRequestService service,
-                                     AppRequestRepository appRequestRepo,
-                                     AdminUserProjectRepository aupRepo,
-                                     JwtUtil jwtUtil,
-                                     AdminUsersRepository adminRepo) {
+    public OwnerAppRequestController(
+            AppRequestService service,
+            AppRequestRepository appRequestRepo,
+            AdminUserProjectRepository aupRepo,
+            JwtUtil jwtUtil,
+            AdminUsersRepository adminRepo,
+            AppBuildJobRepository buildJobRepo
+    ) {
         this.service = service;
         this.appRequestRepo = appRequestRepo;
         this.aupRepo = aupRepo;
         this.jwtUtil = jwtUtil;
         this.adminRepo = adminRepo;
+        this.buildJobRepo = buildJobRepo;
     }
 
+  
+
+    // ------------------------------------------------------------------
     // Legacy JSON create (kept)
+    // ------------------------------------------------------------------
     @PostMapping(
             value = "/app-requests",
             consumes = MediaType.APPLICATION_JSON_VALUE,
@@ -90,7 +103,7 @@ public class OwnerAppRequestController {
         }
     }
 
-    // ✅ AUTO flow (Android)  -> لازم Auth
+    // ✅ AUTO flow (Android)
     @PostMapping(
             value = "/app-requests/auto",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
@@ -261,7 +274,6 @@ public class OwnerAppRequestController {
                     ownerName
             );
 
-            // refresh (احتياط)
             link = aupRepo.findById(link.getId()).orElse(link);
 
             Map<String, Object> body = new HashMap<>();
@@ -371,7 +383,6 @@ public class OwnerAppRequestController {
                     ownerName
             );
 
-            // ✅ أهم سطر: refresh لحتى يجي iOS fields مظبوطين
             link = aupRepo.findById(link.getId()).orElse(link);
 
             Map<String, Object> body = new HashMap<>();
@@ -429,7 +440,7 @@ public class OwnerAppRequestController {
         }
     }
 
-    // ✅ rebuild only Android bundle -> لازم Auth + check owner of link
+    // ✅ rebuild only Android bundle
     @PostMapping(value = "/apps/{linkId}/rebuild-bundle", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> rebuildBundleSamePackage(
             @RequestHeader("Authorization") String authHeader,
@@ -477,8 +488,115 @@ public class OwnerAppRequestController {
             ));
         }
     }
+    
+ // ✅ UNIVERSAL rebuild endpoint (Android + iOS)
+    @PostMapping(value = "/apps/{linkId}/rebuild", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> rebuildUniversal(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable Long linkId,
+            @RequestParam(defaultValue = "true") boolean bumpAndroid,
+            @RequestParam(defaultValue = "true") boolean bumpIos
+    ) {
+        try {
+            String token = extractToken(authHeader);
+            String ownerEmail = jwtUtil.extractUsername(token);
+            String ownerName = extractOwnerNameFromToken(token);
 
-    // ✅ rebuild both -> Auth + check owner of link
+            requireOwnerLinkAccess(authHeader, linkId);
+
+            AdminUserProject link = service.rebuildAndroidAndIos(
+                    linkId,
+                    bumpAndroid,
+                    bumpIos,
+                    null, null, null, null, null,
+                    ownerEmail,
+                    ownerName
+            );
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("message", "Rebuild started");
+            body.put("ownerProjectLinkId", link.getId());
+            body.put("slug", nz(link.getSlug()));
+            body.put("appName", nz(link.getAppName()));
+
+            body.put("androidPackageName", nz(link.getAndroidPackageName()));
+            body.put("androidVersionCode", link.getAndroidVersionCode());
+            body.put("androidVersionName", nz(link.getAndroidVersionName()));
+
+            body.put("iosBundleId", nz(link.getIosBundleId()));
+            body.put("iosBuildNumber", link.getIosBuildNumber());
+            body.put("iosVersionName", nz(link.getIosVersionName()));
+
+            return ResponseEntity.ok(body);
+
+        } catch (ResponseStatusException ex) {
+            return ResponseEntity.status(ex.getStatusCode()).body(Map.of("error", ex.getReason()));
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "error", "Internal error",
+                    "details", ex.getClass().getSimpleName()
+            ));
+        }
+    }
+
+
+    // ✅ rebuild only iOS IPA
+    @PostMapping(value = "/apps/{linkId}/rebuild-ios", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> rebuildIosIpaSameBundle(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable Long linkId,
+            @RequestParam(defaultValue = "true") boolean bumpVersion,
+            @RequestParam(required = false) String apiBaseUrlOverride,
+            @RequestParam(required = false) String navJson,
+            @RequestParam(required = false) String homeJson,
+            @RequestParam(required = false) String enabledFeaturesJson,
+            @RequestParam(required = false) String brandingJson
+    ) {
+        try {
+            String token = extractToken(authHeader);
+            String ownerEmail = jwtUtil.extractUsername(token);
+            String ownerName = extractOwnerNameFromToken(token);
+
+            requireOwnerLinkAccess(authHeader, linkId);
+
+            AdminUserProject link = service.rebuildIosIpaSameBundle(
+                    linkId,
+                    bumpVersion,
+                    apiBaseUrlOverride,
+                    navJson,
+                    homeJson,
+                    enabledFeaturesJson,
+                    brandingJson,
+                    ownerEmail,
+                    ownerName
+            );
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("message", "iOS IPA rebuild started");
+            body.put("ownerProjectLinkId", link.getId());
+            body.put("slug", nz(link.getSlug()));
+            body.put("appName", nz(link.getAppName()));
+
+            body.put("iosBundleId", nz(link.getIosBundleId()));
+            body.put("iosBuildNumber", link.getIosBuildNumber());
+            body.put("iosVersionName", nz(link.getIosVersionName()));
+            body.put("ipaUrl", nz(link.getIpaUrl()));
+
+            return ResponseEntity.ok(body);
+
+        } catch (ResponseStatusException ex) {
+            return ResponseEntity.status(ex.getStatusCode()).body(Map.of("error", ex.getReason()));
+        } catch (IllegalArgumentException | IllegalStateException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "error", "Internal error",
+                    "details", ex.getClass().getSimpleName()
+            ));
+        }
+    }
+
+    // ✅ rebuild both
     @PostMapping(value = "/apps/{linkId}/rebuild-both", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> rebuildAndroidAndIos(
             @RequestHeader("Authorization") String authHeader,
@@ -559,6 +677,42 @@ public class OwnerAppRequestController {
         return aupRepo.findOwnerProjectsSlim(ownerId);
     }
 
+    // ---------------- helpers ----------------
+
+    private Map<String, Object> toJobMap(AppBuildJob j) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("id", j.getId());
+        m.put("platform", j.getPlatform() == null ? "" : j.getPlatform().name());
+        m.put("status", j.getStatus() == null ? "" : j.getStatus().name());
+        m.put("ciBuildId", nz(j.getCiBuildId()));
+
+        // Android meta
+        m.put("androidVersionCode", j.getAndroidVersionCode());
+        m.put("androidVersionName", nz(j.getAndroidVersionName()));
+        m.put("androidPackageName", nz(j.getAndroidPackageName()));
+
+        // iOS meta
+        m.put("iosBuildNumber", j.getIosBuildNumber());
+        m.put("iosVersionName", nz(j.getIosVersionName()));
+        m.put("iosBundleId", nz(j.getIosBundleId()));
+
+        // Artifacts
+        m.put("apkUrl", nz(j.getApkUrl()));
+        m.put("bundleUrl", nz(j.getBundleUrl()));
+        m.put("ipaUrl", nz(j.getIpaUrl()));
+
+        m.put("error", nz(j.getError()));
+
+        // Timestamps
+        m.put("createdAt", j.getCreatedAt());
+        m.put("startedAt", j.getStartedAt());
+        m.put("finishedAt", j.getFinishedAt());
+        m.put("updatedAt", j.getUpdatedAt());
+
+        
+        return m;
+    }
+
     private static String nz(String s) {
         return (s == null) ? "" : s;
     }
@@ -599,7 +753,6 @@ public class OwnerAppRequestController {
         return tokenAdminId;
     }
 
-  
     private void requireOwnerLinkAccess(String authHeader, Long linkId) {
         String token = extractToken(authHeader);
         Long tokenAdminId = jwtUtil.extractAdminId(token);

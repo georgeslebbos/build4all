@@ -80,26 +80,6 @@ public class AdminAppRequestController {
         service.reject(id);
     }*/
 
-    // ✅ now app-scoped (slug in path)
-    /**
-     * Update the APK URL for a specific app instance.
-     *
-     * Why include slug?
-     * - Because one admin + one project can have multiple apps (distinguished by slug),
-     *   so (adminId, projectId, slug) uniquely identifies one AdminUserProject row.
-     *
-     * Example:
-     * PUT /api/admin/owner-projects/{adminId}/{projectId}/apps/{slug}/apk-url
-     * Body: { "apkUrl": "https://..." }
-     *
-     * Returns the updated AdminUserProject entity.
-     */
-    @PutMapping("/owner-projects/{adminId}/{projectId}/apps/{slug}/apk-url")
-    public AdminUserProject setApk(@PathVariable Long adminId,
-                                   @PathVariable Long projectId,
-                                   @PathVariable String slug,
-                                   @RequestBody SetApkUrlDto body) {
-        // body.apkUrl() comes from the record accessor (SetApkUrlDto is a Java record).
-        return service.setApkUrl(adminId, projectId, slug, body.apkUrl());
-    }
+
+   
 }
