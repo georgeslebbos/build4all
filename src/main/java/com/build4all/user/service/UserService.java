@@ -23,6 +23,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import jakarta.mail.internet.InternetAddress;
+
 
 import java.io.IOException;
 import java.nio.file.*;
@@ -63,6 +65,17 @@ public class UserService {
 
     private final EmailService emailService;
     public UserService(EmailService emailService) { this.emailService = emailService; }
+    
+    
+    private void validateEmailOrThrow(String email) {
+        try {
+            InternetAddress addr = new InternetAddress(email, true); // strict
+            addr.validate();
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("Invalid email format");
+        }
+    }
+
 
     /* ============================ Helpers ============================ */
 
@@ -180,8 +193,6 @@ public class UserService {
      */
     public boolean sendVerificationCodeForRegistration(Map<String, String> userData, Long ownerProjectLinkId) {
 
-        // SQL (as part of linkById):
-        //   SELECT * FROM admin_user_project WHERE id = :ownerProjectLinkId LIMIT 1;
         linkById(ownerProjectLinkId);
 
         String email = userData.get("email");
@@ -194,69 +205,43 @@ public class UserService {
         if (!emailProvided && !phoneProvided) throw new IllegalArgumentException("Provide email or phone");
         if (emailProvided && phoneProvided)    throw new IllegalArgumentException("Provide only one: email OR phone");
 
-        // -------------------------
-        // Tenant-scoped uniqueness
-        // -------------------------
+        // ✅ normalize
+        if (emailProvided) email = email.trim();
+        if (phoneProvided) phone = phone.trim();
 
+        // ✅ format validation (BEFORE any send)
         if (emailProvided) {
-            // SQL:
-            //   SELECT EXISTS(
-            //     SELECT 1 FROM users
-            //     WHERE email = :email AND aup_id = :ownerProjectLinkId
-            //   );
+            validateEmailOrThrow(email);
+
             if (userRepository.existsByEmailAndOwnerProject_Id(email, ownerProjectLinkId)) {
                 throw new IllegalArgumentException("Email already in use in this app");
             }
         }
 
         if (phoneProvided) {
-            // SQL:
-            //   SELECT EXISTS(
-            //     SELECT 1 FROM users
-            //     WHERE phone_number = :phone AND aup_id = :ownerProjectLinkId
-            //   );
             if (userRepository.existsByPhoneNumberAndOwnerProject_Id(phone, ownerProjectLinkId)) {
                 throw new IllegalArgumentException("Phone already in use in this app");
             }
         }
 
         String statusStr = Optional.ofNullable(userData.get("status")).orElse("PENDING");
-
-        // SQL:
-        //   SELECT * FROM user_status WHERE name = 'PENDING' LIMIT 1;
         UserStatus status = getStatus(statusStr);
 
-        // -------------------------
-        // Pending user lookup
-        // -------------------------
-
         PendingUser pending = emailProvided
-                ? (
-                // SQL:
-                //   SELECT * FROM pending_users WHERE email = :email LIMIT 1;
-                pendingUserRepository.findByEmail(email)
-        )
-                : (
-                // SQL:
-                //   SELECT * FROM pending_users WHERE phone_number = :phone LIMIT 1;
-                pendingUserRepository.findByPhoneNumber(phone)
-        );
+                ? pendingUserRepository.findByEmail(email)
+                : pendingUserRepository.findByPhoneNumber(phone);
 
-        // DEV note: fixed code for phone (SMS path). Email path gets random 6 digits.
         String code = phoneProvided ? "123456" : String.format("%06d", new Random().nextInt(999999));
 
         if (pending != null) {
-            // If already verified we stop (no DB change needed besides maybe returning true)
             if (Boolean.TRUE.equals(pending.isVerified())) return true;
 
-            // This becomes an UPDATE on pending_users (since entity already has an ID)
             pending.setPasswordHash(passwordEncoder.encode(password));
             pending.setVerificationCode(code);
             pending.setCreatedAt(LocalDateTime.now());
             pending.setStatus(status);
 
         } else {
-            // This becomes an INSERT on pending_users (new entity)
             pending = new PendingUser();
             pending.setEmail(emailProvided ? email : null);
             pending.setPhoneNumber(phoneProvided ? phone : null);
@@ -268,12 +253,8 @@ public class UserService {
             pending.setIsVerified(false);
         }
 
-        // SQL (insert OR update depending on pending.id):
-        // - INSERT INTO pending_users (...) VALUES (...);
-        // - OR UPDATE pending_users SET ... WHERE id = :id;
         pendingUserRepository.save(pending);
 
-        // Email is not SQL; it’s external side-effect
         if (emailProvided) {
             String htmlMessage = """
                 <html><body style="font-family: Arial; text-align:center; padding:20px">

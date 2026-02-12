@@ -6,6 +6,15 @@ import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.authentication.dto.AdminLoginRequest;
 import com.build4all.admin.dto.AdminRegisterRequest;
+import javax.naming.Context;
+import javax.naming.directory.Attribute;
+import javax.naming.directory.Attributes;
+import javax.naming.directory.DirContext;
+import javax.naming.directory.InitialDirContext;
+import java.util.Hashtable;
+import java.util.Locale;
+import java.util.regex.Pattern;
+
 
 import com.build4all.admin.service.AdminUserService;
 import com.build4all.authentication.service.GoogleAuthService;
@@ -120,12 +129,35 @@ public class AuthController {
             if (ownerProjectLinkId == null) {
                 return ResponseEntity.badRequest().body(Map.of("error", "ownerProjectLinkId is required"));
             }
+
+            if (password == null || password.isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "password is required"));
+            }
+
+            boolean emailProvided = email != null && !email.isBlank();
+            boolean phoneProvided = phoneNumber != null && !phoneNumber.isBlank();
+
+            if (!emailProvided && !phoneProvided) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Provide email or phoneNumber"));
+            }
+            if (emailProvided && phoneProvided) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Provide only one: email OR phoneNumber"));
+            }
+
             Map<String, String> data = new HashMap<>();
-            if (email != null && !email.isBlank()) data.put("email", email.trim());
-            if (phoneNumber != null && !phoneNumber.isBlank()) data.put("phoneNumber", phoneNumber.trim());
-            data.put("password", password);
+            data.put("password", password.trim());
+
+            if (emailProvided) {
+                validateEmailBeforeSendingOrThrow(email);   // ✅ format + typo + DNS
+                data.put("email", email.trim());
+            }
+
+            if (phoneProvided) {
+                data.put("phoneNumber", phoneNumber.trim());
+            }
 
             userService.sendVerificationCodeForRegistration(data, ownerProjectLinkId);
+
             return ResponseEntity.ok(Map.of("message", "Verification code sent"));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -1358,5 +1390,72 @@ public class AuthController {
         }
         return null;
     }
+    
+ // ===================== Email validation (format + typo + DNS) =====================
+
+    private static final Pattern EMAIL_PATTERN = Pattern.compile(
+            "^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$",
+            Pattern.CASE_INSENSITIVE
+    );
+
+    private static final Map<String, String> EMAIL_DOMAIN_TYPOS = Map.ofEntries(
+            Map.entry("gamil.com", "gmail.com"),
+            Map.entry("gmil.com", "gmail.com"),
+            Map.entry("gmail.con", "gmail.com"),
+            Map.entry("gmail.co", "gmail.com"),
+            Map.entry("hotnail.com", "hotmail.com"),
+            Map.entry("hotmai.com", "hotmail.com"),
+            Map.entry("outlok.com", "outlook.com"),
+            Map.entry("outllok.com", "outlook.com"),
+            Map.entry("yaho.com", "yahoo.com"),
+            Map.entry("yahho.com", "yahoo.com")
+    );
+
+    private void validateEmailBeforeSendingOrThrow(String email) {
+        if (email == null || email.isBlank()) return;
+
+        String e = email.trim().toLowerCase(Locale.ROOT);
+
+        // 1) strict format
+        if (!EMAIL_PATTERN.matcher(e).matches()) {
+            throw new IllegalArgumentException("Invalid email format");
+        }
+
+        String domain = e.substring(e.lastIndexOf('@') + 1);
+
+        // 2) typo-domain block
+        if (EMAIL_DOMAIN_TYPOS.containsKey(domain)) {
+            throw new IllegalArgumentException(
+                    "Invalid email domain. Did you mean " + EMAIL_DOMAIN_TYPOS.get(domain) + " ?"
+            );
+        }
+
+        // 3) DNS check (must have MX OR A/AAAA)
+        if (!hasMxOrARecord(domain)) {
+            throw new IllegalArgumentException("Email domain does not exist: " + domain);
+        }
+    }
+
+    private boolean hasMxOrARecord(String domain) {
+        try {
+            Hashtable<String, String> env = new Hashtable<>();
+            env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.dns.DnsContextFactory");
+
+            DirContext ctx = new InitialDirContext(env);
+            Attributes attrs = ctx.getAttributes(domain, new String[]{"MX", "A", "AAAA"});
+
+            Attribute mx = attrs.get("MX");
+            Attribute a = attrs.get("A");
+            Attribute aaaa = attrs.get("AAAA");
+
+            return (mx != null && mx.size() > 0)
+                    || (a != null && a.size() > 0)
+                    || (aaaa != null && aaaa.size() > 0);
+
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
 
 }

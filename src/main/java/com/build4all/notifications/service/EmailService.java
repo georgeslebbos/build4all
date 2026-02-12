@@ -6,7 +6,10 @@ import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
 import jakarta.mail.MessagingException;
+import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
+
+import java.io.UnsupportedEncodingException;
 
 @Service
 public class EmailService {
@@ -19,29 +22,32 @@ public class EmailService {
 
     public void sendEmail(String toEmail, String subject, String body) {
         SimpleMailMessage message = new SimpleMailMessage();
-        message.setFrom("spherehobby@gmail.com"); // Must match spring.mail.username
+
+        // ✅ Plain text: must be String
+        message.setFrom("Hobby Sphere <spherehobby@gmail.com>");
         message.setTo(toEmail);
         message.setSubject(subject);
         message.setText(body);
+
         mailSender.send(message);
     }
-    
+
     public void sendHtmlEmail(String to, String subject, String htmlBody) {
         try {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
 
-            helper.setFrom("spherehobby@gmail.com");
+            // ✅ HTML: proper personal name
+            helper.setFrom(new InternetAddress("spherehobby@gmail.com", "Build4all"));
             helper.setTo(to);
             helper.setSubject(subject);
             helper.setText(htmlBody, true);
 
             mailSender.send(message);
         } catch (MessagingException e) {
-            throw new RuntimeException("Failed to send HTML email: " + e.getMessage());
+            throw new RuntimeException("Failed to send HTML email: " + e.getMessage(), e);
+        } catch (UnsupportedEncodingException e) {
+            throw new RuntimeException("Failed to encode sender name: " + e.getMessage(), e);
         }
     }
-
-
-    
 }
