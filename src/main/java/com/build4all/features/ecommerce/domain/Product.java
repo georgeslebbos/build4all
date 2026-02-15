@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 public class Product extends Item {
 
     // Business code (NOT the DB @Id)
-    @Column(name = "sku")
+    @Column(name = "sku",unique = true)
     private String sku;
 
     @Enumerated(EnumType.STRING)

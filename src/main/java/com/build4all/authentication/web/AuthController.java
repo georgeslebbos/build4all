@@ -168,7 +168,11 @@ public class AuthController {
         }
     }
 
-    @PostMapping("/verify-email-code")
+    @PostMapping(
+    	    value = "/verify-email-code.",
+    	    consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE,
+    	    produces = MediaType.APPLICATION_JSON_VALUE
+    	)
     public ResponseEntity<?> verifyEmailCode(@RequestBody Map<String, String> request) {
         try {
             String email = request.get("email");
@@ -183,6 +187,31 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
         }
     }
+
+    @PostMapping(
+    	    value = "/send-verification",
+    	    consumes = MediaType.APPLICATION_JSON_VALUE,
+    	    produces = MediaType.APPLICATION_JSON_VALUE
+    	)
+    	public ResponseEntity<?> sendVerificationJson(@RequestBody Map<String, Object> body) {
+    	    try {
+    	        String email = body.get("email") != null ? body.get("email").toString() : null;
+    	        String phoneNumber = body.get("phoneNumber") != null ? body.get("phoneNumber").toString() : null;
+    	        String password = body.get("password") != null ? body.get("password").toString() : null;
+
+    	        Long ownerProjectLinkId = body.get("ownerProjectLinkId") != null
+    	                ? Long.valueOf(body.get("ownerProjectLinkId").toString())
+    	                : null;
+
+    	        // reuse existing logic
+    	        return sendVerification(email, phoneNumber, password, ownerProjectLinkId);
+
+    	    } catch (Exception e) {
+    	        e.printStackTrace();
+    	        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+    	                .body(Map.of("error", "Server error: " + e.getMessage()));
+    	    }
+    	}
 
     @PostMapping("/user/verify-phone-code")
     public ResponseEntity<?> verifyUserPhoneCode(@RequestBody Map<String, String> request) {
@@ -1431,12 +1460,49 @@ public class AuthController {
         }
 
         // 3) DNS check (must have MX OR A/AAAA)
-        if (!hasMxOrARecord(domain)) {
+     
+        Boolean dnsOk = hasMxOrARecordSafe(domain);
+        if (dnsOk != null && !dnsOk) {
             throw new IllegalArgumentException("Email domain does not exist: " + domain);
+        }
+
+
+    }
+    
+    
+    @PostMapping("/user/resend-code")
+    public ResponseEntity<?> resendUserCode(@RequestBody Map<String, String> req) {
+        try {
+            String email = req.get("email");
+            String phone = req.get("phoneNumber");
+            Long ownerProjectLinkId = toLongOrNull(req.get("ownerProjectLinkId"));
+
+            if (ownerProjectLinkId == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "ownerProjectLinkId is required"));
+            }
+
+            boolean emailProvided = email != null && !email.isBlank();
+            boolean phoneProvided = phone != null && !phone.isBlank();
+
+            if (!emailProvided && !phoneProvided) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Provide email or phoneNumber"));
+            }
+            if (emailProvided && phoneProvided) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Provide only one: email OR phoneNumber"));
+            }
+
+            if (emailProvided) validateEmailBeforeSendingOrThrow(email);
+
+            userService.resendVerificationCodeForRegistration(email, phone, ownerProjectLinkId);
+
+            return ResponseEntity.ok(Map.of("message", "Verification code resent"));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
         }
     }
 
-    private boolean hasMxOrARecord(String domain) {
+
+    private Boolean hasMxOrARecordSafe(String domain) {
         try {
             Hashtable<String, String> env = new Hashtable<>();
             env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.dns.DnsContextFactory");
@@ -1453,9 +1519,10 @@ public class AuthController {
                     || (aaaa != null && aaaa.size() > 0);
 
         } catch (Exception ex) {
-            return false;
+            return null; // ✅ don't block if DNS lookup isn't supported
         }
     }
+
 
 
 }

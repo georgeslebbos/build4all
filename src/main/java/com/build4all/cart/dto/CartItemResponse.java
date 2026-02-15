@@ -46,6 +46,14 @@ public class CartItemResponse {
     /** Computed: unitPrice * quantity. */
     private BigDecimal lineTotal;
 
+ // CartItemResponse.java
+    private Integer availableStock;       // null => stock not tracked (service/digital)
+    private boolean outOfStock;           // stock == 0
+    private boolean quantityExceedsStock; // qty > stock
+    private Integer maxAllowedQuantity;   // equals stock when tracked
+    private boolean disabled;             // true if cannot be checked out
+    private String blockingReason;        // "Out of stock" / "Only X left" / "Removed"
+
     // getters & setters
 
     public Long getCartItemId() { return cartItemId; }
@@ -68,4 +76,42 @@ public class CartItemResponse {
 
     public BigDecimal getLineTotal() { return lineTotal; }
     public void setLineTotal(BigDecimal lineTotal) { this.lineTotal = lineTotal; }
+	public Integer getAvailableStock() {
+		return availableStock;
+	}
+	public void setAvailableStock(Integer availableStock) {
+		this.availableStock = availableStock;
+	}
+	public boolean isOutOfStock() {
+		return outOfStock;
+	}
+	public void setOutOfStock(boolean outOfStock) {
+		this.outOfStock = outOfStock;
+	}
+	public boolean isQuantityExceedsStock() {
+		return quantityExceedsStock;
+	}
+	public void setQuantityExceedsStock(boolean quantityExceedsStock) {
+		this.quantityExceedsStock = quantityExceedsStock;
+	}
+	public Integer getMaxAllowedQuantity() {
+		return maxAllowedQuantity;
+	}
+	public void setMaxAllowedQuantity(Integer maxAllowedQuantity) {
+		this.maxAllowedQuantity = maxAllowedQuantity;
+	}
+	public boolean isDisabled() {
+		return disabled;
+	}
+	public void setDisabled(boolean disabled) {
+		this.disabled = disabled;
+	}
+	public String getBlockingReason() {
+		return blockingReason;
+	}
+	public void setBlockingReason(String blockingReason) {
+		this.blockingReason = blockingReason;
+	}
+    
+    
 }

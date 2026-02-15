@@ -234,14 +234,17 @@ public class UserService {
         String code = phoneProvided ? "123456" : String.format("%06d", new Random().nextInt(999999));
 
         if (pending != null) {
-            if (Boolean.TRUE.equals(pending.isVerified())) return true;
+            if (Boolean.TRUE.equals(pending.isVerified())) {
+                
+                throw new IllegalStateException("ALREADY_VERIFIED_PENDING:" + pending.getId());
+            }
 
             pending.setPasswordHash(passwordEncoder.encode(password));
             pending.setVerificationCode(code);
             pending.setCreatedAt(LocalDateTime.now());
             pending.setStatus(status);
-
-        } else {
+        }
+ else {
             pending = new PendingUser();
             pending.setEmail(emailProvided ? email : null);
             pending.setPhoneNumber(phoneProvided ? phone : null);
@@ -324,6 +327,70 @@ public class UserService {
 
         user.setUpdatedAt(LocalDateTime.now());
         return userRepository.save(user);
+    }
+
+    
+    /**
+     * Resend verification code for registration (tenant-aware signature used by AuthController).
+     * Accepts either email OR phone (not both), and requires ownerProjectLinkId.
+     */
+    public boolean resendVerificationCodeForRegistration(String email, String phoneNumber, Long ownerProjectLinkId) {
+
+        // ✅ ensure tenant exists
+        linkById(ownerProjectLinkId);
+
+        boolean emailProvided = email != null && !email.isBlank();
+        boolean phoneProvided = phoneNumber != null && !phoneNumber.isBlank();
+
+        if (!emailProvided && !phoneProvided) {
+            throw new IllegalArgumentException("Provide email or phoneNumber");
+        }
+        if (emailProvided && phoneProvided) {
+            throw new IllegalArgumentException("Provide only one: email OR phoneNumber");
+        }
+
+        if (emailProvided) email = email.trim();
+        if (phoneProvided) phoneNumber = phoneNumber.trim();
+
+        // ✅ validate email format (same as registration)
+        if (emailProvided) validateEmailOrThrow(email);
+
+        // ⚠️ NOTE: PendingUser in your current code is NOT tenant-scoped (no aup_id on PendingUser),
+        // so resend will find pending globally by email/phone.
+        PendingUser pending = emailProvided
+                ? pendingUserRepository.findByEmail(email)
+                : pendingUserRepository.findByPhoneNumber(phoneNumber);
+
+        if (pending == null) {
+            throw new RuntimeException("No pending user found. Please start registration again.");
+        }
+
+        // (Optional) if already verified, you can block resend:
+        if (Boolean.TRUE.equals(pending.isVerified())) {
+            throw new RuntimeException("This pending registration is already verified.");
+        }
+
+        String code = phoneProvided ? "123456" : String.format("%06d", new Random().nextInt(999999));
+
+        pending.setVerificationCode(code);
+        pending.setCreatedAt(LocalDateTime.now());
+        pendingUserRepository.save(pending);
+
+        if (emailProvided) {
+            String html = """
+                <html><body style="font-family: Arial; text-align:center; padding:20px">
+                  <h2>build4all Verification</h2>
+                  <p>Your new verification code is:</p>
+                  <h1>%s</h1>
+                  <p style="color:#777">Expires in 10 minutes.</p>
+                </body></html>
+            """.formatted(code);
+
+            emailService.sendHtmlEmail(email, "New Verification Code", html);
+        }
+
+        // for phone: you’re using static code; sending SMS is outside this codebase for now
+        return true;
     }
 
     /**

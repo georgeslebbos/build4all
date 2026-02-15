@@ -52,6 +52,11 @@ public class CartResponse {
      */
     private List<CartItemResponse> items;
 
+ // CartResponse.java
+    private boolean canCheckout;          // false if any line is disabled OR no valid items
+    private List<String> blockingErrors;  // summary messages for UI banner (optional)
+    private BigDecimal checkoutTotalPrice; // total of ONLY valid items (optional but 🔥)
+
     // getters & setters
 
     public Long getCartId() { return cartId; }
@@ -68,4 +73,25 @@ public class CartResponse {
 
     public List<CartItemResponse> getItems() { return items; }
     public void setItems(List<CartItemResponse> items) { this.items = items; }
+	public boolean isCanCheckout() {
+		return canCheckout;
+	}
+	public void setCanCheckout(boolean canCheckout) {
+		this.canCheckout = canCheckout;
+	}
+	public List<String> getBlockingErrors() {
+		return blockingErrors;
+	}
+	public void setBlockingErrors(List<String> blockingErrors) {
+		this.blockingErrors = blockingErrors;
+	}
+	public BigDecimal getCheckoutTotalPrice() {
+		return checkoutTotalPrice;
+	}
+	public void setCheckoutTotalPrice(BigDecimal checkoutTotalPrice) {
+		this.checkoutTotalPrice = checkoutTotalPrice;
+	}
+    
+    
 }
+

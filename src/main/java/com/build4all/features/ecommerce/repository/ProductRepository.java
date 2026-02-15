@@ -2,6 +2,7 @@ package com.build4all.features.ecommerce.repository;
 
 import com.build4all.features.ecommerce.domain.Product;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -13,24 +14,23 @@ import java.util.Optional;
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Long> {
 
+    // Tenant lists
     List<Product> findByOwnerProject_Id(Long ownerProjectId);
 
-    List<Product> findByItemType_Id(Long itemTypeId);
+    List<Product> findByOwnerProject_IdAndItemType_Id(Long ownerProjectId, Long itemTypeId);
 
-    List<Product> findByItemType_Category_Id(Long categoryId);
+    List<Product> findByOwnerProject_IdAndItemType_Category_Id(Long ownerProjectId, Long categoryId);
 
-    // ✅ FIX: use the actual mapped field from Item
-    List<Product> findByNameContainingIgnoreCase(String name);
+    // ✅ FIXED: Product has "name" as JPA attribute, not "itemName"
+    List<Product> findByOwnerProject_IdAndNameContainingIgnoreCase(Long ownerProjectId, String q);
 
     List<Product> findByOwnerProject_IdAndCreatedAtAfterOrderByCreatedAtDesc(
             Long ownerProjectId,
             LocalDateTime fromDate
     );
-    boolean existsBySkuIgnoreCase(String sku);
 
-    List<Product> findByOwnerProject_IdAndItemType_Id(Long ownerProjectId, Long itemTypeId);
-
-    List<Product> findByOwnerProject_IdAndItemType_Category_Id(Long ownerProjectId, Long categoryId);
+    // SKU uniqueness per tenant
+    boolean existsByOwnerProject_IdAndSkuIgnoreCase(Long ownerProjectId, String sku);
 
     List<Product> findByIdIn(List<Long> ids);
 
@@ -47,8 +47,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
            ORDER BY p.createdAt DESC
            """)
     List<Product> findActiveDiscountedByOwnerProject(@Param("ownerProjectId") Long ownerProjectId);
-    
- // ProductRepository.java
+
+    // Tenant-safe fetch
     @Query("""
        select p
        from Product p
@@ -58,9 +58,31 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
        where p.id = :itemId
          and p.ownerProject.id = :aupId
     """)
-    java.util.Optional<Product> findByIdAndTenant(@Param("itemId") Long itemId,
-                                                 @Param("aupId") Long aupId);
+    Optional<Product> findByIdAndTenant(@Param("itemId") Long itemId,
+                                       @Param("aupId") Long aupId);
 
+    @Modifying
+    @Query("""
+       delete from Product p
+       where p.id = :id
+         and p.ownerProject.id = :aupId
+    """)
+    int deleteByIdAndTenant(@Param("id") Long id,
+                            @Param("aupId") Long aupId);
+    
+    @Modifying
+    @Query("""
+      update Product p
+      set p.stock = p.stock - :qty
+      where p.id = :id and p.stock >= :qty
+    """)
+    int decrementStockIfEnough(@Param("id") Long id, @Param("qty") int qty);
 
-
+    @Modifying
+    @Query("""
+      update Product p
+      set p.stock = p.stock + :qty
+      where p.id = :id
+    """)
+    int incrementStock(@Param("id") Long id, @Param("qty") int qty);
 }

@@ -1,6 +1,9 @@
 package com.build4all.catalog.repository;
 
 import com.build4all.catalog.dto.AdminItemDTO;
+import org.springframework.data.jpa.repository.Lock;
+import jakarta.persistence.LockModeType;
+
 import com.build4all.catalog.dto.ItemDetailsDTO;
 import com.build4all.ai.dto.AiItemContextDTO;
 import com.build4all.catalog.domain.Item;
@@ -27,7 +30,8 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
            """)
     List<Item> findAllByOwner(@Param("adminId") Long adminId,
                               @Param("projectId") Long projectId);
-
+    
+  
     @Query("""
            SELECT i
            FROM Item i
@@ -38,6 +42,18 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
     List<Item> findByOwnerAndBusiness(@Param("adminId") Long adminId,
                                       @Param("projectId") Long projectId,
                                       @Param("businessId") Long businessId);
+    
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+        select i
+        from Item i
+        where i.id = :itemId
+          and i.ownerProject.id = :aupId
+    """)
+    Optional<Item> findByTenantForUpdate(@Param("aupId") Long aupId,
+                                        @Param("itemId") Long itemId);
+    
+    
 
     /* existing */
     @Query("SELECT i FROM Item i WHERE i.business.id = :businessId")
@@ -124,7 +140,28 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
 
 
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select i from Item i where i.id = :id")
+    Optional<Item> findByIdForStockCheck(@Param("id") Long id);
+    
 
+
+    @Modifying
+    @Query("""
+        update Item i
+        set i.stock = i.stock - :qty
+        where i.id = :id and i.stock >= :qty
+    """)
+    int decrementStockIfEnough(@Param("id") Long id, @Param("qty") int qty);
+
+    // ✅ for restore (cancel/refund)
+    @Modifying
+    @Query("""
+        update Item i
+        set i.stock = i.stock + :qty
+        where i.id = :id
+    """)
+    int incrementStock(@Param("id") Long id, @Param("qty") int qty);
 
 
 

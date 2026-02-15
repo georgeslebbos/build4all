@@ -1,3 +1,4 @@
+// src/main/java/com/build4all/features/ecommerce/web/ProductController.java
 package com.build4all.features.ecommerce.web;
 
 import com.build4all.features.ecommerce.domain.ProductType;
@@ -10,13 +11,12 @@ import com.build4all.security.JwtUtil;
 import com.build4all.tax.domain.TaxClass;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
 import io.swagger.v3.oas.annotations.Operation;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.http.MediaType;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -34,10 +34,8 @@ public class ProductController {
         this.jwtUtil = jwtUtil;
     }
 
-    /* ------------------------ helpers ------------------------ */
-
     private String strip(String auth) {
-        return auth == null ? "" : auth.replace("Bearer ", "").trim();
+        return auth == null ? "" : auth.replaceFirst("(?i)^Bearer\\s+", "").trim();
     }
 
     private boolean hasRole(String token, String... roles) {
@@ -49,14 +47,46 @@ public class ProductController {
         return false;
     }
 
+    private ResponseEntity<?> unauthorized() {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("error", "Invalid or missing token."));
+    }
+
+    private ResponseEntity<?> forbidden(String msg) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(Map.of("error", msg));
+    }
+
+    /**
+     * Tenant resolution ONLY from token.
+     * OWNER token -> extractOwnerProjectId
+     * USER token  -> extractOwnerProjectIdForUser
+     */
+    private Long resolveOwnerProjectIdFromToken(String token) {
+        if (hasRole(token, "OWNER")) {
+            return jwtUtil.extractOwnerProjectId(token);
+        }
+        if (hasRole(token, "USER")) {
+            return jwtUtil.extractOwnerProjectIdForUser(token);
+        }
+        return null; // unsupported role
+    }
+
+    private ResponseEntity<?> tenantMissing() {
+        return forbidden("Tenant (ownerProjectId) is missing in token claims.");
+    }
+
+    private boolean invalidToken(String token) {
+        return token == null || token.isBlank() || !jwtUtil.validateToken(token);
+    }
+
     /* ------------------------ create ------------------------ */
 
     @PostMapping(value = "/with-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Create product with optional image (flat form-data)")
+    @Operation(summary = "Create product with optional image (flat form-data) - tenant from token")
     public ResponseEntity<?> createWithImageFlat(
-            @RequestHeader("Authorization") String auth,
+            @RequestHeader(value = "Authorization", required = false) String auth,
 
-            @RequestParam Long ownerProjectId,
             @RequestParam(required = false) Long itemTypeId,
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false) Long currencyId,
@@ -89,15 +119,14 @@ public class ProductController {
 
             @RequestParam(required = false) String attributesJson,
 
-            // ✅ unified with update + Flutter
             @RequestParam(value = "image", required = false) MultipartFile image
     ) {
         String token = strip(auth);
+        if (invalidToken(token)) return unauthorized();
+        if (!hasRole(token, "OWNER")) return forbidden("Owner role required.");
 
-        if (!hasRole(token, "OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Owner role required."));
-        }
+        Long tokenOwnerProjectId = resolveOwnerProjectIdFromToken(token);
+        if (tokenOwnerProjectId == null) return tenantMissing();
 
         if (itemTypeId == null && categoryId == null) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -106,7 +135,10 @@ public class ProductController {
 
         try {
             ProductRequest req = new ProductRequest();
-            req.setOwnerProjectId(ownerProjectId);
+
+            // ✅ tenant ONLY from token
+            req.setOwnerProjectId(tokenOwnerProjectId);
+
             req.setItemTypeId(itemTypeId);
             req.setCategoryId(categoryId);
             req.setCurrencyId(currencyId);
@@ -140,10 +172,8 @@ public class ProductController {
 
             if (attributesJson != null && !attributesJson.isBlank()) {
                 ObjectMapper om = new ObjectMapper();
-                List<AttributeValueDTO> attrs = om.readValue(
-                        attributesJson,
-                        new TypeReference<List<AttributeValueDTO>>() {}
-                );
+                List<AttributeValueDTO> attrs =
+                        om.readValue(attributesJson, new TypeReference<List<AttributeValueDTO>>() {});
                 req.setAttributes(attrs);
             }
 
@@ -161,12 +191,10 @@ public class ProductController {
 
     /* ------------------------ update ------------------------ */
 
-    /* ------------------------ update ------------------------ */
-
     @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Update product with optional image (flat form-data)")
+    @Operation(summary = "Update product with optional image (flat form-data) - tenant from token")
     public ResponseEntity<?> updateWithImage(
-            @RequestHeader("Authorization") String auth,
+            @RequestHeader(value = "Authorization", required = false) String auth,
             @PathVariable Long id,
 
             @RequestParam(required = false) Long itemTypeId,
@@ -200,19 +228,18 @@ public class ProductController {
 
             @RequestParam(required = false) String attributesJson,
 
-            // ✅ same key as create
             @RequestParam(value = "image", required = false) MultipartFile image
     ) {
         String token = strip(auth);
+        if (invalidToken(token)) return unauthorized();
+        if (!hasRole(token, "OWNER")) return forbidden("Owner role required.");
 
-        if (!hasRole(token, "OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Owner role required."));
-        }
+        Long tokenOwnerProjectId = resolveOwnerProjectIdFromToken(token);
+        if (tokenOwnerProjectId == null) return tenantMissing();
 
         try {
-            // 🔧 Build ProductUpdateRequest manually from flat form-data
             ProductUpdateRequest req = new ProductUpdateRequest();
+
             req.setItemTypeId(itemTypeId);
             req.setCategoryId(categoryId);
 
@@ -223,11 +250,8 @@ public class ProductController {
             req.setStatus(status);
             req.setSku(sku);
 
-            if (productType != null) {
-                req.setProductType(productType);
-            }
+            if (productType != null) req.setProductType(productType);
 
-            // these are Boolean in ProductUpdateRequest
             req.setVirtualProduct(virtualProduct);
             req.setDownloadable(downloadable);
 
@@ -247,20 +271,23 @@ public class ProductController {
             req.setHeightCm(heightCm);
             req.setLengthCm(lengthCm);
 
-            // 🔁 attributesJson → List<AttributeValueDTO>
             if (attributesJson != null && !attributesJson.isBlank()) {
                 ObjectMapper om = new ObjectMapper();
-                List<AttributeValueDTO> attrs = om.readValue(
-                        attributesJson,
-                        new TypeReference<List<AttributeValueDTO>>() {}
-                );
+                List<AttributeValueDTO> attrs =
+                        om.readValue(attributesJson, new TypeReference<List<AttributeValueDTO>>() {});
                 req.setAttributes(attrs);
             }
 
-            ProductResponse updated = productService.updateWithImage(id, req, image);
+            ProductResponse updated =
+                    productService.updateWithImageTenant(id, tokenOwnerProjectId, req, image);
+
             return ResponseEntity.ok(updated);
 
         } catch (IllegalArgumentException e) {
+            if (e.getMessage() != null && e.getMessage().toLowerCase().contains("not found")) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(Map.of("error", "Product not found"));
+            }
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
@@ -269,29 +296,27 @@ public class ProductController {
         }
     }
 
-
     /* ------------------------ delete ------------------------ */
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "Delete product")
+    @Operation(summary = "Delete product - tenant from token")
     public ResponseEntity<?> delete(
-            @RequestHeader("Authorization") String auth,
+            @RequestHeader(value = "Authorization", required = false) String auth,
             @PathVariable Long id
     ) {
         String token = strip(auth);
+        if (invalidToken(token)) return unauthorized();
+        if (!hasRole(token, "OWNER")) return forbidden("Only Owner users can delete products.");
 
-        if (!hasRole(token, "OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Only Owner users can delete products."));
-        }
+        Long tokenOwnerProjectId = resolveOwnerProjectIdFromToken(token);
+        if (tokenOwnerProjectId == null) return tenantMissing();
 
         try {
-            productService.delete(id);
+            productService.deleteTenant(id, tokenOwnerProjectId);
             return ResponseEntity.noContent().build();
-
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("error", e.getMessage()));
+                    .body(Map.of("error", "Product not found"));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", e.getMessage()));
@@ -301,22 +326,21 @@ public class ProductController {
     /* ------------------------ get one ------------------------ */
 
     @GetMapping("/{id}")
-    @Operation(summary = "Get product by id")
+    @Operation(summary = "Get product by id - tenant from token")
     public ResponseEntity<?> getById(
-            @RequestHeader("Authorization") String auth,
+            @RequestHeader(value = "Authorization", required = false) String auth,
             @PathVariable Long id
     ) {
         String token = strip(auth);
+        if (invalidToken(token)) return unauthorized();
+        if (!hasRole(token, "USER", "OWNER")) return forbidden("Only USER/OWNER can access the product.");
 
-        if (!hasRole(token, "USER", "OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Only users can access the product."));
-        }
+        Long tokenOwnerProjectId = resolveOwnerProjectIdFromToken(token);
+        if (tokenOwnerProjectId == null) return tenantMissing();
 
         try {
-            ProductResponse p = productService.get(id);
+            ProductResponse p = productService.getTenant(id, tokenOwnerProjectId);
             return ResponseEntity.ok(p);
-
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("error", "Product not found"));
@@ -326,19 +350,18 @@ public class ProductController {
     /* ------------------------ lists ------------------------ */
 
     @GetMapping
-    @Operation(summary = "List products (by ownerProject, itemType, or category)")
+    @Operation(summary = "List products - tenant from token")
     public ResponseEntity<?> list(
-            @RequestHeader("Authorization") String auth,
-            @RequestParam Long ownerProjectId,
+            @RequestHeader(value = "Authorization", required = false) String auth,
             @RequestParam(required = false) Long itemTypeId,
             @RequestParam(required = false) Long categoryId
     ) {
         String token = strip(auth);
+        if (invalidToken(token)) return unauthorized();
+        if (!hasRole(token, "USER", "OWNER")) return forbidden("Only USER/OWNER can access products.");
 
-        if (!hasRole(token, "USER", "OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Only users can access the list of products."));
-        }
+        Long ownerProjectId = resolveOwnerProjectIdFromToken(token);
+        if (ownerProjectId == null) return tenantMissing();
 
         try {
             List<ProductResponse> result;
@@ -353,6 +376,9 @@ public class ProductController {
 
             return ResponseEntity.ok(result);
 
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", e.getMessage()));
@@ -360,23 +386,20 @@ public class ProductController {
     }
 
     @GetMapping("/new-arrivals")
-    @Operation(summary = "List new arrival products for an app (ownerProject)")
+    @Operation(summary = "List new arrival products - tenant from token")
     public ResponseEntity<?> listNewArrivals(
-            @RequestHeader("Authorization") String auth,
-            @RequestParam Long ownerProjectId,
+            @RequestHeader(value = "Authorization", required = false) String auth,
             @RequestParam(required = false) Integer days
     ) {
         String token = strip(auth);
+        if (invalidToken(token)) return unauthorized();
+        if (!hasRole(token, "USER", "OWNER")) return forbidden("Only USER/OWNER can access new arrivals.");
 
-        if (!hasRole(token, "USER", "OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Only users can access new arrivals."));
-        }
+        Long ownerProjectId = resolveOwnerProjectIdFromToken(token);
+        if (ownerProjectId == null) return tenantMissing();
 
         try {
-            List<ProductResponse> result = productService.listNewArrivals(ownerProjectId, days);
-            return ResponseEntity.ok(result);
-
+            return ResponseEntity.ok(productService.listNewArrivals(ownerProjectId, days));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
@@ -387,23 +410,20 @@ public class ProductController {
     }
 
     @GetMapping("/best-sellers")
-    @Operation(summary = "List best-selling products for an app (ownerProject)")
+    @Operation(summary = "List best-selling products - tenant from token")
     public ResponseEntity<?> listBestSellers(
-            @RequestHeader("Authorization") String auth,
-            @RequestParam Long ownerProjectId,
+            @RequestHeader(value = "Authorization", required = false) String auth,
             @RequestParam(required = false) Integer limit
     ) {
         String token = strip(auth);
+        if (invalidToken(token)) return unauthorized();
+        if (!hasRole(token, "USER", "OWNER")) return forbidden("Only USER/OWNER can access best sellers.");
 
-        if (!hasRole(token, "USER", "OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Only users can access best sellers."));
-        }
+        Long ownerProjectId = resolveOwnerProjectIdFromToken(token);
+        if (ownerProjectId == null) return tenantMissing();
 
         try {
-            var result = productService.listBestSellers(ownerProjectId, limit);
-            return ResponseEntity.ok(result);
-
+            return ResponseEntity.ok(productService.listBestSellers(ownerProjectId, limit));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
@@ -414,22 +434,19 @@ public class ProductController {
     }
 
     @GetMapping("/discounted")
-    @Operation(summary = "List discounted/on-sale products for an app (ownerProject)")
+    @Operation(summary = "List discounted products - tenant from token")
     public ResponseEntity<?> listDiscounted(
-            @RequestHeader("Authorization") String auth,
-            @RequestParam Long ownerProjectId
+            @RequestHeader(value = "Authorization", required = false) String auth
     ) {
         String token = strip(auth);
+        if (invalidToken(token)) return unauthorized();
+        if (!hasRole(token, "USER", "OWNER")) return forbidden("Only USER/OWNER can access discounted products.");
 
-        if (!hasRole(token, "USER", "OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Only users can access discounted products."));
-        }
+        Long ownerProjectId = resolveOwnerProjectIdFromToken(token);
+        if (ownerProjectId == null) return tenantMissing();
 
         try {
-            var result = productService.listDiscounted(ownerProjectId);
-            return ResponseEntity.ok(result);
-
+            return ResponseEntity.ok(productService.listDiscounted(ownerProjectId));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
@@ -439,34 +456,20 @@ public class ProductController {
         }
     }
 
-    /* ------------------------ owner app products (dashboard) ------------------------ */
-
     @GetMapping("/owner/app-products")
-    @Operation(summary = "List all products for one app (ownerProject)")
+    @Operation(summary = "List all products for one app (OWNER only) - tenant from token")
     public ResponseEntity<?> listOwnerAppProducts(
-            @RequestHeader("Authorization") String auth,
-            @RequestParam Long ownerProjectId
+            @RequestHeader(value = "Authorization", required = false) String auth
     ) {
         String token = strip(auth);
+        if (invalidToken(token)) return unauthorized();
+        if (!hasRole(token, "OWNER")) return forbidden("Owner role required.");
 
-        if (!hasRole(token, "OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Owner role required."));
-        }
+        Long ownerProjectId = resolveOwnerProjectIdFromToken(token);
+        if (ownerProjectId == null) return tenantMissing();
 
         try {
-            List<ProductResponse> result = productService.listByOwnerProject(ownerProjectId);
-
-            if (result.isEmpty()) {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body(Map.of("error", "No products found for this app."));
-            }
-
-            return ResponseEntity.ok(result);
-
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.ok(productService.listByOwnerProject(ownerProjectId));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", e.getMessage()));

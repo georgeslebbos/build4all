@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Locale;
 import java.util.NoSuchElementException;
 
@@ -70,4 +71,44 @@ public class OrderPaymentWriteService {
 
         return txRepo.save(tx);
     }
+    
+    
+    @Transactional
+    public PaymentTransaction recordPaymentFailedOrCanceled(Long orderId,
+                                                            String providerCode,
+                                                            String reason) {
+
+        if (orderId == null) throw new IllegalArgumentException("orderId required");
+
+        final String provider = (providerCode == null || providerCode.isBlank())
+                ? "CASH"
+                : providerCode.trim().toUpperCase(Locale.ROOT);
+
+        PaymentTransaction tx = txRepo
+                .findFirstByOrderIdAndProviderCodeIgnoreCaseOrderByCreatedAtDesc(orderId, provider)
+                .orElseThrow(() -> new NoSuchElementException(
+                        "No " + provider + " transaction found for orderId=" + orderId
+                ));
+
+        String r = (reason == null || reason.isBlank())
+                ? "CANCELED"
+                : reason.trim().toUpperCase(Locale.ROOT);
+
+        String status = switch (r) {
+            case "EXPIRED" -> "EXPIRED";
+            case "FAILED", "PAYMENT_FAILED" -> "FAILED";
+            default -> "CANCELED";
+        };
+
+        tx.setStatus(status);
+
+        String payload = """
+                {"updatedAt":"%s","reason":"%s"}
+                """.formatted(LocalDateTime.now(), r);
+
+        tx.setRawProviderPayload(payload);
+
+        return txRepo.save(tx);
+    }
+
 }

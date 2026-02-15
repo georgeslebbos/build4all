@@ -606,13 +606,16 @@ public class OrderController {
      * - CheckoutSummaryResponse (totals + orderId + payment fields if you integrated payment orchestrator)
      */
     @PostMapping("/checkout")
-    @Operation(summary = "USER: Create order from cart (activities + ecommerce)")
     public ResponseEntity<?> checkout(@RequestHeader("Authorization") String auth,
                                       @Valid @RequestBody CheckoutRequest request) {
         Long userId = jwt.extractId(strip(auth));
-        CheckoutSummaryResponse summary = orderService.checkout(userId, request);
+
+        // ✅ ignore client lines, use DB cart lines
+        CheckoutSummaryResponse summary = orderService.checkoutFromCart(userId, request);
+
         return ResponseEntity.status(HttpStatus.CREATED).body(summary);
     }
+
 
     /* ----------------------------------- USER actions ------------------------------------ */
 
@@ -1131,4 +1134,38 @@ public class OrderController {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("error", ex.getMessage()));
     }
+    
+    private Long resolveOwnerProjectIdFromOrder(Order order) {
+        if (order == null || order.getOrderItems() == null || order.getOrderItems().isEmpty()) {
+            throw new IllegalStateException("Order has no items; cannot resolve ownerProjectId");
+        }
+
+        Long ownerProjectId = null;
+
+        for (OrderItem oi : order.getOrderItems()) {
+            if (oi == null || oi.getItem() == null || oi.getItem().getOwnerProject() == null) continue;
+
+            Long opId = oi.getItem().getOwnerProject().getId();
+            if (opId == null) continue;
+
+            if (ownerProjectId == null) ownerProjectId = opId;
+            else if (!ownerProjectId.equals(opId)) {
+                throw new IllegalStateException("Order contains items from multiple ownerProjects (tenant mix) - invalid");
+            }
+        }
+
+        if (ownerProjectId == null) {
+            throw new IllegalStateException("Could not resolve ownerProjectId from order items");
+        }
+
+        return ownerProjectId;
+    }
+
+    private boolean isCashMethod(Order order) {
+        if (order == null || order.getPaymentMethod() == null) return false;
+        Object codeOrName = tryGet(order.getPaymentMethod(), "getCode", "getName");
+        if (codeOrName == null) return false;
+        return "CASH".equalsIgnoreCase(String.valueOf(codeOrName));
+    }
+
 }

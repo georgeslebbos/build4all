@@ -4,6 +4,8 @@ import com.build4all.order.domain.OrderItem;
 import com.build4all.order.dto.CheckoutRequest;
 import com.build4all.order.dto.CheckoutSummaryResponse;
 
+import jakarta.validation.Valid;
+
 import java.util.List;
 
 /**
@@ -187,4 +189,8 @@ public interface OrderService {
      * @return priced summary + orderId/orderDate (+ payment info in the new version)
      */
     CheckoutSummaryResponse checkout(Long userId, CheckoutRequest request);
+
+	CheckoutSummaryResponse checkoutFromCart(Long userId, @Valid CheckoutRequest request);
+
+	void failCashOrder(Long orderItemId, Long businessId, String reason);
 }

@@ -100,6 +100,8 @@ public class OrderServiceImpl implements OrderService {
 
     /** Cart items delete/cleanup after checkout */
     private final CartItemRepository cartItemRepo;
+    
+    
 
     // Pricing engine: shipping + taxes + coupons
     /**
@@ -299,17 +301,19 @@ public class OrderServiceImpl implements OrderService {
      *   so overhead is acceptable.
      */
     private Integer tryCapacity(Item item) {
-        String[] names = {"getMaxParticipants", "getCapacity", "getSeats", "getQuantityLimit", "getStock"};
+        // activities seats ONLY
+        String[] names = {"getMaxParticipants", "getCapacity", "getSeats", "getQuantityLimit"};
         for (String n : names) {
             try {
                 Method m = item.getClass().getMethod(n);
                 Object v = m.invoke(item);
-                if (v instanceof Integer) return (Integer) v;
-                if (v instanceof Number) return ((Number) v).intValue();
+                if (v instanceof Integer i) return i;
+                if (v instanceof Number x) return x.intValue();
             } catch (Exception ignored) {}
         }
         return null;
     }
+
 
     /**
      * Ensures the orderItem belongs to the current user.
@@ -399,10 +403,14 @@ public class OrderServiceImpl implements OrderService {
         // Capacity check (only if item supports it)
         Integer capacity = tryCapacity(item);
         if (capacity != null) {
-            int already = orderItemRepo.sumQuantityByItemIdAndStatusNames(
-                    itemId, List.of("COMPLETED")
-            );
-            int remaining = capacity - already;
+        	List<String> reservedStatuses = List.of("PENDING", "COMPLETED", "CANCEL_REQUESTED");
+
+        	int already = orderItemRepo.sumQuantityByItemIdAndStatusNames(
+        	        item.getId(), reservedStatuses
+        	);
+
+        	int remaining = capacity - already;
+        
             if (quantity > remaining)
                 throw new IllegalStateException("Not enough seats available");
         }
@@ -475,12 +483,15 @@ public class OrderServiceImpl implements OrderService {
         // Capacity check (only if item supports it)
         Integer capacity = tryCapacity(item);
         if (capacity != null) {
-            int already = orderItemRepo.sumQuantityByItemIdAndStatusNames(
-                    itemId, List.of("COMPLETED")
-            );
+        	List<String> reservedStatuses = List.of("PENDING", "COMPLETED", "CANCEL_REQUESTED");
+
+        	int already = orderItemRepo.sumQuantityByItemIdAndStatusNames(
+        	        item.getId(), reservedStatuses
+        	);
+
             int remaining = capacity - already;
             if (quantity > remaining)
-                throw new IllegalStateException("Not enough seats available");
+                throw new IllegalStateException("Not enough seats available" + item.getId());
         }
 
         // Compute totals
@@ -575,16 +586,29 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public void cancelorder(Long orderItemId, Long actorId) {
         var oi = requireUserOwned(orderItemId, actorId);
-        var header = oi.getOrder();
-        String curr = currentStatusCode(header);
+        Order order = oi.getOrder();
+        String curr = currentStatusCode(order);
 
-        if ("COMPLETED".equals(curr))
-            throw new IllegalStateException("Cannot cancel a completed order");
-
+        if ("COMPLETED".equals(curr)) throw new IllegalStateException("Cannot cancel completed");
         if ("CANCELED".equals(curr)) return;
+
+        var ps = paymentRead.summaryForOrder(order.getId(), order.getTotalPrice());
+        if (!ps.isFullyPaid()) {
+            Order full = orderRepo.findByIdWithItems(order.getId())
+                    .orElseThrow(() -> new IllegalStateException("Order not found"));
+            releaseStockForOrder(full);
+
+            String provider = (order.getPaymentMethod() == null || order.getPaymentMethod().getName() == null)
+                    ? "CASH"
+                    : order.getPaymentMethod().getName();
+
+            paymentWrite.recordPaymentFailedOrCanceled(order.getId(), provider, "USER_CANCELED");
+
+        }
 
         flipStatus(oi, "CANCELED");
     }
+
 
     /**
      * User restores an order back to PENDING (if not completed).
@@ -677,12 +701,19 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public void approveCancel(Long orderItemId, Long businessId) {
         var oi = requireBusinessOwned(orderItemId, businessId);
-        String curr = currentStatusCode(oi.getOrder());
+        Order order = oi.getOrder();
+        String curr = currentStatusCode(order);
 
-        if ("COMPLETED".equals(curr))
-            throw new IllegalStateException("Cannot approve cancel for completed order");
-
+        if ("COMPLETED".equals(curr)) throw new IllegalStateException("Cannot approve cancel for completed");
         if ("CANCELED".equals(curr)) return;
+
+        var ps = paymentRead.summaryForOrder(order.getId(), order.getTotalPrice());
+        if (!ps.isFullyPaid()) {
+            Order full = orderRepo.findByIdWithItems(order.getId()).orElseThrow();
+            releaseStockForOrder(full);
+            paymentWrite.recordPaymentFailedOrCanceled(order.getId(), providerForOrder(order), "CANCEL_APPROVED");
+
+        }
 
         flipStatus(oi, "CANCELED");
     }
@@ -752,14 +783,20 @@ public class OrderServiceImpl implements OrderService {
 
         // 💰 Write PAID transaction if needed
         if (remaining.signum() > 0) {
-            paymentWrite.recordManualPaid(
-                    ownerProjectId,
-                    order.getId(),
-                    remaining,
-                    order.getCurrency().getCode(),
-                    "CASH",
-                    "CASH_ORDER_" + order.getId()
-            );
+            try {
+                
+                paymentWrite.markCashAsPaid(order.getId(), orderTotal);
+            } catch (NoSuchElementException ex) {
+                // ✅ fallback: إذا ما في CASH tx (legacy orders), اعملي manual paid
+                paymentWrite.recordManualPaid(
+                        ownerProjectId,
+                        order.getId(),
+                        remaining,
+                        order.getCurrency().getCode(),
+                        "CASH",
+                        "CASH_ORDER_" + order.getId()
+                );
+            }
         }
 
         // 🔁 Re-check AFTER ledger update
@@ -792,12 +829,19 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public void rejectorder(Long orderItemId, Long businessId) {
         var oi = requireBusinessOwned(orderItemId, businessId);
-        String curr = currentStatusCode(oi.getOrder());
+        Order order = oi.getOrder();
+        String curr = currentStatusCode(order);
 
-        if ("COMPLETED".equals(curr))
-            throw new IllegalStateException("Cannot reject completed order");
-
+        if ("COMPLETED".equals(curr)) throw new IllegalStateException("Cannot reject completed");
         if ("REJECTED".equals(curr)) return;
+
+        var ps = paymentRead.summaryForOrder(order.getId(), order.getTotalPrice());
+        if (!ps.isFullyPaid()) {
+            Order full = orderRepo.findByIdWithItems(order.getId()).orElseThrow();
+            releaseStockForOrder(full);
+            paymentWrite.recordPaymentFailedOrCanceled(order.getId(), providerForOrder(order), "BUSINESS_REJECTED");
+
+        }
 
         flipStatus(oi, "REJECTED");
     }
@@ -1098,4 +1142,308 @@ public class OrderServiceImpl implements OrderService {
         cart.setTotalPrice(total);
         cart.setUpdatedAt(LocalDateTime.now());
     }
+    
+    public CheckoutSummaryResponse checkoutFromCart(Long userId, CheckoutRequest request) {
+
+        if (userId == null) throw new IllegalArgumentException("userId is required");
+        if (request == null) throw new IllegalArgumentException("request is required");
+        if (request.getCurrencyId() == null) throw new IllegalArgumentException("currencyId is required");
+        if (request.getPaymentMethod() == null || request.getPaymentMethod().isBlank())
+            throw new IllegalArgumentException("paymentMethod is required");
+
+        // ✅ Load ACTIVE cart from DB (server decides lines)
+        Cart cart = cartRepo.findByUser_IdAndStatus(userId, CartStatus.ACTIVE)
+                .orElseThrow(() -> new IllegalStateException("No active cart"));
+
+        if (cart.getItems() == null || cart.getItems().isEmpty())
+            throw new IllegalStateException("Cart is empty");
+
+        // ✅ Aggregate by itemId (prevents bypass via duplicates)
+        Map<Long, Integer> qtyByItemId = new LinkedHashMap<>();
+        for (CartItem ci : cart.getItems()) {
+            if (ci.getItem() == null || ci.getItem().getId() == null) continue;
+            int qty = ci.getQuantity();
+            if (qty <= 0) continue;
+
+            Long itemId = ci.getItem().getId();
+            qtyByItemId.merge(itemId, qty, Integer::sum);
+        }
+
+        if (qtyByItemId.isEmpty())
+            throw new IllegalStateException("Cart has no valid items");
+
+        // Build server-trusted lines
+        List<CartLine> lines = new ArrayList<>();
+        for (Map.Entry<Long, Integer> e : qtyByItemId.entrySet()) {
+            CartLine line = new CartLine();
+            line.setItemId(e.getKey());
+            line.setQuantity(e.getValue());
+            lines.add(line);
+        }
+
+        // ✅ Gate: stock/capacity + tenant isolation (LOCK items)
+        List<String> blockingErrors = new ArrayList<>();
+        List<Map<String, Object>> lineErrors = new ArrayList<>();
+
+        Long ownerProjectId = null;
+
+        // statuses that reserve seats (activities)
+        List<String> reservedStatuses = List.of("PENDING", "COMPLETED", "CANCEL_REQUESTED");
+
+        for (CartLine line : lines) {
+
+            if (line.getItemId() == null) continue;
+
+            // lock item row for stock/capacity check
+            Item fresh = itemRepo.findByIdForStockCheck(line.getItemId())
+                    .orElseThrow(() -> new IllegalArgumentException("Item not found: " + line.getItemId()));
+
+            // tenant scope (single app only)
+            if (fresh.getOwnerProject() == null || fresh.getOwnerProject().getId() == null) {
+                blockingErrors.add("Item " + fresh.getId() + " has no ownerProject");
+                lineErrors.add(Map.of(
+                        "itemId", fresh.getId(),
+                        "reason", "NO_TENANT",
+                        "message", "Item has no ownerProject"
+                ));
+                continue;
+            }
+
+            Long opId = fresh.getOwnerProject().getId();
+            if (ownerProjectId == null) ownerProjectId = opId;
+            else if (!ownerProjectId.equals(opId)) {
+                blockingErrors.add("Cart contains items from multiple apps (tenant mix)");
+                lineErrors.add(Map.of(
+                        "itemId", fresh.getId(),
+                        "reason", "TENANT_MISMATCH",
+                        "message", "Item belongs to a different app"
+                ));
+                continue;
+            }
+
+            int qty = line.getQuantity();
+            if (qty <= 0) {
+                blockingErrors.add("Invalid quantity for item " + fresh.getId());
+                lineErrors.add(Map.of(
+                        "itemId", fresh.getId(),
+                        "reason", "INVALID_QTY",
+                        "message", "Quantity must be > 0"
+                ));
+                continue;
+            }
+
+            // ✅ STOCK first (ecommerce)
+            Integer stock = readStock(fresh);
+            if (stock != null) {
+                if (stock <= 0) {
+                    blockingErrors.add("Item " + fresh.getId() + " is out of stock");
+                    lineErrors.add(Map.of(
+                            "itemId", fresh.getId(),
+                            "reason", "OUT_OF_STOCK",
+                            "availableStock", stock,
+                            "maxAllowedQuantity", 0,
+                            "message", "Out of stock"
+                    ));
+                } else if (qty > stock) {
+                    blockingErrors.add("Only " + stock + " left for item " + fresh.getId());
+                    lineErrors.add(Map.of(
+                            "itemId", fresh.getId(),
+                            "reason", "QTY_EXCEEDS_STOCK",
+                            "availableStock", stock,
+                            "maxAllowedQuantity", stock,
+                            "message", "Only " + stock + " left"
+                    ));
+                }
+                continue; // stock handled
+            }
+
+            // ✅ CAPACITY (activities)
+            Integer capacity = readSeatsCapacity(fresh);
+            if (capacity != null) {
+                int alreadyReserved = orderItemRepo.sumQuantityByItemIdAndStatusNames(fresh.getId(), reservedStatuses);
+                int remaining = capacity - alreadyReserved;
+
+                if (remaining <= 0) {
+                    blockingErrors.add("No seats left for item " + fresh.getId());
+                    lineErrors.add(Map.of(
+                            "itemId", fresh.getId(),
+                            "reason", "NO_CAPACITY",
+                            "availableStock", 0,
+                            "maxAllowedQuantity", 0,
+                            "message", "No seats left"
+                    ));
+                } else if (qty > remaining) {
+                    blockingErrors.add("Only " + remaining + " seats left for item " + fresh.getId());
+                    lineErrors.add(Map.of(
+                            "itemId", fresh.getId(),
+                            "reason", "QTY_EXCEEDS_CAPACITY",
+                            "availableStock", remaining,
+                            "maxAllowedQuantity", remaining,
+                            "message", "Only " + remaining + " left"
+                    ));
+                }
+            }
+        }
+
+        if (!blockingErrors.isEmpty()) {
+            throw new com.build4all.order.web.CheckoutBlockedException(blockingErrors, lineErrors);
+        }
+        
+     // ✅ After validation success (no blockingErrors)
+     // Reserve stock for ecommerce items (atomic)
+     // ✅ Reserve stock (atomic) for stock-tracked items
+        for (CartLine line : lines) {
+            if (line.getItemId() == null) continue;
+
+            Item fresh = itemRepo.findByIdForStockCheck(line.getItemId())
+                    .orElseThrow(() -> new IllegalArgumentException("Item not found: " + line.getItemId()));
+
+            Integer stock = readStock(fresh); // ✅ only stock-tracked items
+            if (stock != null) {
+                int qty = line.getQuantity();
+
+                int updated = itemRepo.decrementStockIfEnough(fresh.getId(), qty);
+
+                if (updated != 1) {
+                    throw new com.build4all.order.web.CheckoutBlockedException(
+                            List.of("Stock changed for item " + fresh.getId() + ". Please refresh cart."),
+                            List.of(Map.of(
+                                    "itemId", fresh.getId(),
+                                    "reason", "STOCK_CHANGED",
+                                    "message", "Stock changed, please refresh"
+                            ))
+                    );
+                }
+            }
+
+        }
+
+     
+
+        // ✅ Override lines from server cart (ignore client lines)
+        request.setLines(lines);
+
+        // Run existing checkout pipeline (pricing + order + payment + cart clear)
+        return checkout(userId, request);
+    }
+
+
+    /* -------------------- helpers (stock/capacity detection) -------------------- */
+
+    private Integer readStock(Item item) {
+        // if returns null => "not stock-tracked"
+        Object v = tryGet(item, "getStock", "getAvailableStock", "getQuantity", "getAvailableQuantity");
+        if (v == null) return null;
+
+        if (v instanceof Integer i) return i;
+        if (v instanceof Long l) return l.intValue();
+        if (v instanceof Number n) return n.intValue();
+
+        try { return Integer.parseInt(v.toString()); }
+        catch (Exception e) { return null; }
+    }
+    
+    private void releaseStockForOrder(Order order) {
+        if (order == null || order.getOrderItems() == null) return;
+
+        for (OrderItem oi : order.getOrderItems()) {
+            Item item = oi.getItem();
+            if (item == null || item.getId() == null) continue;
+
+            Integer stock = readStock(item);
+            if (stock == null) continue;
+
+            int qty = oi.getQuantity();
+            if (qty > 0) {
+                itemRepo.incrementStock(item.getId(), qty);
+            }
+        }
+    }
+
+
+    /**
+     * Capacity for activities: seats/participants.
+     * IMPORTANT: we do NOT include getStock here, because stock is handled separately above.
+     */
+    private Integer readSeatsCapacity(Item item) {
+        String[] names = {"getMaxParticipants", "getCapacity", "getSeats", "getQuantityLimit"};
+        for (String n : names) {
+            try {
+                Method m = item.getClass().getMethod(n);
+                Object v = m.invoke(item);
+                if (v instanceof Integer i) return i;
+                if (v instanceof Number x) return x.intValue();
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+    
+
+
+    private Object tryGet(Object target, String... candidates) {
+        if (target == null) return null;
+        Class<?> c = target.getClass();
+        for (String name : candidates) {
+            try {
+                Method m = c.getMethod(name);
+                return m.invoke(target);
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+
+
+   
+
+    private void assertStockAvailable(Item item, int desiredQty) {
+        if (desiredQty <= 0) throw new IllegalArgumentException("quantity must be > 0");
+
+        Integer stock = readStock(item);
+        if (stock == null) return; // not enforced
+
+        if (stock <= 0) throw new IllegalStateException("Out of stock");
+        if (desiredQty > stock) throw new IllegalStateException("Only " + stock + " left");
+    }
+    
+    
+    @Override
+    public void failCashOrder(Long orderItemId, Long businessId, String reason) {
+
+        OrderItem oi = requireBusinessOwned(orderItemId, businessId);
+        Order order = oi.getOrder();
+        if (order == null) throw new IllegalStateException("Missing order");
+
+        String curr = currentStatusCode(order);
+        if ("COMPLETED".equals(curr)) throw new IllegalStateException("Cannot fail a completed order");
+        if ("CANCELED".equals(curr) || "REJECTED".equals(curr) || "EXPIRED".equals(curr)) return;
+
+        // ✅ if not paid -> release stock
+        var ps = paymentRead.summaryForOrder(order.getId(), order.getTotalPrice());
+        if (!ps.isFullyPaid()) {
+            Order full = orderRepo.findByIdWithItems(order.getId())
+                    .orElseThrow(() -> new IllegalStateException("Order not found"));
+            releaseStockForOrder(full);
+
+            paymentWrite.recordPaymentFailedOrCanceled(
+                    order.getId(),
+                    "CASH",
+                    (reason == null || reason.isBlank()) ? "NOT_PAID" : reason
+            );
+        }
+
+   
+        flipStatus(oi, "CANCELED");
+    }
+
+    
+    private String providerForOrder(Order order) {
+        if (order != null && order.getPaymentMethod() != null && order.getPaymentMethod().getName() != null) {
+            return order.getPaymentMethod().getName().trim().toUpperCase(Locale.ROOT);
+        }
+        return "CASH";
+    }
+
+
+
 }
