@@ -27,6 +27,9 @@ public class Category {
     @Column(name = "name", nullable = false)
     private String name;
 
+    @Column(name = "owner_project_id")
+    private Long ownerProjectId;
+
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
@@ -76,4 +79,14 @@ public class Category {
 
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+
+	public Long getOwnerProjectId() {
+		return ownerProjectId;
+	}
+
+	public void setOwnerProjectId(Long ownerProjectId) {
+		this.ownerProjectId = ownerProjectId;
+	}
+    
+    
 }

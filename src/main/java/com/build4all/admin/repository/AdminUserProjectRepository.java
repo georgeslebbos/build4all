@@ -33,6 +33,14 @@ public interface AdminUserProjectRepository extends JpaRepository<AdminUserProje
     Optional<AdminUserProject> findBySlug(String slug);
     
     @Query("""
+    		  select a.project.id
+    		  from AdminUserProject a
+    		  where a.id = :linkId
+    		""")
+    		Optional<Long> findProjectIdByLinkId(@Param("linkId") Long linkId);
+
+    
+    @Query("""
     		  select
     		    l.id                 as linkId,
     		    p.id                 as projectId,
