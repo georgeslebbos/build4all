@@ -169,15 +169,19 @@ public class AuthController {
     }
 
     @PostMapping(
-    	    value = "/verify-email-code.",
-    	    consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE,
-    	    produces = MediaType.APPLICATION_JSON_VALUE
-    	)
+            value = "/verify-email-code",
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
     public ResponseEntity<?> verifyEmailCode(@RequestBody Map<String, String> request) {
         try {
             String email = request.get("email");
             String code  = request.get("code");
-            Long userId  = userService.verifyEmailCodeAndRegister(email, code);
+
+            if (email == null || code == null || email.isBlank() || code.isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "email and code are required"));
+            }
+
+            Long userId = userService.verifyEmailCodeAndRegister(email.trim(), code.trim());
 
             return ResponseEntity.ok(Map.of(
                     "message", "Verification successful. Continue with profile setup.",
@@ -187,6 +191,7 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
         }
     }
+
 
     @PostMapping(
     	    value = "/send-verification",

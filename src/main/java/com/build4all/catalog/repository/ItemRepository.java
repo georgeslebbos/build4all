@@ -162,6 +162,12 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
         where i.id = :id
     """)
     int incrementStock(@Param("id") Long id, @Param("qty") int qty);
+    
+
+    @Query("select count(i) from Item i where i.itemType.category.id = :categoryId")
+    long countByCategoryId(@Param("categoryId") Long categoryId);
+
+    long countByItemType_Id(Long itemTypeId);
 
 
 

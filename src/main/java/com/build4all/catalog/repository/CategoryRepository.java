@@ -22,5 +22,11 @@ public interface CategoryRepository extends JpaRepository<Category, Long> {
     boolean existsByNameIgnoreCaseAndOwnerProjectId(String name, Long ownerProjectId);
 
     Optional<Category> findByNameIgnoreCaseAndOwnerProjectId(String name, Long ownerProjectId);
+    
+    Optional<Category> findByIdAndOwnerProjectId(Long id, Long ownerProjectId);
+    
+    boolean existsByNameIgnoreCaseAndOwnerProjectIdAndIdNot(String name, Long ownerProjectId, Long id);
+	List<Category> findByProject_IdAndOwnerProjectIdOrderByNameAsc(Long projectId, Long ownerProjectId);
+
 
 }

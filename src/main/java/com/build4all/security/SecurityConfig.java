@@ -171,7 +171,10 @@ public class SecurityConfig implements WebMvcConfigurer {
                                 "/api/public/runtime-config/by-link",
                                 "/api/public/ai/status/**",
                                 "/api/auth/demo/create-apple-review-account",
-                                "/api/auth/demo/seed-apple-review-account-all"
+                                "/api/auth/demo/seed-apple-review-account-all",
+                                "/api/users/reset-password",
+                                "/api/users/verify-reset-code",
+                                "/api/users/update-password"
                         ).permitAll()
 
                         // Any other endpoint requires authentication (JWT must be valid).

@@ -80,6 +80,48 @@ public class JwtUtil {
         return generateToken(user, dbTenantId);
     }
 
+    
+    /**
+     * ✅ Best-practice tenant extraction:
+     * - Works for USER / BUSINESS / OWNER / SUPER_ADMIN tokens
+     * - Enforces that ownerProjectId MUST exist for tenant-scoped endpoints
+     *
+     * Usage:
+     *   Long tenantId = jwtUtil.requireOwnerProjectId(authHeader);
+     */
+    public Long requireOwnerProjectId(String tokenOrBearer) {
+        String jwt = normalize(tokenOrBearer);
+
+        if (jwt == null || jwt.isBlank()) {
+            throw new RuntimeException("Authorization token missing or invalid");
+        }
+
+        if (!validateToken(jwt)) {
+            throw new RuntimeException("Invalid token");
+        }
+
+        Long ownerProjectId = extractOwnerProjectIdClaim(jwt);
+
+        // ✅ Enforce tenant presence for tenant-scoped endpoints
+        if (ownerProjectId == null) {
+            throw new RuntimeException("Token missing ownerProjectId claim");
+        }
+
+        return ownerProjectId;
+    }
+
+    /**
+     * ✅ Optional: if you KEEP ownerProjectId in path/query (not ideal),
+     * enforce that request tenant == token tenant.
+     */
+    public void requireTenantMatch(String tokenOrBearer, Long requestedOwnerProjectId) {
+        Long tokenTenant = requireOwnerProjectId(tokenOrBearer);
+        if (requestedOwnerProjectId == null || !tokenTenant.equals(requestedOwnerProjectId)) {
+            // use 404 behavior in controllers to avoid leaking existence
+            throw new RuntimeException("Tenant mismatch");
+        }
+    }
+
     /**
      * ✅ STRICT (Recommended):
      * Generates a USER token while forcing tenant scope.

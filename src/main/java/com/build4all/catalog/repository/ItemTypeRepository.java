@@ -22,5 +22,29 @@ public interface ItemTypeRepository extends JpaRepository<ItemType, Long> {
     Optional<ItemType> findByCategory_IdAndDefaultForCategoryTrue(Long categoryId);
     
     Optional<ItemType> findByNameIgnoreCaseAndCategory_Project_Id(String name, Long projectId);
+    
+
+    boolean existsByCategory_Id(Long categoryId);
+
+    long deleteByCategory_Id(Long categoryId);
+    
+
+ 
+
+    // ✅ helpful for reassignment
+    Optional<ItemType> findFirstByCategory_IdAndIdNotOrderByNameAsc(Long categoryId, Long excludedId);
+    
+    
+    List<ItemType> findByCategory_OwnerProjectIdOrderByNameAsc(Long ownerProjectId);
+
+    List<ItemType> findByCategory_Project_IdAndCategory_OwnerProjectIdOrderByNameAsc(Long projectId, Long ownerProjectId);
+
+    List<ItemType> findByCategory_IdAndCategory_OwnerProjectIdOrderByNameAsc(Long categoryId, Long ownerProjectId);
+
+    Optional<ItemType> findByIdAndCategory_OwnerProjectId(Long id, Long ownerProjectId);
+
+    Optional<ItemType> findFirstByCategory_IdAndIdNotAndCategory_OwnerProjectIdOrderByNameAsc(
+            Long categoryId, Long id, Long ownerProjectId
+    );
 
 }

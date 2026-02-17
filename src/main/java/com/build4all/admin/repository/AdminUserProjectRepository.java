@@ -2,6 +2,7 @@ package com.build4all.admin.repository;
 
 import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.dto.OwnerProjectView;
+import com.build4all.app.dto.AppSupportInfoDto;
 import com.build4all.app.dto.SuperAdminAppDetailsDto;
 import com.build4all.app.dto.SuperAdminAppRowDto;
 import com.build4all.project.dto.ProjectOwnerSummaryDTO;
@@ -136,7 +137,21 @@ public interface AdminUserProjectRepository extends JpaRepository<AdminUserProje
     List<ProjectOwnerSummaryDTO> findOwnersByProject(@Param("projectId") Long projectId);
 
     List<AdminUserProject> findByProject_IdAndAdmin_AdminId(Long projectId, Long adminId);
+    
+    @Query("""
+    		  select new com.build4all.app.dto.AppSupportInfoDto(
+    		    a.id,
+    		    a.admin.adminId,
+    		    concat(a.admin.firstName, ' ', a.admin.lastName),
+    		    a.admin.email,
+    		    a.admin.phoneNumber
+    		  )
+    		  from AdminUserProject a
+    		  where a.id = :linkId
+    		""")
+    		Optional<AppSupportInfoDto> findSupportInfoByLinkId(@Param("linkId") Long linkId);
 
+    		
     @Query("""
           select new com.build4all.project.dto.OwnerAppInProjectDTO(
             a.id,

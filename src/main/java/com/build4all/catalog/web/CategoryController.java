@@ -1,45 +1,38 @@
+// src/main/java/com/build4all/catalog/web/CategoryController.java
 package com.build4all.catalog.web;
 
-import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.catalog.dto.CategoryDTO;
 import com.build4all.catalog.dto.CategoryRequest;
 import com.build4all.catalog.domain.Category;
-import com.build4all.catalog.domain.Icon;
-import com.build4all.catalog.repository.CategoryRepository;
-import com.build4all.catalog.repository.IconRepository;
-import com.build4all.project.domain.Project;
-import com.build4all.project.repository.ProjectRepository;
+import com.build4all.catalog.service.CategoryService;
+import com.build4all.catalog.service.DeleteBlockedException;
+import com.build4all.security.JwtUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/admin/categories")
 public class CategoryController {
 
-    private final CategoryRepository categoryRepo;
-    private final IconRepository iconRepo;
-    private final ProjectRepository projectRepo;
-    private final AdminUserProjectRepository aupRepo;
+    private static final Logger log = LoggerFactory.getLogger(CategoryController.class);
 
-    public CategoryController(CategoryRepository categoryRepo,
-                              IconRepository iconRepo,
-                              ProjectRepository projectRepo,
-                              AdminUserProjectRepository aupRepo) {
-        this.categoryRepo = categoryRepo;
-        this.iconRepo = iconRepo;
-        this.projectRepo = projectRepo;
-        this.aupRepo = aupRepo;
+    private final CategoryService categoryService;
+    private final JwtUtil jwtUtil;
+
+    public CategoryController(CategoryService categoryService, JwtUtil jwtUtil) {
+        this.categoryService = categoryService;
+        this.jwtUtil = jwtUtil;
     }
 
-    // =========================
-    // Helpers
-    // =========================
-
+    // ---------- DTO ----------
     private CategoryDTO toDto(Category c) {
         return new CategoryDTO(
                 c.getId(),
@@ -49,6 +42,7 @@ public class CategoryController {
         );
     }
 
+    // ---------- Errors ----------
     private ResponseEntity<Map<String, Object>> error(HttpStatus status, String msg) {
         Map<String, Object> body = new HashMap<>();
         body.put("error", msg);
@@ -59,253 +53,258 @@ public class CategoryController {
         return error(HttpStatus.BAD_REQUEST, msg);
     }
 
-    private String normalizeName(String name) {
-        return name == null ? null : name.trim().toUpperCase();
+    private ResponseEntity<Map<String, Object>> unauthorized(String msg) {
+        return error(HttpStatus.UNAUTHORIZED, msg);
     }
 
-    private String normalizeIconLib(String iconLib) {
-        return (iconLib == null || iconLib.isBlank()) ? "Ionicons" : iconLib.trim();
+    private ResponseEntity<Map<String, Object>> forbidden(String msg) {
+        return error(HttpStatus.FORBIDDEN, msg);
     }
 
-    // ✅ Resolve PROJECT id from ownerProjectId (AdminUserProject id)
-    private Long resolveProjectIdFromOwnerProject(Long ownerProjectId) {
-        return aupRepo.findProjectIdByLinkId(ownerProjectId)
-                .orElseThrow(() -> new IllegalArgumentException("ownerProject not found: " + ownerProjectId));
+    private Long ownerProjectIdFromAuth(String authHeader) {
+        return jwtUtil.requireOwnerProjectId(authHeader);
     }
 
-    private void ensureIconExistsIfNeeded(boolean ensureIconExists, String iconName, String iconLib) {
-        if (!ensureIconExists) return;
-        if (iconName == null || iconName.isBlank()) return;
-
-        Optional<Icon> icOpt = iconRepo.findByNameIgnoreCase(iconName.trim());
-        if (icOpt.isEmpty()) {
-            iconRepo.save(new Icon(iconName.trim(), iconLib));
-        } else {
-            Icon ic = icOpt.get();
-            if (ic.getLibrary() == null || !ic.getLibrary().equalsIgnoreCase(iconLib)) {
-                ic.setLibrary(iconLib);
-                iconRepo.save(ic);
-            }
-        }
+    private ResponseEntity<Map<String, Object>> authFail(String msg) {
+        // if requireOwnerProjectId says "Forbidden" -> 403 else 401
+        if (msg != null && msg.equalsIgnoreCase("Forbidden")) return forbidden(msg);
+        return unauthorized(msg);
     }
 
-    // =========================
-    // READ
-    // =========================
-
-    // ⚠️ ADMIN ONLY: lists ALL categories in DB (all owners/projects)
+    // ---------- READ (tenant-safe) ----------
     @GetMapping
-    public List<CategoryDTO> listAll() {
-        return categoryRepo.findAllByOrderByNameAsc()
-                .stream()
-                .map(this::toDto)
-                .toList();
-    }
-
-    // ⚠️ PROJECT SCOPE (shared across apps under same project)
-    @GetMapping("/by-project/{projectId}")
-    public List<CategoryDTO> listByProject(@PathVariable Long projectId) {
-        return categoryRepo.findByProject_IdOrderByNameAsc(projectId)
-                .stream()
-                .map(this::toDto)
-                .toList();
-    }
-
-    // ✅ OWNER PROJECT SCOPE (TENANT): app1/app2/app3 separated
-    @GetMapping("/by-owner-project/{ownerProjectId}")
-    public ResponseEntity<?> listByOwnerProject(@PathVariable Long ownerProjectId) {
+    public ResponseEntity<?> listAllForTenant(
+            @RequestHeader(value = "Authorization", required = false) String auth
+    ) {
         try {
-            // optional validation that ownerProject exists:
-            resolveProjectIdFromOwnerProject(ownerProjectId);
+            if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            List<CategoryDTO> out = categoryRepo.findByOwnerProjectIdOrderByNameAsc(ownerProjectId)
-                    .stream()
-                    .map(this::toDto)
-                    .toList();
+            Long ownerProjectId = ownerProjectIdFromAuth(auth);
+
+            List<CategoryDTO> out = categoryService.listAllForOwnerProject(ownerProjectId)
+                    .stream().map(this::toDto).toList();
 
             return ResponseEntity.ok(out);
+
         } catch (IllegalArgumentException e) {
-            return badRequest(e.getMessage());
+            return authFail(e.getMessage());
         } catch (Exception e) {
-            return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to load categories by owner project");
+            log.error("list categories failed", e);
+            return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to load categories");
         }
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<CategoryDTO> get(@PathVariable Long id) {
-        return categoryRepo.findById(id)
-                .map(c -> ResponseEntity.ok(toDto(c)))
-                .orElse(ResponseEntity.notFound().build());
+    public ResponseEntity<?> getForTenant(
+            @PathVariable Long id,
+            @RequestHeader(value = "Authorization", required = false) String auth
+    ) {
+        try {
+            if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
+
+            Long ownerProjectId = ownerProjectIdFromAuth(auth);
+
+            Category c = categoryService.getForTenant(id, ownerProjectId);
+            return ResponseEntity.ok(toDto(c));
+
+        } catch (IllegalArgumentException e) {
+            // ✅ silent not found (no tenant leak)
+            return error(HttpStatus.NOT_FOUND, "Category not found: " + id);
+        } catch (Exception e) {
+            log.error("get category failed", e);
+            return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to load category");
+        }
     }
 
-    // =========================
-    // CREATE
-    // =========================
-
-    // ⚠️ PROJECT-SCOPED create (shared across apps)
-    @PostMapping
-    public ResponseEntity<?> create(@RequestBody CategoryRequest req,
-                                    @RequestParam(defaultValue = "true") boolean ensureIconExists) {
+    // ---------- LIST BY PROJECT (tenant-safe) ----------
+    @GetMapping("/by-project/{projectId}")
+    public ResponseEntity<?> listByProjectForTenant(
+            @PathVariable Long projectId,
+            @RequestHeader(value = "Authorization", required = false) String auth
+    ) {
         try {
-            if (req.getProjectId() == null) return badRequest("projectId is required");
-            if (req.getName() == null || req.getName().isBlank()) return badRequest("name is required");
+            if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            Project project = projectRepo.findById(req.getProjectId()).orElse(null);
-            if (project == null) return badRequest("project not found: " + req.getProjectId());
+            Long ownerProjectId = ownerProjectIdFromAuth(auth);
 
-            String name = normalizeName(req.getName());
-            String iconName = (req.getIconName() == null) ? null : req.getIconName().trim();
-            String iconLib = normalizeIconLib(req.getIconLibrary());
+            List<CategoryDTO> out = categoryService.listByProjectForTenant(projectId, ownerProjectId)
+                    .stream().map(this::toDto).toList();
 
-            // project-scoped uniqueness
-            if (categoryRepo.existsByNameIgnoreCaseAndProject_Id(name, project.getId())) {
-                return error(HttpStatus.CONFLICT, "Category already exists in this project: " + name);
+            return ResponseEntity.ok(out);
+
+        } catch (IllegalArgumentException e) {
+            // ✅ if project mismatch -> silent not found
+            String msg = e.getMessage() == null ? "" : e.getMessage();
+            if (msg.equalsIgnoreCase("Category not found")) {
+                return error(HttpStatus.NOT_FOUND, "Project not found: " + projectId);
             }
+            return authFail(msg);
+        } catch (Exception e) {
+            log.error("listByProject failed", e);
+            return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to load categories by project");
+        }
+    }
 
-            ensureIconExistsIfNeeded(ensureIconExists, iconName, iconLib);
+    // ---------- CREATE (tenant-safe) ----------
+    @PostMapping
+    public ResponseEntity<?> createForTenant(
+            @RequestBody CategoryRequest req,
+            @RequestParam(defaultValue = "true") boolean ensureIconExists,
+            @RequestHeader(value = "Authorization", required = false) String auth
+    ) {
+        try {
+            if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            Category entity = new Category();
-            entity.setProject(project);
-            entity.setName(name);
-            entity.setIconName(iconName);
-            entity.setIconLibrary(iconLib);
+            Long ownerProjectId = ownerProjectIdFromAuth(auth);
 
-            // IMPORTANT: project-scoped create means tenant is null
-            entity.setOwnerProjectId(null);
-
-            Category saved = categoryRepo.save(entity);
+            Category saved = categoryService.createForTenant(ownerProjectId, req, ensureIconExists);
 
             return ResponseEntity
                     .created(URI.create("/api/admin/categories/" + saved.getId()))
                     .body(toDto(saved));
+
+        } catch (IllegalArgumentException e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage();
+            if (msg.equalsIgnoreCase("Forbidden") || msg.toLowerCase().contains("token")) {
+                return authFail(msg);
+            }
+            // name conflict -> 409 (better UX)
+            if (msg.toLowerCase().contains("already exists")) {
+                return error(HttpStatus.CONFLICT, msg);
+            }
+            return badRequest(msg);
+
         } catch (Exception e) {
+            log.error("create category failed", e);
             return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to create category");
         }
     }
 
-    // ✅ TENANT-SCOPED create (ownerProjectId)
-    @PostMapping("/by-owner-project/{ownerProjectId}")
-    public ResponseEntity<?> createByOwnerProject(@PathVariable Long ownerProjectId,
-                                                 @RequestBody CategoryRequest req,
-                                                 @RequestParam(defaultValue = "true") boolean ensureIconExists) {
-        try {
-            if (req.getName() == null || req.getName().isBlank()) return badRequest("name is required");
-
-            Long projectId = resolveProjectIdFromOwnerProject(ownerProjectId);
-            Project projectRef = projectRepo.getReferenceById(projectId);
-
-            String name = normalizeName(req.getName());
-            String iconName = (req.getIconName() == null) ? null : req.getIconName().trim();
-            String iconLib = normalizeIconLib(req.getIconLibrary());
-
-            // ✅ ownerProject-scoped uniqueness
-            if (categoryRepo.existsByNameIgnoreCaseAndOwnerProjectId(name, ownerProjectId)) {
-                return error(HttpStatus.CONFLICT, "Category already exists in this owner project: " + name);
-            }
-
-            ensureIconExistsIfNeeded(ensureIconExists, iconName, iconLib);
-
-            Category entity = new Category();
-            entity.setProject(projectRef);               // still required (FK not null)
-            entity.setOwnerProjectId(ownerProjectId);    // ✅ THIS is the tenant scope
-            entity.setName(name);
-            entity.setIconName(iconName);
-            entity.setIconLibrary(iconLib);
-
-            Category saved = categoryRepo.save(entity);
-
-            return ResponseEntity
-                    .created(URI.create("/api/admin/categories/" + saved.getId()))
-                    .body(toDto(saved));
-        } catch (IllegalArgumentException e) {
-            return badRequest(e.getMessage());
-        } catch (Exception e) {
-            return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to create category by owner project");
-        }
-    }
-
-    // =========================
-    // UPDATE
-    // =========================
-
+    // ---------- UPDATE (tenant-safe) ----------
     @PutMapping("/{id}")
-    public ResponseEntity<?> update(@PathVariable Long id,
-                                    @RequestBody CategoryRequest req,
-                                    @RequestParam(defaultValue = "true") boolean ensureIconExists) {
+    public ResponseEntity<?> updateForTenant(
+            @PathVariable Long id,
+            @RequestBody CategoryRequest req,
+            @RequestParam(defaultValue = "true") boolean ensureIconExists,
+            @RequestHeader(value = "Authorization", required = false) String auth
+    ) {
         try {
-            Optional<Category> opt = categoryRepo.findById(id);
-            if (opt.isEmpty()) return error(HttpStatus.NOT_FOUND, "Category not found");
+            if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            Category existing = opt.get();
+            Long ownerProjectId = ownerProjectIdFromAuth(auth);
 
-            // If name update -> enforce uniqueness in SAME scope:
-            // - if ownerProjectId is set -> uniqueness per ownerProject
-            // - else -> uniqueness per project
-            if (req.getName() != null && !req.getName().isBlank()) {
-                String newName = normalizeName(req.getName());
-
-                Long ownerProjectId = existing.getOwnerProjectId();
-                Long projectId = existing.getProject() != null ? existing.getProject().getId() : null;
-
-                boolean changed = existing.getName() == null || !existing.getName().equalsIgnoreCase(newName);
-
-                if (changed) {
-                    if (ownerProjectId != null) {
-                        if (categoryRepo.existsByNameIgnoreCaseAndOwnerProjectId(newName, ownerProjectId)) {
-                            return error(HttpStatus.CONFLICT, "Category already exists in this owner project: " + newName);
-                        }
-                    } else if (projectId != null) {
-                        if (categoryRepo.existsByNameIgnoreCaseAndProject_Id(newName, projectId)) {
-                            return error(HttpStatus.CONFLICT, "Category already exists in this project: " + newName);
-                        }
-                    }
-                }
-
-                existing.setName(newName);
-            }
-
-            // Icon name update
-            if (req.getIconName() != null) {
-                String newIcon = req.getIconName().trim();
-                existing.setIconName(newIcon);
-
-                if (ensureIconExists && !newIcon.isBlank()) {
-                    String lib = normalizeIconLib(
-                            req.getIconLibrary() != null ? req.getIconLibrary() : existing.getIconLibrary()
-                    );
-                    ensureIconExistsIfNeeded(true, newIcon, lib);
-                }
-            }
-
-            // Icon library update
-            if (req.getIconLibrary() != null && !req.getIconLibrary().isBlank()) {
-                String newLib = req.getIconLibrary().trim();
-                existing.setIconLibrary(newLib);
-
-                if (ensureIconExists && existing.getIconName() != null && !existing.getIconName().isBlank()) {
-                    ensureIconExistsIfNeeded(true, existing.getIconName(), newLib);
-                }
-            }
-
-            Category saved = categoryRepo.save(existing);
+            Category saved = categoryService.updateForTenant(id, ownerProjectId, req, ensureIconExists);
             return ResponseEntity.ok(toDto(saved));
+
+        } catch (IllegalArgumentException e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage();
+            if (msg.equalsIgnoreCase("Forbidden") || msg.toLowerCase().contains("token")) {
+                return authFail(msg);
+            }
+            if (msg.toLowerCase().contains("already exists")) {
+                return error(HttpStatus.CONFLICT, msg);
+            }
+            // ✅ silent not found
+            return error(HttpStatus.NOT_FOUND, "Category not found: " + id);
+
         } catch (Exception e) {
+            log.error("update category failed", e);
             return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update category");
         }
     }
 
-    // =========================
-    // DELETE
-    // =========================
-
+    // ---------- DELETE (tenant-safe) ----------
     @DeleteMapping("/{id}")
-    public ResponseEntity<?> delete(@PathVariable Long id) {
+    public ResponseEntity<?> deleteForTenant(
+            @PathVariable Long id,
+            @RequestHeader(value = "Authorization", required = false) String auth
+    ) {
         try {
-            if (!categoryRepo.existsById(id)) return error(HttpStatus.NOT_FOUND, "Category not found");
-            categoryRepo.deleteById(id);
-            return ResponseEntity.noContent().build();
+            if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
+
+            Long ownerProjectId = ownerProjectIdFromAuth(auth);
+
+            CategoryService.DeleteCascadeResult res = categoryService.deleteCategoryCascade(id, ownerProjectId);
+
+            return ResponseEntity.ok(Map.of(
+                    "message", "Category deleted",
+                    "deletedItemTypes", res.deletedItemTypes()
+            ));
+
+        } catch (DeleteBlockedException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "error", "Cannot delete category because it is still used.",
+                    "code", e.getCode(),
+                    "count", e.getCount()
+            ));
+
+        } catch (IllegalArgumentException e) {
+            // ✅ silent not found
+            return error(HttpStatus.NOT_FOUND, "Category not found: " + id);
+
         } catch (Exception e) {
+            log.error("delete category failed", e);
             return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete category");
+        }
+    }
+
+    // ---------------- BACKWARD COMPAT ENDPOINTS ----------------
+    // Keeps your old routes alive but now they are tenant-verified (no spoofing).
+
+    @GetMapping("/by-owner-project/{ownerProjectId}")
+    public ResponseEntity<?> listByOwnerProjectLegacy(
+            @PathVariable Long ownerProjectId,
+            @RequestHeader(value = "Authorization", required = false) String auth
+    ) {
+        try {
+            if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
+
+            Long tokenTenant = ownerProjectIdFromAuth(auth);
+            if (!tokenTenant.equals(ownerProjectId)) {
+                return error(HttpStatus.NOT_FOUND, "Categories not found");
+            }
+
+            List<CategoryDTO> out = categoryService.listAllForOwnerProject(tokenTenant)
+                    .stream().map(this::toDto).toList();
+
+            return ResponseEntity.ok(out);
+
+        } catch (IllegalArgumentException e) {
+            return authFail(e.getMessage());
+        } catch (Exception e) {
+            log.error("listByOwnerProject legacy failed", e);
+            return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to load categories");
+        }
+    }
+
+    @PostMapping("/by-owner-project/{ownerProjectId}")
+    public ResponseEntity<?> createByOwnerProjectLegacy(
+            @PathVariable Long ownerProjectId,
+            @RequestBody CategoryRequest req,
+            @RequestParam(defaultValue = "true") boolean ensureIconExists,
+            @RequestHeader(value = "Authorization", required = false) String auth
+    ) {
+        try {
+            if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
+
+            Long tokenTenant = ownerProjectIdFromAuth(auth);
+            if (!tokenTenant.equals(ownerProjectId)) {
+                return error(HttpStatus.NOT_FOUND, "Categories not found");
+            }
+
+            Category saved = categoryService.createForTenant(tokenTenant, req, ensureIconExists);
+
+            return ResponseEntity
+                    .created(URI.create("/api/admin/categories/" + saved.getId()))
+                    .body(toDto(saved));
+
+        } catch (IllegalArgumentException e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage();
+            if (msg.toLowerCase().contains("already exists")) return error(HttpStatus.CONFLICT, msg);
+            return badRequest(msg);
+        } catch (Exception e) {
+            log.error("create legacy failed", e);
+            return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to create category");
         }
     }
 }
