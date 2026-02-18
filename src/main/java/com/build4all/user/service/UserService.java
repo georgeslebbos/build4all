@@ -24,6 +24,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import jakarta.mail.internet.InternetAddress;
+import com.build4all.common.errors.ApiException;
+import org.springframework.http.HttpStatus;
 
 
 import java.io.IOException;
@@ -236,7 +238,12 @@ public class UserService {
         if (pending != null) {
             if (Boolean.TRUE.equals(pending.isVerified())) {
                 
-                throw new IllegalStateException("ALREADY_VERIFIED_PENDING:" + pending.getId());
+            	throw new ApiException(
+            		    HttpStatus.CONFLICT,
+            		    "PENDING_ALREADY_VERIFIED",
+            		    "Pending already verified. Continue profile setup.",
+            		    Map.of("pendingId", pending.getId())
+            		);
             }
 
             pending.setPasswordHash(passwordEncoder.encode(password));
@@ -742,36 +749,30 @@ public class UserService {
                 .toList();
     }
 
+    @Transactional
     public boolean deleteUserById(Long id) {
-
-        // SQL:
-        //   SELECT * FROM users WHERE user_id=:id LIMIT 1;
         return userRepository.findById(id)
                 .map(u -> {
-                    // SQL:
-                    //   DELETE FROM users WHERE user_id=:id;
-                    userRepository.delete(u);
+                    u.setStatus(getStatus("DELETED")); 
+                    u.setUpdatedAt(LocalDateTime.now());
+                    userRepository.save(u);
                     return true;
                 })
                 .orElse(false);
     }
 
+    @Transactional
     public boolean deleteUserByIdWithPassword(Long id, String inputPassword) {
+        Optional<Users> opt = userRepository.findById(id);
+        if (opt.isEmpty()) return false;
 
-        // SQL:
-        //   SELECT * FROM users WHERE user_id=:id LIMIT 1;
-        Optional<Users> optionalUser = userRepository.findById(id);
-
-        if (optionalUser.isEmpty()) return false;
-
-        Users user = optionalUser.get();
-
-        // Not SQL: compare hash
+        Users user = opt.get();
         if (!passwordEncoder.matches(inputPassword, user.getPasswordHash())) return false;
 
-        // SQL:
-        //   DELETE FROM users WHERE user_id=:id;
-        userRepository.delete(user);
+        user.setStatus(getStatus("DELETED")); 
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepository.save(user);
+
         return true;
     }
 
@@ -1019,7 +1020,7 @@ public class UserService {
      */
     @Scheduled(cron = "0 0 3 * * *")
     public void permanentlyDeleteUsersAfter90Days() {
-        LocalDateTime cutoff = LocalDateTime.now().minusDays(90);
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(30);
 
         // SQL:
         //   SELECT * FROM users;
@@ -1029,6 +1030,93 @@ public class UserService {
                 // SQL per user:
                 //   DELETE FROM users WHERE user_id=?;
                 .forEach(userRepository::delete);
+    }
+    
+ // Every 12 hours (pick what you want)
+    @Scheduled(cron = "0 0 */12 * * *")
+    @Transactional
+    public void anonymizeDeletedUsersAfter90Days() {
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(30);
+
+        List<Users> usersToPurge = userRepository.findDeletedUsersBefore(cutoff);
+
+        for (Users u : usersToPurge) {
+            if (isAlreadyAnonymized(u)) continue;
+
+            anonymizeUser(u);
+        }
+
+        // Not required strictly (Hibernate dirty checking will flush),
+        // but harmless and explicit:
+        userRepository.saveAll(usersToPurge);
+    }
+
+    private boolean isAlreadyAnonymized(Users u) {
+        // Simple “signature” to avoid re-processing
+        return u.getUsername() != null
+                && u.getUsername().startsWith("deleted_")
+                && "Deleted".equals(u.getFirstName())
+                && "User".equals(u.getLastName())
+                && u.getEmail() == null
+                && u.getPhoneNumber() == null;
+    }
+
+    private void anonymizeUser(Users u) {
+        // tenant id for uniqueness check
+        Long aupId = (u.getOwnerProject() != null) ? u.getOwnerProject().getId() : null;
+
+        // 1) generate unique username inside same tenant
+        String newUsername = generateUniqueDeletedUsername(u, aupId);
+        u.setUsername(newUsername);
+
+        // 2) wipe PII
+        u.setEmail(null);
+        u.setPhoneNumber(null);
+
+        // ⚠️ adjust these to YOUR entity field names if different:
+        // u.setProfileImageUrl(null);   // if your field is profileImageUrl
+        // u.setProfilePictureUrl(null); // if your field is profilePictureUrl
+
+        // if you have social ids
+        trySetGoogleFacebookNull(u);
+
+        // 3) replace names
+        u.setFirstName("Deleted");
+        u.setLastName("User");
+
+        // 4) disable login forever (random password hash)
+        // ⚠️ adjust setter name to your entity: setPasswordHash / setPassword / setHashedPassword...
+        u.setPasswordHash(passwordEncoder.encode(UUID.randomUUID().toString()));
+
+        // 5) optional safety
+        u.setIsPublicProfile(false);
+
+        // 6) mark updated
+        u.setUpdatedAt(LocalDateTime.now());
+    }
+
+    private String generateUniqueDeletedUsername(Users u, Long aupId) {
+        String base = "deleted_" + u.getId();
+        String candidate = base;
+        int i = 1;
+
+        // If aupId is null, fallback to global uniqueness check (you have existsByUsernameIgnoreCase)
+        while (!candidate.equalsIgnoreCase(u.getUsername())
+                && (aupId != null
+                    ? userRepository.existsByUsernameIgnoreCaseAndOwnerProject_Id(candidate, aupId)
+                    : userRepository.existsByUsernameIgnoreCase(candidate))) {
+            candidate = base + "_" + i;
+            i++;
+        }
+
+        return candidate;
+    }
+
+    private void trySetGoogleFacebookNull(Users u) {
+        // If your entity has these fields, uncomment.
+        // If not, leave it as-is.
+        // u.setGoogleId(null);
+        // u.setFacebookId(null);
     }
 
     /* ============== Legacy/global convenience methods ============== */

@@ -11,6 +11,8 @@ import com.build4all.user.domain.Users;
 import com.build4all.user.repository.UsersRepository;
 import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.user.dto.UserSummaryDTO;
+import com.build4all.admin.dto.AdminUserUpdateProfileRequest;
+import org.springframework.util.StringUtils;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -335,6 +337,75 @@ public class AdminUserService {
             a.getCreatedAt(),
             a.getUpdatedAt()
         );
+    }
+
+    @Transactional
+    public AdminUserProfileDTO updateAdminProfile(Long adminId, AdminUserUpdateProfileRequest req) {
+
+        AdminUser admin = requireById(adminId);
+
+        // --- username ---
+        if (StringUtils.hasText(req.getUsername())) {
+            String newUsername = req.getUsername().trim();
+            if (adminUserRepository.existsByUsernameIgnoreCaseAndAdminIdNot(newUsername, adminId)) {
+                throw new RuntimeException("Username already in use");
+            }
+            admin.setUsername(newUsername);
+        }
+
+        // --- first / last name ---
+        if (StringUtils.hasText(req.getFirstName())) {
+            admin.setFirstName(req.getFirstName().trim());
+        }
+        if (StringUtils.hasText(req.getLastName())) {
+            admin.setLastName(req.getLastName().trim());
+        }
+
+        // --- email ---
+        if (StringUtils.hasText(req.getEmail())) {
+            String newEmail = req.getEmail().trim();
+            if (adminUserRepository.existsByEmailIgnoreCaseAndAdminIdNot(newEmail, adminId)) {
+                throw new RuntimeException("Email already in use");
+            }
+            admin.setEmail(newEmail);
+        }
+
+        // --- phone (allow clearing by sending empty string) ---
+        if (req.getPhoneNumber() != null) {
+            String p = req.getPhoneNumber().trim();
+            admin.setPhoneNumber(p.isEmpty() ? null : p);
+        }
+
+        // --- notification toggles ---
+        if (req.getNotifyItemUpdates() != null) {
+            admin.setNotifyItemUpdates(req.getNotifyItemUpdates());
+        }
+        if (req.getNotifyUserFeedback() != null) {
+            admin.setNotifyUserFeedback(req.getNotifyUserFeedback());
+        }
+
+        // --- AI flag ---
+        if (req.getAiEnabled() != null) {
+            admin.setAiEnabled(req.getAiEnabled());
+        }
+
+        // --- optional password change ---
+        boolean wantsPasswordChange = StringUtils.hasText(req.getNewPassword());
+        if (wantsPasswordChange) {
+            if (!StringUtils.hasText(req.getCurrentPassword())) {
+                throw new RuntimeException("Current password is required to change password");
+            }
+
+            boolean ok = passwordEncoder.matches(req.getCurrentPassword(), admin.getPasswordHash());
+            if (!ok) {
+                throw new RuntimeException("Current password is incorrect");
+            }
+
+            admin.setPasswordHash(passwordEncoder.encode(req.getNewPassword()));
+        }
+
+        adminUserRepository.save(admin);
+        return toProfileDTO(admin);
     }
 
 

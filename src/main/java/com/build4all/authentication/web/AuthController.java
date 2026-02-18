@@ -125,48 +125,38 @@ public class AuthController {
             @RequestParam("password") String password,
             @RequestParam("ownerProjectLinkId") Long ownerProjectLinkId
     ) {
-        try {
-            if (ownerProjectLinkId == null) {
-                return ResponseEntity.badRequest().body(Map.of("error", "ownerProjectLinkId is required"));
-            }
-
-            if (password == null || password.isBlank()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "password is required"));
-            }
-
-            boolean emailProvided = email != null && !email.isBlank();
-            boolean phoneProvided = phoneNumber != null && !phoneNumber.isBlank();
-
-            if (!emailProvided && !phoneProvided) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Provide email or phoneNumber"));
-            }
-            if (emailProvided && phoneProvided) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Provide only one: email OR phoneNumber"));
-            }
-
-            Map<String, String> data = new HashMap<>();
-            data.put("password", password.trim());
-
-            if (emailProvided) {
-                validateEmailBeforeSendingOrThrow(email);   // ✅ format + typo + DNS
-                data.put("email", email.trim());
-            }
-
-            if (phoneProvided) {
-                data.put("phoneNumber", phoneNumber.trim());
-            }
-
-            userService.sendVerificationCodeForRegistration(data, ownerProjectLinkId);
-
-            return ResponseEntity.ok(Map.of("message", "Verification code sent"));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-        } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Server error: " + e.getMessage()));
+        if (ownerProjectLinkId == null) {
+            throw new IllegalArgumentException("ownerProjectLinkId is required");
         }
+        if (password == null || password.isBlank()) {
+            throw new IllegalArgumentException("password is required");
+        }
+
+        boolean emailProvided = email != null && !email.isBlank();
+        boolean phoneProvided = phoneNumber != null && !phoneNumber.isBlank();
+
+        if (!emailProvided && !phoneProvided) {
+            throw new IllegalArgumentException("Provide email or phoneNumber");
+        }
+        if (emailProvided && phoneProvided) {
+            throw new IllegalArgumentException("Provide only one: email OR phoneNumber");
+        }
+
+        Map<String, String> data = new HashMap<>();
+        data.put("password", password.trim());
+
+        if (emailProvided) {
+            validateEmailBeforeSendingOrThrow(email);
+            data.put("email", email.trim());
+        } else {
+            data.put("phoneNumber", phoneNumber.trim());
+        }
+
+        userService.sendVerificationCodeForRegistration(data, ownerProjectLinkId);
+
+        return ResponseEntity.ok(Map.of("message", "Verification code sent"));
     }
+
 
     @PostMapping(
             value = "/verify-email-code",

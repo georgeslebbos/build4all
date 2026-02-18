@@ -65,6 +65,16 @@ public interface UsersRepository extends JpaRepository<Users, Long> {
      */
     Users findByPhoneNumberAndOwnerProject(String phoneNumber, AdminUserProject link);
 
+    
+    @Query("""
+    		  select u from Users u
+    		  join u.status s
+    		  where s.name = 'DELETED'
+    		    and u.updatedAt < :cutoff
+    		""")
+    		List<Users> findDeletedUsersBefore(@Param("cutoff") LocalDateTime cutoff);
+
+    
     /**
      * Find by username inside a tenant link.
      *

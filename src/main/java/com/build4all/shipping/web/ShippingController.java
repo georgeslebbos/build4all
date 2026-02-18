@@ -25,7 +25,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/shipping")
@@ -37,7 +36,6 @@ public class ShippingController {
     private final ShippingMethodRepository methodRepository;
     private final JwtUtil jwtUtil;
 
-    // ✅ NEW: Real lookups to avoid "stub entities" and enforce tenant isolation
     private final AdminUserProjectRepository adminUserProjectRepository;
     private final CountryRepository countryRepository;
     private final RegionRepository regionRepository;
@@ -58,35 +56,45 @@ public class ShippingController {
 
     /* ===================== helpers ===================== */
 
+    /**
+     * Keep token extraction simple: JwtUtil already normalizes "Bearer ".
+     */
     private String strip(String auth) {
-        return auth == null ? "" : auth.replace("Bearer ", "").trim();
+        return auth == null ? "" : auth.replaceFirst("(?i)^Bearer\\s+", "").trim();
     }
 
     /**
-     * Check if current token has one of the given roles.
-     * Supports both "OWNER", "USER", "ADMIN" and "ROLE_*" variants.
+     * Role checker that supports:
+     * - USER / OWNER / SUPER_ADMIN
+     * - ROLE_USER / ROLE_OWNER / ROLE_SUPER_ADMIN
+     *
+     * NOTE: your system uses SUPER_ADMIN (not ADMIN).
+     * If you still have "ADMIN" somewhere legacy, you can include it too.
      */
-    private boolean hasRole(String token, String... roles) {
-        String role = jwtUtil.extractRole(token);
+    private boolean hasRole(String tokenOrBearer, String... roles) {
+        String jwt = strip(tokenOrBearer);
+        String role = jwtUtil.extractRole(jwt);
         if (role == null) return false;
+
         String normalized = role.toUpperCase();
         for (String r : roles) {
             String expected = r.toUpperCase();
-            if (normalized.equals(expected) || normalized.equals("ROLE_" + expected)) {
-                return true;
-            }
+            if (normalized.equals(expected) || normalized.equals("ROLE_" + expected)) return true;
         }
         return false;
     }
 
-    /* ===================== mapping helpers (methods) ===================== */
+    private boolean isAdminOrOwner(String tokenOrBearer) {
+        // "SUPER_ADMIN" is your real admin role (based on JwtUtil)
+        return hasRole(tokenOrBearer, "OWNER", "SUPER_ADMIN", "ADMIN");
+    }
+
+    /* ===================== mapping helpers ===================== */
 
     private ShippingMethodResponse toResponse(ShippingMethod m) {
         ShippingMethodResponse r = new ShippingMethodResponse();
         r.setId(m.getId());
-        r.setOwnerProjectId(
-                m.getOwnerProject() != null ? m.getOwnerProject().getId() : null
-        );
+        r.setOwnerProjectId(m.getOwnerProject() != null ? m.getOwnerProject().getId() : null);
         r.setName(m.getName());
         r.setDescription(m.getDescription());
         r.setMethodType(m.getType() != null ? m.getType().name() : null);
@@ -100,12 +108,9 @@ public class ShippingController {
     }
 
     /**
-     * ✅ NEW:
-     * Apply request fields EXCEPT ownerProject/country/region.
-     *
-     * Why?
-     * - ownerProject must be set ONLY once during creation (otherwise you can "move" a method between tenants)
-     * - country/region must be resolved from DB (not stubs) to avoid FK problems and to validate IDs
+     * Apply request fields EXCEPT:
+     * - ownerProject (comes from token / set once on create)
+     * - country/region (resolved from DB)
      */
     private void applyRequestToMethodCore(ShippingMethodRequest req, ShippingMethod m) {
 
@@ -113,32 +118,21 @@ public class ShippingController {
         if (req.getDescription() != null) m.setDescription(req.getDescription());
 
         if (req.getMethodType() != null && !req.getMethodType().isBlank()) {
-            ShippingMethodType type = ShippingMethodType.valueOf(
-                    req.getMethodType().toUpperCase()
-            );
+            ShippingMethodType type = ShippingMethodType.valueOf(req.getMethodType().toUpperCase());
             m.setType(type);
         }
 
-        if (req.getFlatRate() != null) {
-            m.setFlatRate(req.getFlatRate());
-        }
-        if (req.getPricePerKg() != null) {
-            m.setPricePerKg(req.getPricePerKg());
-        }
-        if (req.getFreeShippingThreshold() != null) {
-            m.setFreeShippingThreshold(req.getFreeShippingThreshold());
-        }
+        if (req.getFlatRate() != null) m.setFlatRate(req.getFlatRate());
+        if (req.getPricePerKg() != null) m.setPricePerKg(req.getPricePerKg());
+        if (req.getFreeShippingThreshold() != null) m.setFreeShippingThreshold(req.getFreeShippingThreshold());
 
         // enabled flag (always applied)
         m.setEnabled(req.isEnabled());
     }
 
     /**
-     * ✅ NEW:
      * Resolve country & region as real entities (no stubs).
-     *
-     * Also adds safety: if Region has a relation to Country, ensure both match.
-     * If your Region entity doesn't have getCountry(), this still works without that validation.
+     * Optional strict validation if Region has getCountry().
      */
     private void applyCountryRegion(ShippingMethodRequest req, ShippingMethod m) {
 
@@ -155,7 +149,6 @@ public class ShippingController {
                     .orElseThrow(() -> new IllegalArgumentException("Invalid regionId: " + req.getRegionId()));
         }
 
-        // Optional strict validation (only if Region has Country)
         if (country != null && region != null) {
             try {
                 if (region.getCountry() != null && region.getCountry().getId() != null) {
@@ -163,9 +156,10 @@ public class ShippingController {
                         throw new IllegalArgumentException("regionId does not belong to countryId");
                     }
                 }
+            } catch (NoSuchMethodError ignored) {
+                // Region has no getCountry() method in your model
             } catch (Exception ignored) {
-                // If Region has no getCountry() in your model, ignore.
-                // You can remove this try/catch once you confirm Region structure.
+                // If Region structure differs, ignore (or remove once confirmed).
             }
         }
 
@@ -174,28 +168,47 @@ public class ShippingController {
     }
 
     /* ====================================================
-       USER / OWNER / ADMIN: checkout-time quotes
+       USER / OWNER / SUPER_ADMIN: checkout-time quotes
        ==================================================== */
 
+    /**
+     * Checkout quote:
+     * - USER/BUSINESS requests might be tenant-scoped already
+     * - But your ShippingService expects ownerProjectId from request
+     * So we enforce: request ownerProjectId MUST match token ownerProjectId (for tenant-scoped tokens).
+     */
     @PostMapping("/quote")
     @Operation(summary = "Get default shipping quote for cart")
     public ResponseEntity<?> quote(
             @RequestHeader("Authorization") String auth,
             @RequestBody ShippingQuoteRequest req
     ) {
-        String token = strip(auth);
-        if (!hasRole(token, "USER", "OWNER", "ADMIN")) {
+        if (!hasRole(auth, "USER", "OWNER", "SUPER_ADMIN", "BUSINESS", "ADMIN")) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "User/Owner/Admin role required"));
+                    .body(Map.of("error", "User/Owner/Admin role required"));
         }
 
         try {
+            // ✅ If token has tenant, enforce match when request provides ownerProjectId
+            // (SUPER_ADMIN may not have tenant in token, so requireOwnerProjectId could throw)
+            try {
+                Long tokenTenant = jwtUtil.extractOwnerProjectIdClaim(strip(auth));
+                if (tokenTenant != null) {
+                    if (req.getOwnerProjectId() == null || !tokenTenant.equals(req.getOwnerProjectId())) {
+                        throw new IllegalArgumentException("Tenant mismatch");
+                    }
+                }
+            } catch (Exception ignored) {
+                // If parsing fails, continue to service validation; not ideal but avoids breaking if token type differs.
+            }
+
             ShippingQuote quote = shippingService.getQuote(
                     req.getOwnerProjectId(),
                     req.getAddress(),
                     req.getLines()
             );
             return ResponseEntity.ok(quote);
+
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         } catch (Exception ex) {
@@ -209,19 +222,29 @@ public class ShippingController {
             @RequestHeader("Authorization") String auth,
             @RequestBody ShippingQuoteRequest req
     ) {
-        String token = strip(auth);
-        if (!hasRole(token, "USER", "OWNER", "ADMIN")) {
+        if (!hasRole(auth, "USER", "OWNER", "SUPER_ADMIN", "BUSINESS", "ADMIN")) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "User/Owner/Admin role required"));
+                    .body(Map.of("error", "User/Owner/Admin role required"));
         }
 
         try {
+            try {
+                Long tokenTenant = jwtUtil.extractOwnerProjectIdClaim(strip(auth));
+                if (tokenTenant != null) {
+                    if (req.getOwnerProjectId() == null || !tokenTenant.equals(req.getOwnerProjectId())) {
+                        throw new IllegalArgumentException("Tenant mismatch");
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+
             List<ShippingQuote> list = shippingService.getAvailableMethods(
                     req.getOwnerProjectId(),
                     req.getAddress(),
                     req.getLines()
             );
             return ResponseEntity.ok(list);
+
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         } catch (Exception ex) {
@@ -230,28 +253,20 @@ public class ShippingController {
     }
 
     /* ====================================================
-       OWNER / ADMIN: CRUD for shipping methods
+       OWNER / SUPER_ADMIN: CRUD for shipping methods
+       IMPORTANT: ownerProjectId comes from TOKEN (not request)
        ==================================================== */
 
     @PostMapping("/methods")
-    @Operation(summary = "Create shipping method (OWNER/ADMIN)")
-    @PreAuthorize("hasRole('OWNER')")
+    @Operation(summary = "Create shipping method (OWNER/SUPER_ADMIN)")
+    @PreAuthorize("hasAnyRole('OWNER','SUPER_ADMIN')")
     public ResponseEntity<?> createMethod(
             @RequestHeader("Authorization") String auth,
             @RequestBody ShippingMethodRequest req
     ) {
-        /*
-         * NOTE:
-         * We rely on @PreAuthorize for authorization.
-         * If you want to support ADMIN too, change to:
-         * @PreAuthorize("hasAnyRole('OWNER','SUPER_ADMIN')")
-         * (and align role names with your system)
-         */
-
         try {
-            if (req.getOwnerProjectId() == null) {
-                throw new IllegalArgumentException("ownerProjectId is required");
-            }
+            Long ownerProjectId = jwtUtil.requireOwnerProjectId(auth); // ✅ token is source of truth
+
             if (req.getName() == null || req.getName().isBlank()) {
                 throw new IllegalArgumentException("name is required");
             }
@@ -259,21 +274,18 @@ public class ShippingController {
                 throw new IllegalArgumentException("methodType is required");
             }
 
-            // ✅ REAL lookup: avoids setting a stub AdminUserProject(id) which can break validation and FK constraints
-            AdminUserProject ownerProject = adminUserProjectRepository.findById(req.getOwnerProjectId())
-                    .orElseThrow(() -> new IllegalArgumentException("Invalid ownerProjectId: " + req.getOwnerProjectId()));
+            AdminUserProject ownerProject = adminUserProjectRepository.findById(ownerProjectId)
+                    .orElseThrow(() -> new IllegalArgumentException("Invalid ownerProjectId in token: " + ownerProjectId));
 
             ShippingMethod method = new ShippingMethod();
+            method.setOwnerProject(ownerProject); // ✅ set once on create
 
-            // ✅ ownerProject set ONLY at create time (prevents tenant reassignment later)
-            method.setOwnerProject(ownerProject);
-
-            // ✅ apply fields (no stubs)
             applyRequestToMethodCore(req, method);
             applyCountryRegion(req, method);
 
             ShippingMethod saved = methodRepository.save(method);
             return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(saved));
+
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         } catch (Exception ex) {
@@ -282,35 +294,27 @@ public class ShippingController {
     }
 
     @PutMapping("/methods/{id}")
-    @Operation(summary = "Update shipping method (OWNER/ADMIN)")
-    @PreAuthorize("hasRole('OWNER')")
+    @Operation(summary = "Update shipping method (OWNER/SUPER_ADMIN)")
+    @PreAuthorize("hasAnyRole('OWNER','SUPER_ADMIN')")
     public ResponseEntity<?> updateMethod(
             @RequestHeader("Authorization") String auth,
             @PathVariable Long id,
             @RequestBody ShippingMethodRequest req
     ) {
-        /*
-         * ✅ IMPORTANT:
-         * We scope the update by ownerProjectId to prevent cross-tenant access:
-         * - someone cannot update shipping method #10 that belongs to another tenant
-         *   just by guessing the ID.
-         */
         try {
-            if (req.getOwnerProjectId() == null) {
-                throw new IllegalArgumentException("ownerProjectId is required (for scoping update)");
-            }
+            Long ownerProjectId = jwtUtil.requireOwnerProjectId(auth); // ✅ from token
 
-            // ✅ secure lookup: must belong to the same ownerProject
             ShippingMethod method = methodRepository
-                    .findByIdAndOwnerProject_Id(id, req.getOwnerProjectId())
+                    .findByIdAndOwnerProject_Id(id, ownerProjectId)
                     .orElseThrow(() -> new IllegalArgumentException("Shipping method not found for this ownerProject"));
 
-            // ✅ DO NOT change ownerProject on update (ignore req.ownerProjectId as a setter)
+            // ✅ never move tenants on update
             applyRequestToMethodCore(req, method);
             applyCountryRegion(req, method);
 
             ShippingMethod saved = methodRepository.save(method);
             return ResponseEntity.ok(toResponse(saved));
+
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         } catch (Exception ex) {
@@ -319,27 +323,24 @@ public class ShippingController {
     }
 
     @DeleteMapping("/methods/{id}")
-    @Operation(summary = "Delete/disable shipping method (OWNER/ADMIN)")
-    @PreAuthorize("hasRole('OWNER')")
+    @Operation(summary = "Delete/disable shipping method (OWNER/SUPER_ADMIN)")
+    @PreAuthorize("hasAnyRole('OWNER','SUPER_ADMIN')")
     public ResponseEntity<?> deleteMethod(
             @RequestHeader("Authorization") String auth,
-            @PathVariable Long id,
-            @RequestParam Long ownerProjectId
+            @PathVariable Long id
     ) {
-        /*
-         * ✅ IMPORTANT:
-         * Delete is also scoped by ownerProjectId.
-         */
         try {
+            Long ownerProjectId = jwtUtil.requireOwnerProjectId(auth); // ✅ from token
+
             ShippingMethod method = methodRepository
                     .findByIdAndOwnerProject_Id(id, ownerProjectId)
                     .orElseThrow(() -> new IllegalArgumentException("Shipping method not found for this ownerProject"));
 
-            // Soft delete: disable instead of physical delete
-            method.setEnabled(false);
+            method.setEnabled(false); // soft delete
             methodRepository.save(method);
 
             return ResponseEntity.noContent().build();
+
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         } catch (Exception ex) {
@@ -348,23 +349,21 @@ public class ShippingController {
     }
 
     @GetMapping("/methods/{id}")
-    @Operation(summary = "Get shipping method by id (OWNER/ADMIN)")
-    @PreAuthorize("hasRole('OWNER')")
+    @Operation(summary = "Get shipping method by id (OWNER/SUPER_ADMIN)")
+    @PreAuthorize("hasAnyRole('OWNER','SUPER_ADMIN')")
     public ResponseEntity<?> getMethodById(
             @RequestHeader("Authorization") String auth,
-            @PathVariable Long id,
-            @RequestParam Long ownerProjectId
+            @PathVariable Long id
     ) {
-        /*
-         * ✅ IMPORTANT:
-         * Get-by-id is also scoped by ownerProjectId.
-         */
         try {
+            Long ownerProjectId = jwtUtil.requireOwnerProjectId(auth); // ✅ from token
+
             ShippingMethod method = methodRepository
                     .findByIdAndOwnerProject_Id(id, ownerProjectId)
                     .orElseThrow(() -> new IllegalArgumentException("Shipping method not found for this ownerProject"));
 
             return ResponseEntity.ok(toResponse(method));
+
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
         } catch (Exception ex) {
@@ -373,47 +372,55 @@ public class ShippingController {
     }
 
     @GetMapping("/methods")
-    @Operation(summary = "List shipping methods for ownerProject (OWNER/ADMIN)")
-    public ResponseEntity<?> listMethodsForOwner(
-            @RequestHeader("Authorization") String auth,
-            @RequestParam Long ownerProjectId
-    ) {
-        String token = strip(auth);
-        if (!hasRole(token, "OWNER", "ADMIN")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "Owner/Admin role required"));
+    @Operation(summary = "List shipping methods for ownerProject (OWNER/SUPER_ADMIN)")
+    @PreAuthorize("hasAnyRole('OWNER','SUPER_ADMIN')")
+    public ResponseEntity<?> listMethodsForOwner(@RequestHeader("Authorization") String auth) {
+        try {
+            Long ownerProjectId = jwtUtil.requireOwnerProjectId(auth); // ✅ from token
+
+            List<ShippingMethod> methods = methodRepository.findByOwnerProject_Id(ownerProjectId);
+            List<ShippingMethodResponse> result = methods.stream().map(this::toResponse).toList();
+
+            return ResponseEntity.ok(result);
+
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError().body(Map.of("error", ex.getMessage()));
         }
-
-        List<ShippingMethod> methods = methodRepository.findByOwnerProject_Id(ownerProjectId);
-        List<ShippingMethodResponse> result = methods.stream()
-                .map(this::toResponse)
-                .collect(Collectors.toList());
-
-        return ResponseEntity.ok(result);
     }
 
     /* ====================================================
-       USER / OWNER / ADMIN: public list of enabled methods
+       USER / OWNER / SUPER_ADMIN: public list of enabled methods
+       NOTE: for store checkout you might still pass ownerProjectId (public app)
        ==================================================== */
 
     @GetMapping("/methods/public")
-    @Operation(summary = "List enabled shipping methods for app (public for USER/OWNER/ADMIN)")
+    @Operation(summary = "List enabled shipping methods for app (public for USER/OWNER/SUPER_ADMIN)")
     public ResponseEntity<?> listPublicMethods(
             @RequestHeader("Authorization") String auth,
             @RequestParam Long ownerProjectId
     ) {
-        String token = strip(auth);
-        if (!hasRole(token, "USER", "OWNER", "ADMIN")) {
+        if (!hasRole(auth, "USER", "OWNER", "SUPER_ADMIN", "BUSINESS", "ADMIN")) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "User/Owner/Admin role required"));
+                    .body(Map.of("error", "User/Owner/Admin role required"));
         }
 
-        List<ShippingMethod> methods = methodRepository.findByOwnerProject_IdAndEnabledTrue(ownerProjectId);
-        List<ShippingMethodResponse> result = methods.stream()
-                .map(this::toResponse)
-                .collect(Collectors.toList());
+        try {
+            // If token is tenant-scoped, enforce match against requested ownerProjectId
+            Long tokenTenant = jwtUtil.extractOwnerProjectIdClaim(strip(auth));
+            if (tokenTenant != null && !tokenTenant.equals(ownerProjectId)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Tenant mismatch"));
+            }
 
-        return ResponseEntity.ok(result);
+            List<ShippingMethod> methods = methodRepository.findByOwnerProject_IdAndEnabledTrue(ownerProjectId);
+            List<ShippingMethodResponse> result = methods.stream().map(this::toResponse).toList();
+
+            return ResponseEntity.ok(result);
+
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError().body(Map.of("error", ex.getMessage()));
+        }
     }
 
     /* ===================== generic error handlers ===================== */

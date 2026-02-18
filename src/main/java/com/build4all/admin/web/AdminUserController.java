@@ -6,6 +6,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 
 import com.build4all.security.JwtUtil;
+import com.build4all.admin.dto.AdminUserProfileDTO;
+import com.build4all.admin.dto.AdminUserUpdateProfileRequest;
 import com.build4all.admin.service.AdminUserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -212,4 +214,71 @@ public class AdminUserController {
                     .body(Map.of("message", "Internal server error", "error", e.getMessage()));
         }
     }
+    
+    @PatchMapping("/me")
+    public ResponseEntity<?> updateMyAdminProfile(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestBody AdminUserUpdateProfileRequest req
+    ) {
+        try {
+            final String token = authHeader.replace("Bearer ", "").trim();
+
+            if (!jwtUtil.isAdminOrOwner(token)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("message", "Forbidden: login required"));
+            }
+
+            final Long adminId = jwtUtil.extractAdminId(token);
+            if (adminId == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("message", "Token missing id claim"));
+            }
+
+            AdminUserProfileDTO dto = adminUserService.updateAdminProfile(adminId, req);
+            return ResponseEntity.ok(Map.of("message", "Profile updated", "data", dto));
+
+        } catch (RuntimeException re) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("message", re.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Internal server error", "error", e.getMessage()));
+        }
+    }
+
+    @PatchMapping("/{adminId}")
+    public ResponseEntity<?> updateAdminProfileById(
+            @PathVariable Long adminId,
+            @RequestHeader("Authorization") String authHeader,
+            @RequestBody AdminUserUpdateProfileRequest req
+    ) {
+        try {
+            final String token = authHeader.replace("Bearer ", "").trim();
+
+            if (!jwtUtil.isAdminToken(token)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("message", "Forbidden: Admin access required"));
+            }
+
+            final boolean superAdmin = jwtUtil.isSuperAdmin(token);
+            final Long tokenId = jwtUtil.extractAdminId(token);
+
+            // Only SUPER_ADMIN can edit other admins. Everyone else: self only.
+            if (!superAdmin && (tokenId == null || !tokenId.equals(adminId))) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("message", "Forbidden: not allowed to edit this profile"));
+            }
+
+            AdminUserProfileDTO dto = adminUserService.updateAdminProfile(adminId, req);
+            return ResponseEntity.ok(Map.of("message", "Profile updated", "data", dto));
+
+        } catch (RuntimeException re) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("message", re.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Internal server error", "error", e.getMessage()));
+        }
+    }
+
 }

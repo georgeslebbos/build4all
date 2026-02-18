@@ -34,12 +34,10 @@ public class TaxController {
     private final TaxService taxService;
     private final JwtUtil jwtUtil;
 
-    // ✅ NEW: real lookups to avoid stubs and validate IDs
     private final AdminUserProjectRepository adminUserProjectRepository;
     private final CountryRepository countryRepository;
     private final RegionRepository regionRepository;
 
-    // ✅ NEW: we will use tenant-safe methods in TaxServiceImpl
     private final TaxServiceImpl taxServiceImpl;
 
     public TaxController(TaxService taxService,
@@ -59,13 +57,17 @@ public class TaxController {
     /* ===================== helpers ===================== */
 
     private String strip(String auth) {
-        return auth == null ? "" : auth.replace("Bearer ", "").trim();
+        return auth == null ? "" : auth.replaceFirst("(?i)^Bearer\\s+", "").trim();
     }
 
-    /**
-     * Check if current token has one of the given roles.
-     * Supports "OWNER", "USER", "ADMIN" and "ROLE_*" variants.
-     */
+    private ResponseEntity<?> unauthorized(String msg) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", msg));
+    }
+
+    private ResponseEntity<?> forbidden(String msg) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", msg));
+    }
+
     private boolean hasRole(String token, String... roles) {
         String role = jwtUtil.extractRole(token);
         if (role == null) return false;
@@ -80,18 +82,24 @@ public class TaxController {
     }
 
     /**
-     * ✅ NEW:
-     * Convert request into entity, using REAL lookups (not stubs).
-     * This makes errors clean (Invalid countryId...) and prevents FK surprises.
+     * ✅ The ONLY source of tenant id.
+     * If token is invalid or missing tenant claim => 401.
      */
-    private TaxRule fromRequestResolved(TaxRuleRequest req) {
+    private Long tenantFromTokenOrThrow(String authHeader) {
+        // JwtUtil.requireOwnerProjectId accepts raw or Bearer
+        return jwtUtil.requireOwnerProjectId(authHeader);
+    }
+
+    /**
+     * ✅ Convert request into entity using REAL lookups
+     * BUT ownerProjectId is forced from token (client value is ignored).
+     */
+    private TaxRule fromRequestResolved(Long ownerProjectId, TaxRuleRequest req) {
         TaxRule rule = new TaxRule();
 
-        if (req.getOwnerProjectId() != null) {
-            AdminUserProject proj = adminUserProjectRepository.findById(req.getOwnerProjectId())
-                    .orElseThrow(() -> new IllegalArgumentException("Invalid ownerProjectId: " + req.getOwnerProjectId()));
-            rule.setOwnerProject(proj);
-        }
+        AdminUserProject proj = adminUserProjectRepository.findById(ownerProjectId)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid ownerProjectId: " + ownerProjectId));
+        rule.setOwnerProject(proj);
 
         rule.setName(req.getName());
         rule.setRate(req.getRate());
@@ -111,7 +119,7 @@ public class TaxController {
                     .orElseThrow(() -> new IllegalArgumentException("Invalid regionId: " + req.getRegionId()));
         }
 
-        // Optional strict validation (only if Region has Country in your model)
+        // Optional strict validation if Region has getCountry()
         if (country != null && region != null) {
             try {
                 if (region.getCountry() != null && region.getCountry().getId() != null) {
@@ -119,8 +127,9 @@ public class TaxController {
                         throw new IllegalArgumentException("regionId does not belong to countryId");
                     }
                 }
+            } catch (IllegalArgumentException ex) {
+                throw ex;
             } catch (Exception ignored) {
-                // If Region has no getCountry(), ignore (you can remove later).
             }
         }
 
@@ -133,9 +142,7 @@ public class TaxController {
     private TaxRuleResponse toResponse(TaxRule rule) {
         TaxRuleResponse r = new TaxRuleResponse();
         r.setId(rule.getId());
-        r.setOwnerProjectId(
-                rule.getOwnerProject() != null ? rule.getOwnerProject().getId() : null
-        );
+        r.setOwnerProjectId(rule.getOwnerProject() != null ? rule.getOwnerProject().getId() : null);
         r.setName(rule.getName());
         r.setRate(rule.getRate());
         r.setAppliesToShipping(rule.isAppliesToShipping());
@@ -146,138 +153,164 @@ public class TaxController {
     }
 
     /* ====================================================
-       ADMIN / OWNER: CRUD on Tax Rules
+       OWNER / SUPER_ADMIN: CRUD on Tax Rules
        ==================================================== */
 
     @PostMapping("/rules")
-    @Operation(summary = "Create tax rule (OWNER/ADMIN only)")
+    @Operation(summary = "Create tax rule (OWNER/SUPER_ADMIN only)")
     public ResponseEntity<?> createRule(
             @RequestHeader("Authorization") String auth,
             @RequestBody TaxRuleRequest req
     ) {
         String token = strip(auth);
-        if (!hasRole(token, "OWNER", "ADMIN")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "Owner/Admin role required"));
+
+        if (!jwtUtil.validateToken(token)) {
+            return unauthorized("Invalid token");
+        }
+
+        if (!hasRole(token, "OWNER", "SUPER_ADMIN")) {
+            return forbidden("Owner/Super Admin role required");
         }
 
         try {
-            TaxRule created = taxService.createRule(fromRequestResolved(req));
+            Long ownerProjectId = tenantFromTokenOrThrow(auth); // ✅ from token (Bearer ok)
+            TaxRule created = taxService.createRule(fromRequestResolved(ownerProjectId, req));
             return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(created));
-        } catch (IllegalArgumentException ex) {
-            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (RuntimeException ex) {
+            // includes JwtUtil.requireOwnerProjectId errors
+            return unauthorized(ex.getMessage());
         } catch (Exception ex) {
-            return ResponseEntity.internalServerError().body(Map.of("error", ex.getMessage()));
+            return ResponseEntity.internalServerError().body(Map.of("error", "Server error"));
         }
     }
 
     @PutMapping("/rules/{id}")
-    @Operation(summary = "Update tax rule (OWNER/ADMIN only)")
+    @Operation(summary = "Update tax rule (OWNER/SUPER_ADMIN only)")
     public ResponseEntity<?> updateRule(
             @RequestHeader("Authorization") String auth,
             @PathVariable Long id,
             @RequestBody TaxRuleRequest req
     ) {
         String token = strip(auth);
-        if (!hasRole(token, "OWNER", "ADMIN")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "Owner/Admin role required"));
+
+        if (!jwtUtil.validateToken(token)) {
+            return unauthorized("Invalid token");
+        }
+
+        if (!hasRole(token, "OWNER", "SUPER_ADMIN")) {
+            return forbidden("Owner/Super Admin role required");
         }
 
         try {
-            // ✅ Tenant scoping: required
-            if (req.getOwnerProjectId() == null) {
-                throw new IllegalArgumentException("ownerProjectId is required (for scoping update)");
-            }
+            Long ownerProjectId = tenantFromTokenOrThrow(auth); // ✅ from token
 
-            TaxRule updates = fromRequestResolved(req);
+            TaxRule updates = fromRequestResolved(ownerProjectId, req);
 
-            // ✅ Use scoped update (id + ownerProjectId)
-            TaxRule updated = taxServiceImpl.updateRuleScoped(req.getOwnerProjectId(), id, updates);
-
+            TaxRule updated = taxServiceImpl.updateRuleScoped(ownerProjectId, id, updates);
             return ResponseEntity.ok(toResponse(updated));
-        } catch (IllegalArgumentException ex) {
-            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+
+        } catch (RuntimeException ex) {
+            return unauthorized(ex.getMessage());
         } catch (Exception ex) {
-            return ResponseEntity.internalServerError().body(Map.of("error", ex.getMessage()));
+            return ResponseEntity.internalServerError().body(Map.of("error", "Server error"));
         }
     }
 
+    /**
+     * ✅ IMPORTANT FIX:
+     * Don’t return 204 (empty body) because Flutter often tries to parse JSON and explodes.
+     * Return 200 with {message:"..."}.
+     */
     @DeleteMapping("/rules/{id}")
-    @Operation(summary = "Delete tax rule (OWNER/ADMIN only)")
+    @Operation(summary = "Delete tax rule (OWNER/SUPER_ADMIN only)")
     public ResponseEntity<?> deleteRule(
             @RequestHeader("Authorization") String auth,
-            @PathVariable Long id,
-            @RequestParam Long ownerProjectId
+            @PathVariable Long id
     ) {
         String token = strip(auth);
-        if (!hasRole(token, "OWNER", "ADMIN")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "Owner/Admin role required"));
+
+        if (!jwtUtil.validateToken(token)) {
+            return unauthorized("Invalid token");
+        }
+
+        if (!hasRole(token, "OWNER", "SUPER_ADMIN")) {
+            return forbidden("Owner/Super Admin role required");
         }
 
         try {
-            // ✅ scoped delete prevents cross-tenant delete
+            Long ownerProjectId = tenantFromTokenOrThrow(auth); // ✅ from token
+
             taxServiceImpl.deleteRuleScoped(ownerProjectId, id);
-            return ResponseEntity.noContent().build();
-        } catch (IllegalArgumentException ex) {
-            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+
+            return ResponseEntity.ok(Map.of("message", "Tax rule deleted"));
+
+        } catch (RuntimeException ex) {
+            return unauthorized(ex.getMessage());
         } catch (Exception ex) {
-            return ResponseEntity.internalServerError().body(Map.of("error", ex.getMessage()));
+            return ResponseEntity.internalServerError().body(Map.of("error", "Server error"));
         }
     }
 
     @GetMapping("/rules/{id}")
-    @Operation(summary = "Get tax rule by id (OWNER/ADMIN only)")
+    @Operation(summary = "Get tax rule by id (OWNER/SUPER_ADMIN only)")
     public ResponseEntity<?> getRule(
             @RequestHeader("Authorization") String auth,
-            @PathVariable Long id,
-            @RequestParam Long ownerProjectId
+            @PathVariable Long id
     ) {
         String token = strip(auth);
-        if (!hasRole(token, "OWNER", "ADMIN")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "Owner/Admin role required"));
+
+        if (!jwtUtil.validateToken(token)) {
+            return unauthorized("Invalid token");
+        }
+
+        if (!hasRole(token, "OWNER", "SUPER_ADMIN")) {
+            return forbidden("Owner/Super Admin role required");
         }
 
         try {
+            Long ownerProjectId = tenantFromTokenOrThrow(auth); // ✅ from token
             TaxRule rule = taxServiceImpl.getRuleScoped(ownerProjectId, id);
             return ResponseEntity.ok(toResponse(rule));
-        } catch (IllegalArgumentException ex) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("error", ex.getMessage()));
+
+        } catch (RuntimeException ex) {
+            return unauthorized(ex.getMessage());
         } catch (Exception ex) {
-            return ResponseEntity.internalServerError().body(Map.of("error", ex.getMessage()));
+            return ResponseEntity.internalServerError().body(Map.of("error", "Server error"));
         }
     }
 
     @GetMapping("/rules")
-    @Operation(summary = "List tax rules for an app (OWNER/ADMIN only)")
+    @Operation(summary = "List tax rules for tenant (OWNER/SUPER_ADMIN only)")
     public ResponseEntity<?> listRules(
-            @RequestHeader("Authorization") String auth,
-            @RequestParam Long ownerProjectId
+            @RequestHeader("Authorization") String auth
     ) {
         String token = strip(auth);
-        if (!hasRole(token, "OWNER", "ADMIN")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "Owner/Admin role required"));
+
+        if (!jwtUtil.validateToken(token)) {
+            return unauthorized("Invalid token");
+        }
+
+        if (!hasRole(token, "OWNER", "SUPER_ADMIN")) {
+            return forbidden("Owner/Super Admin role required");
         }
 
         try {
+            Long ownerProjectId = tenantFromTokenOrThrow(auth); // ✅ from token
+
             List<TaxRule> rules = taxService.listRulesByOwnerProject(ownerProjectId);
-            List<TaxRuleResponse> resp = rules.stream()
-                    .map(this::toResponse)
-                    .collect(Collectors.toList());
+            List<TaxRuleResponse> resp = rules.stream().map(this::toResponse).collect(Collectors.toList());
+
             return ResponseEntity.ok(resp);
-        } catch (IllegalArgumentException ex) {
-            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+
+        } catch (RuntimeException ex) {
+            return unauthorized(ex.getMessage());
         } catch (Exception ex) {
-            return ResponseEntity.internalServerError().body(Map.of("error", ex.getMessage()));
+            return ResponseEntity.internalServerError().body(Map.of("error", "Server error"));
         }
     }
 
     /* ====================================================
-       USER / OWNER / ADMIN: preview tax calculation
+       USER / OWNER / SUPER_ADMIN: preview tax calculation
        ==================================================== */
 
     @PostMapping("/preview")
@@ -287,20 +320,27 @@ public class TaxController {
             @RequestBody TaxPreviewRequest req
     ) {
         String token = strip(auth);
-        if (!hasRole(token, "USER", "OWNER", "ADMIN")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("message", "User/Owner/Admin role required"));
+
+        if (!jwtUtil.validateToken(token)) {
+            return unauthorized("Invalid token");
+        }
+
+        // ✅ include SUPER_ADMIN (your tokens use SUPER_ADMIN, not ADMIN)
+        if (!hasRole(token, "USER", "OWNER", "SUPER_ADMIN")) {
+            return forbidden("User/Owner/Super Admin role required");
         }
 
         try {
+            Long ownerProjectId = tenantFromTokenOrThrow(auth); // ✅ from token (ignore request)
+
             BigDecimal itemTax = taxService.calculateItemTax(
-                    req.getOwnerProjectId(),
+                    ownerProjectId,
                     req.getAddress(),
                     req.getLines()
             );
 
             BigDecimal shippingTax = taxService.calculateShippingTax(
-                    req.getOwnerProjectId(),
+                    ownerProjectId,
                     req.getAddress(),
                     req.getShippingTotal()
             );
@@ -310,22 +350,11 @@ public class TaxController {
                     "shippingTaxTotal", shippingTax,
                     "totalTax", itemTax.add(shippingTax)
             ));
-        } catch (IllegalArgumentException ex) {
-            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+
+        } catch (RuntimeException ex) {
+            return unauthorized(ex.getMessage());
         } catch (Exception ex) {
-            return ResponseEntity.internalServerError().body(Map.of("error", ex.getMessage()));
+            return ResponseEntity.internalServerError().body(Map.of("error", "Server error"));
         }
-    }
-
-    /* ===================== generic error handlers ===================== */
-
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<?> badRequest(IllegalArgumentException ex) {
-        return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
-    }
-
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<?> serverError(Exception ex) {
-        return ResponseEntity.internalServerError().body(Map.of("error", ex.getMessage()));
     }
 }

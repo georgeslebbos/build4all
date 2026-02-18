@@ -69,4 +69,9 @@ public interface AdminUsersRepository extends JpaRepository<AdminUser, Long> {
      * Useful for dashboards and for enforcing role-based limits.
      */
     int countByRole_NameIgnoreCase(String roleName);
+    
+    boolean existsByEmailIgnoreCaseAndAdminIdNot(String email, Long adminId);
+
+    boolean existsByUsernameIgnoreCaseAndAdminIdNot(String username, Long adminId);
+
 }
