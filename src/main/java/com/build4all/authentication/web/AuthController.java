@@ -194,10 +194,17 @@ public class AuthController {
     	        String phoneNumber = body.get("phoneNumber") != null ? body.get("phoneNumber").toString() : null;
     	        String password = body.get("password") != null ? body.get("password").toString() : null;
 
+    	        if (password == null || password.isBlank()) {
+    	            throw new IllegalArgumentException("password is required");
+    	        }
+    	        validatePasswordOrThrow(password);
+
+    	        
     	        Long ownerProjectLinkId = body.get("ownerProjectLinkId") != null
     	                ? Long.valueOf(body.get("ownerProjectLinkId").toString())
     	                : null;
 
+    	        
     	        // reuse existing logic
     	        return sendVerification(email, phoneNumber, password, ownerProjectLinkId);
 
@@ -512,9 +519,16 @@ public class AuthController {
             Map<String, String> businessData = new HashMap<>();
             if (email != null && !email.isBlank()) businessData.put("email", email.trim());
             if (phoneNumber != null && !phoneNumber.isBlank()) businessData.put("phoneNumber", phoneNumber.trim());
+            
+            if (password == null || password.isBlank()) {
+                throw new IllegalArgumentException("password is required");
+            }
+            validatePasswordOrThrow(password);
+
             businessData.put("password", password);
             businessData.put("status", "ACTIVE");
 
+            
             Long pendingId = businessService.sendBusinessVerificationCode(ownerProjectLinkId, businessData);
 
             return ResponseEntity.ok(Map.of(
@@ -1005,28 +1019,38 @@ public class AuthController {
     @Operation(summary = "Unified Admin Login (SUPER_ADMIN / OWNER / MANAGER)")
     @PostMapping("/admin/login")
     public ResponseEntity<?> adminLogin(@RequestBody AdminLoginRequest request) {
-        if (request.getUsernameOrEmail() == null || request.getPassword() == null) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("error", "Email/Username and password are required"));
+        if (request.getUsernameOrEmail() == null || request.getUsernameOrEmail().isBlank()
+                || request.getPassword() == null || request.getPassword().isBlank()) {
+            return authError(HttpStatus.BAD_REQUEST, "MISSING_FIELDS",
+                    "Email/Username and password are required");
         }
 
-        var opt = adminUserService.findByUsernameOrEmail(request.getUsernameOrEmail());
+        var opt = adminUserService.findByUsernameOrEmail(request.getUsernameOrEmail().trim());
         if (opt.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Invalid credentials"));
+            return authError(HttpStatus.UNAUTHORIZED, "ACCOUNT_NOT_FOUND",
+                    "No account found for this email/username");
         }
 
         var admin = opt.get();
+
         if (!passwordEncoder.matches(request.getPassword(), admin.getPasswordHash())) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Invalid credentials"));
+            return authError(HttpStatus.UNAUTHORIZED, "INCORRECT_PASSWORD",
+                    "Incorrect password");
         }
 
         String role = admin.getRole() != null ? admin.getRole().getName() : null;
-        if (role == null || !(role.equalsIgnoreCase("SUPER_ADMIN")
-                || role.equalsIgnoreCase("OWNER") || role.equalsIgnoreCase("MANAGER"))) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Access denied for this role"));
+        if (role == null) {
+            return authError(HttpStatus.FORBIDDEN, "ROLE_NOT_ALLOWED",
+                    "Access denied for this role");
+        }
+
+        boolean allowed = role.equalsIgnoreCase("SUPER_ADMIN")
+                || role.equalsIgnoreCase("OWNER")
+                || role.equalsIgnoreCase("MANAGER");
+
+        if (!allowed) {
+            return authError(HttpStatus.FORBIDDEN, "ROLE_NOT_ALLOWED",
+                    "Access denied for this role");
         }
 
         String token = jwtUtil.generateToken(admin);
@@ -1045,6 +1069,9 @@ public class AuthController {
                 "role", role,
                 "admin", adminData
         ));
+        
+        
+        
     }
 
     /* =====================================================================================
@@ -1064,6 +1091,12 @@ public class AuthController {
             if (adminUserService.findByEmail(email).isPresent()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Email already in use"));
             }
+
+            
+            if (password == null || password.isBlank()) {
+                throw new IllegalArgumentException("password is required");
+            }
+            validatePasswordOrThrow(password);
 
             // Send a real OTP to the email (stored hashed with TTL)
             ownerOtpService.generateAndSendOtp(email);
@@ -1517,6 +1550,31 @@ public class AuthController {
             return null; // ✅ don't block if DNS lookup isn't supported
         }
     }
+
+    private ResponseEntity<?> authError(HttpStatus status, String code, String message) {
+        return ResponseEntity.status(status).body(Map.of(
+                "code", code,
+                "error", message
+        ));
+    }
+
+    
+    private static final Pattern PASSWORD_SPECIAL = Pattern.compile(
+    	    "^(?=.*[!@#$%^&*()_+\\-={}\\[\\]:;\"'|\\\\<>,.?/]).{6,8}$"
+    	);
+
+    	private void validatePasswordOrThrow(String password) {
+    	    if (password == null || password.isBlank()) {
+    	        throw new IllegalArgumentException("password is required");
+    	    }
+    	    String p = password.trim();
+    	    if (p.length() < 6 || p.length() > 8) {
+    	        throw new IllegalArgumentException("password must be between 6 and 8 characters");
+    	    }
+    	    if (!PASSWORD_SPECIAL.matcher(p).matches()) {
+    	        throw new IllegalArgumentException("password must contain at least 1 special character");
+    	    }
+    	}
 
 
 

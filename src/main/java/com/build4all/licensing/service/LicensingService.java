@@ -111,15 +111,19 @@ public class LicensingService {
     }
 
     public void assertDedicatedInfraReady(Long aupId) {
-        // same logic you had earlier (kept)
         var infra = infraRepo.findById(aupId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "DEDICATED_INFRA_MISSING"));
 
         if (infra.getDedicatedServer() == null) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "DEDICATED_SERVER_NOT_ASSIGNED");
         }
+
+        var server = infra.getDedicatedServer();
+        if (server.getStatus() != com.build4all.licensing.domain.ServerStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "DEDICATED_SERVER_NOT_ACTIVE");
+        }
     }
-    
+
     public void requireUserSlotAvailable(Long aupId) {
 
         // ✅ re-use the canonical "active + expiry check"
@@ -244,9 +248,11 @@ public class LicensingService {
 
         if (currentOpt.isPresent()) {
             Subscription current = currentOpt.get();
-            current.setStatus(SubscriptionStatus.EXPIRED); 
+            boolean ended = LocalDate.now().isAfter(current.getPeriodEnd());
+            current.setStatus(ended ? SubscriptionStatus.EXPIRED : SubscriptionStatus.CANCELED);
             subscriptionRepo.save(current);
         }
+
 
         // 2) Create new subscription
         Subscription sub = new Subscription();
