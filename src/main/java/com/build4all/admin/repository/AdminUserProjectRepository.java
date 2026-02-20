@@ -198,6 +198,7 @@ public interface AdminUserProjectRepository extends JpaRepository<AdminUserProje
     // =====================================================================
 
     
+    
 
     @Query("""
         select new com.build4all.app.dto.SuperAdminAppRowDto(
@@ -227,6 +228,12 @@ public interface AdminUserProjectRepository extends JpaRepository<AdminUserProje
     List<SuperAdminAppRowDto> findAllForSuperAdmin();
 
     
+    @Query("""
+    		  select coalesce(max(a.appNumber), 0)
+    		  from AdminUserProject a
+    		  where lower(a.envSuffix) = lower(:env)
+    		""")
+    		int maxAppNumberForEnv(@Param("env") String env);
 
     @Query("""
         select new com.build4all.app.dto.SuperAdminAppDetailsDto(

@@ -4,6 +4,7 @@ import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.app.domain.AppRuntimeConfig;
 import com.build4all.app.repository.AppRuntimeConfigRepository;
+import com.build4all.app.service.ThemeJsonBuilder;
 import com.build4all.theme.domain.Theme;
 import com.build4all.theme.repository.ThemeRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -33,7 +34,6 @@ public class PublicRuntimeConfigController {
     @Value("${ci.runtime-token:}")
     private String ciRuntimeToken;
 
-    // ✅ TEMP switch: if true -> allow no-token access for by-link
     @Value("${ci.runtime-token-disabled:false}")
     private boolean ciRuntimeTokenDisabled;
 
@@ -45,7 +45,6 @@ public class PublicRuntimeConfigController {
         this.themeRepo = themeRepo;
     }
 
-    // quick sanity check
     @GetMapping("/runtime-config/ping")
     public Map<String, Object> ping() {
         return Map.of(
@@ -59,9 +58,7 @@ public class PublicRuntimeConfigController {
     public ResponseEntity<Map<String, Object>> runtimeConfig(@RequestParam Long ownerId,
                                                              @RequestParam Long projectId,
                                                              @RequestParam String slug) {
-
         String s = slugify(slug);
-
         AdminUserProject link = linkRepo
                 .findByAdmin_AdminIdAndProject_IdAndSlug(ownerId, projectId, s)
                 .orElseThrow(() -> new IllegalArgumentException("App not found"));
@@ -69,14 +66,6 @@ public class PublicRuntimeConfigController {
         return ResponseEntity.ok(buildResponse(link));
     }
 
-    /**
-     * ✅ CI endpoint:
-     * /api/public/runtime-config/by-link?linkId=14
-     *
-     * TEMP MODE:
-     * - if ci.runtime-token-disabled=true -> NO TOKEN REQUIRED
-     * - else -> require X-Auth-Token
-     */
     @Transactional(readOnly = true)
     @GetMapping("/runtime-config/by-link")
     public ResponseEntity<Map<String, Object>> runtimeConfigByLink(
@@ -98,29 +87,32 @@ public class PublicRuntimeConfigController {
         return ResponseEntity.ok(buildResponse(link));
     }
 
-    // ---------------- core builder ----------------
+    // ─────────────────────────────────────────────────────────────────────
+    // core builder
+    // ─────────────────────────────────────────────────────────────────────
 
     private Map<String, Object> buildResponse(AdminUserProject link) {
         AppRuntimeConfig cfg = runtimeRepo.findByApp_Id(link.getId()).orElse(null);
 
-        String nav = cfg != null ? nz(cfg.getNavJson()) : "[]";
-        String home = cfg != null ? nz(cfg.getHomeJson()) : "{}";
-        String features = cfg != null ? nz(cfg.getEnabledFeaturesJson()) : "[]";
-        String branding = cfg != null ? nz(cfg.getBrandingJson()) : "{}";
+        String nav      = cfg != null ? nz(cfg.getNavJson())              : "[]";
+        String home     = cfg != null ? nz(cfg.getHomeJson())             : "{}";
+        String features = cfg != null ? nz(cfg.getEnabledFeaturesJson())  : "[]";
+        String branding = cfg != null ? nz(cfg.getBrandingJson())         : "{}";
 
-        // ✅ Resolve theme JSON from DB, then normalize it to Flutter schema
+        // ✅ Resolve theme JSON, normalize to Flutter schema,
+        //    then override menuType from brandingJson
         String themeJsonRaw = resolveThemeJson(link.getThemeId());
-        String themeJson = normalizeThemeJsonToMobileSchema(themeJsonRaw);
+        String themeJson    = normalizeThemeJsonToMobileSchema(themeJsonRaw, branding);
 
         Map<String, Object> res = new HashMap<>();
 
-        res.put("OWNER_ID", link.getAdmin().getAdminId().toString());
-        res.put("PROJECT_ID", link.getProject().getId().toString());
-        res.put("SLUG", link.getSlug());
+        res.put("OWNER_ID",              link.getAdmin().getAdminId().toString());
+        res.put("PROJECT_ID",            link.getProject().getId().toString());
+        res.put("SLUG",                  link.getSlug());
         res.put("OWNER_PROJECT_LINK_ID", String.valueOf(link.getId()));
 
-        res.put("APP_NAME", nz(link.getAppName()));
-        res.put("STATUS", nz(link.getStatus()));
+        res.put("APP_NAME",   nz(link.getAppName()));
+        res.put("STATUS",     nz(link.getStatus()));
         res.put("LICENSE_ID", nz(link.getLicenseId()));
 
         res.put("APP_TYPE", link.getProject() != null && link.getProject().getProjectType() != null
@@ -129,143 +121,143 @@ public class PublicRuntimeConfigController {
 
         res.put("THEME_ID", link.getThemeId());
 
-        // ✅ return normalized json + b64 of normalized json
-        res.put("THEME_JSON", themeJson);
+        res.put("THEME_JSON",     themeJson);
         res.put("THEME_JSON_B64", b64(themeJson));
 
-        res.put("CURRENCY_CODE", link.getCurrency() != null ? link.getCurrency().getCode() : null);
+        res.put("CURRENCY_CODE",   link.getCurrency() != null ? link.getCurrency().getCode()   : null);
         res.put("CURRENCY_SYMBOL", link.getCurrency() != null ? link.getCurrency().getSymbol() : null);
 
-        res.put("LOGO_URL", nz(link.getLogoUrl()));
-        res.put("APK_URL", nz(link.getApkUrl()));
-        res.put("IPA_URL", nz(link.getIpaUrl()));
+        res.put("LOGO_URL",   nz(link.getLogoUrl()));
+        res.put("APK_URL",    nz(link.getApkUrl()));
+        res.put("IPA_URL",    nz(link.getIpaUrl()));
         res.put("BUNDLE_URL", nz(link.getBundleUrl()));
 
         res.put("API_BASE_URL_OVERRIDE", cfg != null ? cfg.getApiBaseUrlOverride() : null);
 
-        res.put("NAV_JSON", nav);
-        res.put("HOME_JSON", home);
+        res.put("NAV_JSON",              nav);
+        res.put("HOME_JSON",             home);
         res.put("ENABLED_FEATURES_JSON", features);
-        res.put("BRANDING_JSON", branding);
+        res.put("BRANDING_JSON",         branding);
 
-        res.put("NAV_JSON_B64", b64(nav));
-        res.put("HOME_JSON_B64", b64(home));
+        res.put("NAV_JSON_B64",              b64(nav));
+        res.put("HOME_JSON_B64",             b64(home));
         res.put("ENABLED_FEATURES_JSON_B64", b64(features));
-        res.put("BRANDING_JSON_B64", b64(branding));
+        res.put("BRANDING_JSON_B64",         b64(branding));
 
         return res;
     }
 
-    // ---------------- theme normalization (THE FIX) ----------------
+    // ─────────────────────────────────────────────────────────────────────
+    // theme normalisation
+    // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * Ensures the returned theme JSON matches what Flutter expects:
-     * {
-     *   "menuType": "...",
-     *   "valuesMobile": {
-     *     "colors": { "primary": "...", ... },
-     *     "card": {...},
-     *     "search": {...},
-     *     "button": {...}
-     *   }
-     * }
+     * Normalise raw theme JSON to the Flutter mobile schema AND override
+     * menuType from brandingJson if present.
      *
-     * If DB contains old flat theme like {"primary":"#.."} we wrap it.
+     * Priority: brandingJson.menuType > themeJson.menuType > "bottom"
      */
     @SuppressWarnings("unchecked")
-    private String normalizeThemeJsonToMobileSchema(String themeJsonRaw) {
+    private String normalizeThemeJsonToMobileSchema(String themeJsonRaw, String brandingJson) {
         try {
+            // ── 1. Parse / build the mobile-schema map ───────────────────
+            Map<String, Object> root;
+
             if (themeJsonRaw == null || themeJsonRaw.isBlank() || themeJsonRaw.trim().equals("{}")) {
-                return fallbackMobileThemeJson();
-            }
+                root = parseFallbackRoot();
+            } else {
+                Map<String, Object> raw =
+                        MAPPER.readValue(themeJsonRaw, new TypeReference<Map<String, Object>>() {});
 
-            Map<String, Object> raw =
-                    MAPPER.readValue(themeJsonRaw, new TypeReference<Map<String, Object>>() {});
-
-            if (raw == null || raw.isEmpty()) {
-                return fallbackMobileThemeJson();
-            }
-
-            // already correct
-            if (raw.containsKey("valuesMobile")) {
-                // Still ensure valuesMobile.colors exists so Flutter doesn't fallback
-                Object vmObj = raw.get("valuesMobile");
-                if (!(vmObj instanceof Map)) return fallbackMobileThemeJson();
-
-                Map<String, Object> vm = (Map<String, Object>) vmObj;
-                Object colorsObj = vm.get("colors");
-                if (!(colorsObj instanceof Map)) {
-                    vm.put("colors", defaultColorsMap());
-                } else {
-                    // ensure primary exists
-                    Map<String, Object> colors = (Map<String, Object>) colorsObj;
-                    if (!colors.containsKey("primary")) {
-                        colors.putAll(defaultColorsMap());
+                if (raw == null || raw.isEmpty()) {
+                    root = parseFallbackRoot();
+                } else if (raw.containsKey("valuesMobile")) {
+                    // already correct schema – ensure colors complete
+                    Object vmObj = raw.get("valuesMobile");
+                    if (!(vmObj instanceof Map)) {
+                        root = parseFallbackRoot();
                     } else {
-                        ensureColorDefaults(colors);
+                        Map<String, Object> vm = (Map<String, Object>) vmObj;
+                        Object colorsObj = vm.get("colors");
+                        if (!(colorsObj instanceof Map)) {
+                            vm.put("colors", defaultColorsMap());
+                        } else {
+                            ensureColorDefaults((Map<String, Object>) colorsObj);
+                        }
+                        root = raw;
                     }
-                }
+                } else {
+                    // flat theme – wrap into mobile schema
+                    root = new LinkedHashMap<>();
+                    root.put("menuType", raw.getOrDefault("menuType", "bottom"));
 
-                // write back
-                return MAPPER.writeValueAsString(raw);
+                    Map<String, Object> valuesMobile = new LinkedHashMap<>();
+                    Map<String, Object> colors       = new LinkedHashMap<>();
+
+                    Object primary = raw.getOrDefault("primary", "#16A34A");
+                    colors.put("primary",    primary);
+                    colors.put("onPrimary",  raw.getOrDefault("onPrimary",  "#FFFFFF"));
+                    colors.put("background", raw.getOrDefault("background", "#FFFFFF"));
+                    colors.put("surface",    raw.getOrDefault("surface",    "#FFFFFF"));
+                    colors.put("label",      raw.getOrDefault("label",      "#111827"));
+                    colors.put("body",       raw.getOrDefault("body",       "#374151"));
+                    colors.put("border",     raw.getOrDefault("border",     primary));
+                    Object error = raw.getOrDefault("error", "#DC2626");
+                    colors.put("error",   error);
+                    colors.put("danger",  raw.getOrDefault("danger",  error));
+                    colors.put("muted",   raw.getOrDefault("muted",   "#9CA3AF"));
+                    colors.put("success", raw.getOrDefault("success", primary));
+
+                    valuesMobile.put("colors", colors);
+                    valuesMobile.put("card",   raw.getOrDefault("card",   defaultCardMap()));
+                    valuesMobile.put("search", raw.getOrDefault("search", defaultSearchMap()));
+                    valuesMobile.put("button", raw.getOrDefault("button", defaultButtonMap()));
+
+                    root.put("valuesMobile", valuesMobile);
+                }
             }
 
-            // ---- flat -> wrap ----
-            Map<String, Object> root = new LinkedHashMap<>();
-            root.put("menuType", raw.getOrDefault("menuType", "bottom"));
-
-            Map<String, Object> valuesMobile = new LinkedHashMap<>();
-
-            // colors
-            Map<String, Object> colors = new LinkedHashMap<>();
-            Object primary = raw.getOrDefault("primary", "#16A34A");
-            colors.put("primary", primary);
-            colors.put("onPrimary", raw.getOrDefault("onPrimary", "#FFFFFF"));
-            colors.put("background", raw.getOrDefault("background", "#FFFFFF"));
-            colors.put("surface", raw.getOrDefault("surface", "#FFFFFF"));
-            colors.put("label", raw.getOrDefault("label", "#111827"));
-            colors.put("body", raw.getOrDefault("body", "#374151"));
-            colors.put("border", raw.getOrDefault("border", primary));
-
-            Object error = raw.getOrDefault("error", "#DC2626");
-            colors.put("error", error);
-
-            // extras supported by your Flutter code
-            colors.put("danger", raw.getOrDefault("danger", error));
-            colors.put("muted", raw.getOrDefault("muted", "#9CA3AF"));
-            colors.put("success", raw.getOrDefault("success", primary));
-
-            valuesMobile.put("colors", colors);
-
-            // allow passing optional token sections if present, else provide safe defaults
-            valuesMobile.put("card", raw.getOrDefault("card", defaultCardMap()));
-            valuesMobile.put("search", raw.getOrDefault("search", defaultSearchMap()));
-            valuesMobile.put("button", raw.getOrDefault("button", defaultButtonMap()));
-
-            root.put("valuesMobile", valuesMobile);
+            // ── 2. ✅ Override menuType from brandingJson ─────────────────
+            String menuFromBranding = ThemeJsonBuilder.extractMenuTypeFromBranding(brandingJson);
+            if (menuFromBranding != null) {
+                String resolved = ThemeJsonBuilder.resolveMenuType(menuFromBranding);
+                root.put("menuType", resolved);
+                System.out.println("✅ runtime-config: menuType overridden from branding → " + resolved);
+            } else {
+                // ensure menuType key exists with a sane default
+                root.putIfAbsent("menuType", "bottom");
+            }
 
             return MAPPER.writeValueAsString(root);
 
         } catch (Exception e) {
-            System.out.println("⚠️ Theme normalization failed: " + e.getClass().getSimpleName() + " -> " + e.getMessage());
-            // If parsing fails, don't break runtime-config; just return raw OR fallback
-            // returning fallback is safer so Flutter won't crash & won't stay green unexpectedly
+            System.out.println("⚠️ Theme normalisation failed: "
+                    + e.getClass().getSimpleName() + " → " + e.getMessage());
             return fallbackMobileThemeJson();
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // helpers
+    // ─────────────────────────────────────────────────────────────────────
+
+    private Map<String, Object> parseFallbackRoot() throws Exception {
+        return MAPPER.readValue(fallbackMobileThemeJson(),
+                new TypeReference<Map<String, Object>>() {});
+    }
+
     private void ensureColorDefaults(Map<String, Object> colors) {
         Object primary = colors.getOrDefault("primary", "#16A34A");
-        colors.putIfAbsent("onPrimary", "#FFFFFF");
+        colors.putIfAbsent("onPrimary",  "#FFFFFF");
         colors.putIfAbsent("background", "#FFFFFF");
-        colors.putIfAbsent("surface", "#FFFFFF");
-        colors.putIfAbsent("label", "#111827");
-        colors.putIfAbsent("body", "#374151");
-        colors.putIfAbsent("border", primary);
+        colors.putIfAbsent("surface",    "#FFFFFF");
+        colors.putIfAbsent("label",      "#111827");
+        colors.putIfAbsent("body",       "#374151");
+        colors.putIfAbsent("border",     primary);
         Object error = colors.getOrDefault("error", "#DC2626");
-        colors.putIfAbsent("error", error);
-        colors.putIfAbsent("danger", error);
-        colors.putIfAbsent("muted", "#9CA3AF");
+        colors.putIfAbsent("error",   error);
+        colors.putIfAbsent("danger",  error);
+        colors.putIfAbsent("muted",   "#9CA3AF");
         colors.putIfAbsent("success", primary);
     }
 
@@ -276,68 +268,73 @@ public class PublicRuntimeConfigController {
 
             Map<String, Object> valuesMobile = new LinkedHashMap<>();
             valuesMobile.put("colors", defaultColorsMap());
-            valuesMobile.put("card", defaultCardMap());
+            valuesMobile.put("card",   defaultCardMap());
             valuesMobile.put("search", defaultSearchMap());
             valuesMobile.put("button", defaultButtonMap());
 
             root.put("valuesMobile", valuesMobile);
             return MAPPER.writeValueAsString(root);
         } catch (Exception e) {
-            return "{\"menuType\":\"bottom\",\"valuesMobile\":{\"colors\":{\"primary\":\"#16A34A\",\"onPrimary\":\"#FFFFFF\",\"background\":\"#FFFFFF\",\"surface\":\"#FFFFFF\",\"label\":\"#111827\",\"body\":\"#374151\",\"border\":\"#16A34A\",\"error\":\"#DC2626\",\"danger\":\"#DC2626\",\"muted\":\"#9CA3AF\",\"success\":\"#16A34A\"}}}";
+            return "{\"menuType\":\"bottom\",\"valuesMobile\":{\"colors\":"
+                    + "{\"primary\":\"#16A34A\",\"onPrimary\":\"#FFFFFF\","
+                    + "\"background\":\"#FFFFFF\",\"surface\":\"#FFFFFF\","
+                    + "\"label\":\"#111827\",\"body\":\"#374151\","
+                    + "\"border\":\"#16A34A\",\"error\":\"#DC2626\","
+                    + "\"danger\":\"#DC2626\",\"muted\":\"#9CA3AF\","
+                    + "\"success\":\"#16A34A\"}}}";
         }
     }
 
     private Map<String, Object> defaultColorsMap() {
-        Map<String, Object> colors = new LinkedHashMap<>();
-        colors.put("primary", "#16A34A");
-        colors.put("onPrimary", "#FFFFFF");
-        colors.put("background", "#FFFFFF");
-        colors.put("surface", "#FFFFFF");
-        colors.put("label", "#111827");
-        colors.put("body", "#374151");
-        colors.put("border", "#16A34A");
-        colors.put("error", "#DC2626");
-        colors.put("danger", "#DC2626");
-        colors.put("muted", "#9CA3AF");
-        colors.put("success", "#16A34A");
-        return colors;
+        Map<String, Object> c = new LinkedHashMap<>();
+        c.put("primary",    "#16A34A");
+        c.put("onPrimary",  "#FFFFFF");
+        c.put("background", "#FFFFFF");
+        c.put("surface",    "#FFFFFF");
+        c.put("label",      "#111827");
+        c.put("body",       "#374151");
+        c.put("border",     "#16A34A");
+        c.put("error",      "#DC2626");
+        c.put("danger",     "#DC2626");
+        c.put("muted",      "#9CA3AF");
+        c.put("success",    "#16A34A");
+        return c;
     }
 
     private Map<String, Object> defaultCardMap() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("radius", 16);
-        m.put("elevation", 4);
-        m.put("padding", 12);
+        m.put("radius",      16);
+        m.put("elevation",   4);
+        m.put("padding",     12);
         m.put("imageHeight", 120);
-        m.put("showShadow", true);
-        m.put("showBorder", true);
+        m.put("showShadow",  true);
+        m.put("showBorder",  true);
         return m;
     }
 
     private Map<String, Object> defaultSearchMap() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("radius", 16);
+        m.put("radius",      16);
         m.put("borderWidth", 1.4);
-        m.put("dense", true);
+        m.put("dense",       true);
         return m;
     }
 
     private Map<String, Object> defaultButtonMap() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("radius", 16);
-        m.put("height", 48);
-        m.put("textSize", 15);
+        m.put("radius",    16);
+        m.put("height",    48);
+        m.put("textSize",  15);
         m.put("fullWidth", true);
         return m;
     }
 
-    // ---------------- helpers ----------------
-
     private boolean validCiToken(String token) {
         String expected = (ciRuntimeToken == null) ? "" : ciRuntimeToken.trim();
-        String got = (token == null) ? "" : token.trim();
+        String got      = (token == null)          ? "" : token.trim();
 
-        System.out.println(">>> CI expected len=" + expected.length() + " | got len=" + got.length());
+        System.out.println(">>> CI expected len=" + expected.length()
+                + " | got len=" + got.length());
 
         if (expected.isBlank()) return false;
         return expected.equals(got);

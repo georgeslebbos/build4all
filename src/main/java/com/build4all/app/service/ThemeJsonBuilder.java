@@ -10,42 +10,48 @@ public class ThemeJsonBuilder {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    /**
+     * Build a Flutter-compatible theme JSON.
+     *
+     * @param menuType  optional – "hamburger" / "drawer" / "bottom".
+     *                  If null/blank the THEME default ("bottom") is used.
+     *                  Pass the value from brandingJson so the menu choice is respected.
+     */
     public static String buildThemeJson(
             String primaryColor,
             String secondaryColor,
             String backgroundColor,
             String onBackgroundColor,
-            String errorColor
+            String errorColor,
+            String menuType
     ) {
         try {
+            // ---------- resolve menuType ----------
+            String resolvedMenu = resolveMenuType(menuType);
+
             // ---------- colors ----------
             Map<String, Object> colors = new LinkedHashMap<>();
 
-            // primary
             String primary = (primaryColor != null && !primaryColor.isBlank())
                     ? primaryColor
-                    : "#16A34A"; // default green
+                    : "#16A34A";
             colors.put("primary", primary);
             colors.put("onPrimary", "#FFFFFF");
 
-            // background/surface
             String bg = (backgroundColor != null && !backgroundColor.isBlank())
                     ? backgroundColor
                     : "#FFFFFF";
             colors.put("background", bg);
             colors.put("surface", "#FFFFFF");
 
-            // label/body
             String onBg = (onBackgroundColor != null && !onBackgroundColor.isBlank())
                     ? onBackgroundColor
                     : "#111827";
             colors.put("label", onBg);
             colors.put("body", "#374151");
 
-            // border
             colors.put("border", primary);
 
-            // error + extras (optional but your Flutter supports them)
             String err = (errorColor != null && !errorColor.isBlank())
                     ? errorColor
                     : "#DC2626";
@@ -82,13 +88,59 @@ public class ThemeJsonBuilder {
 
             // ---------- root ----------
             Map<String, Object> root = new LinkedHashMap<>();
-            root.put("menuType", "bottom");
+            root.put("menuType", resolvedMenu);   // ✅ from branding, never hardcoded
             root.put("valuesMobile", valuesMobile);
 
             return MAPPER.writeValueAsString(root);
 
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("Could not build themeJson", e);
+        }
+    }
+
+    /**
+     * Legacy overload – kept for callers that don't pass menuType yet.
+     * Defaults to "bottom" (old behaviour).
+     */
+    public static String buildThemeJson(
+            String primaryColor,
+            String secondaryColor,
+            String backgroundColor,
+            String onBackgroundColor,
+            String errorColor
+    ) {
+        return buildThemeJson(primaryColor, secondaryColor, backgroundColor,
+                onBackgroundColor, errorColor, null);
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────
+
+    /**
+     * Normalise a raw menuType string to either "hamburger" or "bottom".
+     * "drawer" is treated as an alias for "hamburger".
+     * Anything else / null → "bottom".
+     */
+    public static String resolveMenuType(String raw) {
+        if (raw == null || raw.isBlank()) return "bottom";
+        String v = raw.trim().toLowerCase();
+        if (v.equals("drawer") || v.equals("hamburger")) return "hamburger";
+        if (v.equals("bottom")) return "bottom";
+        return "bottom";
+    }
+
+    /**
+     * Extract "menuType" from a brandingJson string safely.
+     * Returns null if absent / parse error.
+     */
+    public static String extractMenuTypeFromBranding(String brandingJson) {
+        if (brandingJson == null || brandingJson.isBlank()) return null;
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> b = MAPPER.readValue(brandingJson, Map.class);
+            Object m = b.get("menuType");
+            return (m != null && !m.toString().isBlank()) ? m.toString() : null;
+        } catch (Exception e) {
+            return null;
         }
     }
 }

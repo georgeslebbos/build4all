@@ -1,4 +1,3 @@
-// src/main/java/com/build4all/features/ecommerce/service/ProductService.java
 package com.build4all.features.ecommerce.service;
 
 import com.build4all.admin.domain.AdminUserProject;
@@ -25,9 +24,13 @@ import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.io.IOException;
 import java.nio.file.*;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -195,7 +198,6 @@ public class ProductService {
         p.setItemType(itemType);
         p.setCurrency(currency);
 
-        // ✅ keep old naming: Item base field
         p.setItemName(request.getName());
         p.setDescription(request.getDescription());
         p.setPrice(request.getPrice());
@@ -318,6 +320,9 @@ public class ProductService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * ✅ FIXED: New arrivals should not show Upcoming/Draft.
+     */
     public List<ProductResponse> listNewArrivals(Long ownerProjectId, Integer daysBack) {
         if (ownerProjectId == null) throw new IllegalArgumentException("ownerProjectId is required");
 
@@ -327,6 +332,10 @@ public class ProductService {
         return productRepository
                 .findByOwnerProject_IdAndCreatedAtAfterOrderByCreatedAtDesc(ownerProjectId, from)
                 .stream()
+                .filter(p -> p.getStatus() != null && (
+                	    p.getStatus().equalsIgnoreCase("Published")
+                	    || p.getStatus().equalsIgnoreCase("Available")
+                	))
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
@@ -336,6 +345,7 @@ public class ProductService {
         if (ownerProjectId == null) throw new IllegalArgumentException("ownerProjectId is required");
         int max = (limit == null || limit <= 0) ? 10 : limit;
 
+        // ✅ now correct because repository query filters COMPLETED + Product + Published
         List<Object[]> rows = orderItemRepository.findBestSellingItemsByOwnerProject(ownerProjectId);
         if (rows.isEmpty()) return List.of();
 
@@ -404,6 +414,7 @@ public class ProductService {
     public List<ProductResponse> listDiscounted(Long ownerProjectId) {
         if (ownerProjectId == null) throw new IllegalArgumentException("ownerProjectId is required");
 
+        // ✅ now real flash sale due to repo query tightening
         return productRepository.findActiveDiscountedByOwnerProject(ownerProjectId)
                 .stream()
                 .map(this::toResponse)
@@ -417,11 +428,26 @@ public class ProductService {
     public void deleteTenant(Long id, Long ownerProjectId) {
         Product p = getTenantProductOrThrow(id, ownerProjectId);
 
-        deleteLocalImageIfManaged(p.getImageUrl());
+        // ✅ FIX: check by ITEM id, not OrderItem primary key
+        if (orderItemRepository.existsByItem_Id(id)) {
+            throw new IllegalStateException(
+                    "You can’t delete this product because it’s referenced by orders or present in carts. Archive/Deactivate it instead"
+            );
+        }
 
-        itemAttributeValueRepository.deleteAllByItemId(id);
+        final String imageUrl = p.getImageUrl();
+
+        // delete dependent attribute values first
+        itemAttributeValueRepository.deleteAllByItem_Id(id);
 
         productRepository.delete(p);
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                deleteLocalImageIfManaged(imageUrl);
+            }
+        });
     }
 
     /* =========================================================
@@ -557,11 +583,24 @@ public class ProductService {
         return r;
     }
 
+    /**
+     * ✅ FIX: supports ISO strings like:
+     * - 2026-02-20T10:00:00
+     * - 2026-02-20T10:00:00Z
+     * - 2026-02-20T10:00:00+02:00
+     */
     private LocalDateTime parseDateTimeOrNull(String value) {
         if (value == null || value.isBlank()) return null;
+
         try {
             return LocalDateTime.parse(value);
-        } catch (DateTimeParseException e) {
+        } catch (DateTimeParseException ignored) { }
+
+        try {
+            return OffsetDateTime.parse(value)
+                    .withOffsetSameInstant(ZoneOffset.UTC)
+                    .toLocalDateTime();
+        } catch (Exception e) {
             throw new IllegalArgumentException("Invalid datetime format: " + value);
         }
     }

@@ -49,6 +49,9 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
 
     boolean existsByItem_IdAndUser_Id(Long itemId, Long userId);
 
+    // ✅ NEW (needed for delete guard in ProductService)
+    boolean existsByItem_Id(Long itemId);
+
     List<OrderItem> findByItem_IdAndUser_Id(Long itemId, Long userId);
 
     long countByItem_Id(Long itemId);
@@ -311,18 +314,27 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     List<OrderItem> findRichByBusinessId(@Param("businessId") Long businessId);
 
     /* =========================================================================================
-       OwnerProject (application/tenant) reports (existing + NEW)
+       OwnerProject (application/tenant) reports (existing + FIXED)
        ========================================================================================= */
 
     /**
      * Best-selling items for one app (ownerProjectId).
      * Returns rows: [ itemId (Long), totalQty (Long) ] ordered by totalQty desc.
+     *
+     * ✅ FIXED:
+     * - counts ONLY completed orders (real sales)
+     * - counts ONLY published products
+     * - counts ONLY Product subtype (no other item types)
      */
     @Query("""
            SELECT oi.item.id AS itemId, SUM(oi.quantity) AS totalQty
            FROM OrderItem oi
+           JOIN oi.order o
            JOIN oi.item i
            WHERE i.ownerProject.id = :ownerProjectId
+             AND UPPER(o.status.name) = 'COMPLETED'
+             AND LOWER(i.status) = 'published'
+             AND TYPE(i) = com.build4all.features.ecommerce.domain.Product
            GROUP BY oi.item.id
            ORDER BY totalQty DESC
            """)
@@ -364,8 +376,6 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     /**
      * SUPER_ADMIN:
      * List order items for a specific application (ownerProjectId).
-     * This is basically the same as OWNER view, but SUPER_ADMIN can do it for any app.
-     * (You may choose to reuse the OWNER method above; keeping this name is clarity.)
      */
     @EntityGraph(attributePaths = {"order","item","currency","user"})
     @Query("""
@@ -380,10 +390,6 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     /**
      * SUPER_ADMIN:
      * Aggregate: count distinct orders grouped by application (ownerProjectId).
-     *
-     * Returns rows: Object[] where:
-     * - row[0] = ownerProjectId (Long)
-     * - row[1] = ordersCount (Long)
      */
     @Query("""
            select i.ownerProject.id, count(distinct o.id)
@@ -399,10 +405,6 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
      * OWNER tenant isolation helper:
      * Checks whether this order header belongs to this application (ownerProjectId),
      * based on at least one line item in the order.
-     *
-     * Used by:
-     * - GET /api/orders/owner/orders/{orderId}
-     * - PUT /api/orders/owner/orders/{orderId}/status
      */
     boolean existsByOrder_IdAndItem_OwnerProject_Id(Long orderId, Long ownerProjectId);
 }

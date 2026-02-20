@@ -56,8 +56,6 @@ public class OwnerAppRequestController {
         this.buildJobRepo = buildJobRepo;
     }
 
-  
-
     // ------------------------------------------------------------------
     // Legacy JSON create (kept)
     // ------------------------------------------------------------------
@@ -136,12 +134,16 @@ public class OwnerAppRequestController {
 
             MultipartFile logoFile = (file != null) ? file : logo;
 
+            // ✅ Extract menuType from brandingJson so theme respects it
+            String menuType = ThemeJsonBuilder.extractMenuTypeFromBranding(brandingJson);
+
             String themeJson = ThemeJsonBuilder.buildThemeJson(
                     primaryColor,
                     secondaryColor,
                     backgroundColor,
                     onBackgroundColor,
-                    errorColor
+                    errorColor,
+                    menuType   // ✅ pass menuType
             );
 
             AdminUserProject link = service.createAndAutoApprove(
@@ -187,14 +189,11 @@ public class OwnerAppRequestController {
                     "https://raw.githubusercontent.com/fatimahh0/HobbySphereFlutter/main/builds/"
                             + ownerId + "/" + projectId + "/" + link.getSlug() + "/latest.json";
             body.put("manifestUrlHint", manifestUrlGuess);
-
             body.put("callbackBase", nz(callbackBase));
-
             body.put("runtimeConfigUrl",
                     "/api/public/runtime-config?ownerId=" + ownerId
                             + "&projectId=" + projectId
-                            + "&slug=" + link.getSlug()
-            );
+                            + "&slug=" + link.getSlug());
 
             return ResponseEntity.ok(body);
 
@@ -247,12 +246,16 @@ public class OwnerAppRequestController {
 
             MultipartFile logoFile = (file != null) ? file : logo;
 
+            // ✅ Extract menuType from brandingJson
+            String menuType = ThemeJsonBuilder.extractMenuTypeFromBranding(brandingJson);
+
             String themeJson = ThemeJsonBuilder.buildThemeJson(
                     primaryColor,
                     secondaryColor,
                     backgroundColor,
                     onBackgroundColor,
-                    errorColor
+                    errorColor,
+                    menuType   // ✅ pass menuType
             );
 
             AdminUserProject link = service.createAndAutoApproveIos(
@@ -298,12 +301,10 @@ public class OwnerAppRequestController {
             body.put("iosBundleId", nz(link.getIosBundleId()));
 
             body.put("callbackBase", nz(callbackBase));
-
             body.put("runtimeConfigUrl",
                     "/api/public/runtime-config?ownerId=" + ownerId
                             + "&projectId=" + projectId
-                            + "&slug=" + link.getSlug()
-            );
+                            + "&slug=" + link.getSlug());
 
             return ResponseEntity.ok(body);
 
@@ -356,12 +357,16 @@ public class OwnerAppRequestController {
 
             MultipartFile logoFile = (file != null) ? file : logo;
 
+            // ✅ Extract menuType from brandingJson
+            String menuType = ThemeJsonBuilder.extractMenuTypeFromBranding(brandingJson);
+
             String themeJson = ThemeJsonBuilder.buildThemeJson(
                     primaryColor,
                     secondaryColor,
                     backgroundColor,
                     onBackgroundColor,
-                    errorColor
+                    errorColor,
+                    menuType   // ✅ pass menuType
             );
 
             AdminUserProject link = service.createAndAutoApproveBoth(
@@ -387,7 +392,6 @@ public class OwnerAppRequestController {
 
             Map<String, Object> body = new HashMap<>();
             body.put("message", "Android + iOS builds started");
-
             body.put("adminId", ownerId);
             body.put("projectId", projectId);
             body.put("ownerProjectLinkId", link.getId());
@@ -417,14 +421,11 @@ public class OwnerAppRequestController {
                     "https://raw.githubusercontent.com/fatimahh0/HobbySphereFlutter/main/builds/"
                             + ownerId + "/" + projectId + "/" + link.getSlug() + "/latest.json";
             body.put("manifestUrlHint", manifestUrlGuess);
-
             body.put("callbackBase", nz(callbackBase));
-
             body.put("runtimeConfigUrl",
                     "/api/public/runtime-config?ownerId=" + ownerId
                             + "&projectId=" + projectId
-                            + "&slug=" + link.getSlug()
-            );
+                            + "&slug=" + link.getSlug());
 
             return ResponseEntity.ok(body);
 
@@ -488,8 +489,8 @@ public class OwnerAppRequestController {
             ));
         }
     }
-    
- // ✅ UNIVERSAL rebuild endpoint (Android + iOS)
+
+    // ✅ UNIVERSAL rebuild endpoint (Android + iOS)
     @PostMapping(value = "/apps/{linkId}/rebuild", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> rebuildUniversal(
             @RequestHeader("Authorization") String authHeader,
@@ -539,7 +540,6 @@ public class OwnerAppRequestController {
         }
     }
 
-
     // ✅ rebuild only iOS IPA
     @PostMapping(value = "/apps/{linkId}/rebuild-ios", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> rebuildIosIpaSameBundle(
@@ -576,7 +576,6 @@ public class OwnerAppRequestController {
             body.put("ownerProjectLinkId", link.getId());
             body.put("slug", nz(link.getSlug()));
             body.put("appName", nz(link.getAppName()));
-
             body.put("iosBundleId", nz(link.getIosBundleId()));
             body.put("iosBuildNumber", link.getIosBuildNumber());
             body.put("iosVersionName", nz(link.getIosVersionName()));
@@ -686,30 +685,24 @@ public class OwnerAppRequestController {
         m.put("status", j.getStatus() == null ? "" : j.getStatus().name());
         m.put("ciBuildId", nz(j.getCiBuildId()));
 
-        // Android meta
         m.put("androidVersionCode", j.getAndroidVersionCode());
         m.put("androidVersionName", nz(j.getAndroidVersionName()));
         m.put("androidPackageName", nz(j.getAndroidPackageName()));
 
-        // iOS meta
         m.put("iosBuildNumber", j.getIosBuildNumber());
         m.put("iosVersionName", nz(j.getIosVersionName()));
         m.put("iosBundleId", nz(j.getIosBundleId()));
 
-        // Artifacts
         m.put("apkUrl", nz(j.getApkUrl()));
         m.put("bundleUrl", nz(j.getBundleUrl()));
         m.put("ipaUrl", nz(j.getIpaUrl()));
-
         m.put("error", nz(j.getError()));
 
-        // Timestamps
         m.put("createdAt", j.getCreatedAt());
         m.put("startedAt", j.getStartedAt());
         m.put("finishedAt", j.getFinishedAt());
         m.put("updatedAt", j.getUpdatedAt());
 
-        
         return m;
     }
 

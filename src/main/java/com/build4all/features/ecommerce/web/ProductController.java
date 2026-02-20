@@ -12,6 +12,8 @@ import com.build4all.tax.domain.TaxClass;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
+
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -299,7 +301,6 @@ public class ProductController {
     /* ------------------------ delete ------------------------ */
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "Delete product - tenant from token")
     public ResponseEntity<?> delete(
             @RequestHeader(value = "Authorization", required = false) String auth,
             @PathVariable Long id
@@ -314,14 +315,31 @@ public class ProductController {
         try {
             productService.deleteTenant(id, tokenOwnerProjectId);
             return ResponseEntity.noContent().build();
+
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("error", "Product not found"));
+                    .body(Map.of("code", "PRODUCT_NOT_FOUND"));
+        } catch (DataIntegrityViolationException e) {
+            // FK violation (cart/orders/etc)
+            String msg = String.valueOf(e.getMostSpecificCause() != null ? e.getMostSpecificCause().getMessage() : e.getMessage()).toLowerCase();
+
+            if (msg.contains("cart_items")) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body(Map.of("code", "PRODUCT_DELETE_BLOCKED_CART"));
+            }
+            if (msg.contains("order_items")) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body(Map.of("code", "PRODUCT_DELETE_BLOCKED_ORDERS"));
+            }
+
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of("code", "PRODUCT_DELETE_BLOCKED_IN_USE"));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", e.getMessage()));
+                    .body(Map.of("code", "SERVER_ERROR"));
         }
     }
+    
 
     /* ------------------------ get one ------------------------ */
 

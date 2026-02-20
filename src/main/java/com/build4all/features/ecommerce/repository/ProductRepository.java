@@ -21,7 +21,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     List<Product> findByOwnerProject_IdAndItemType_Category_Id(Long ownerProjectId, Long categoryId);
 
-    // ✅ FIXED: Product has "name" as JPA attribute, not "itemName"
+    // search (leave as-is in your project)
     List<Product> findByOwnerProject_IdAndNameContainingIgnoreCase(Long ownerProjectId, String q);
 
     List<Product> findByOwnerProject_IdAndCreatedAtAfterOrderByCreatedAtDesc(
@@ -34,17 +34,27 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     List<Product> findByIdIn(List<Long> ids);
 
+    /**
+     * ✅ FLASH SALE (active discounted right now):
+     * - published only
+     * - salePrice < price
+     * - saleStart & saleEnd MUST exist
+     * - now within window
+     */
     @Query("""
            SELECT p
            FROM Product p
            WHERE p.ownerProject.id = :ownerProjectId
+             AND LOWER(p.status) = 'published'
              AND p.salePrice IS NOT NULL
              AND p.salePrice > 0
              AND p.price IS NOT NULL
              AND p.salePrice < p.price
-             AND (p.saleStart IS NULL OR p.saleStart <= CURRENT_TIMESTAMP)
-             AND (p.saleEnd IS NULL OR p.saleEnd >= CURRENT_TIMESTAMP)
-           ORDER BY p.createdAt DESC
+             AND p.saleStart IS NOT NULL
+             AND p.saleEnd IS NOT NULL
+             AND p.saleStart <= CURRENT_TIMESTAMP
+             AND p.saleEnd >= CURRENT_TIMESTAMP
+           ORDER BY p.saleEnd ASC
            """)
     List<Product> findActiveDiscountedByOwnerProject(@Param("ownerProjectId") Long ownerProjectId);
 
@@ -69,7 +79,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     """)
     int deleteByIdAndTenant(@Param("id") Long id,
                             @Param("aupId") Long aupId);
-    
+
     @Modifying
     @Query("""
       update Product p

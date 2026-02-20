@@ -19,4 +19,8 @@ public interface ItemAttributeValueRepository extends JpaRepository<ItemAttribut
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from ItemAttributeValue v where v.item.id = :itemId")
     int deleteAllByItemId(@Param("itemId") Long itemId);
+    
+    @Modifying
+    @Query("delete from ItemAttributeValue v where v.item.id = :itemId")
+    void deleteAllByItem_Id(@Param("itemId") Long itemId);
 }

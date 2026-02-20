@@ -66,6 +66,12 @@ public class AdminUserProject {
 
     @Column(name = "bundle_url", columnDefinition = "TEXT")
     private String bundleUrl;
+    
+    @Column(name = "env_suffix", length = 16, nullable = true)
+    private String envSuffix;   // "test" | "dev" | "prod"...
+
+    @Column(name = "app_number", nullable = true)
+    private Integer appNumber;  // this is the oplX number (resets per env)
 
     @Column(name = "theme_id")
     private Long themeId;
@@ -80,10 +86,10 @@ public class AdminUserProject {
     @Column(name = "android_version_name", length = 32)
     private String androidVersionName;
 
-    @Column(name = "android_package_name", length = 255, unique = true)
+    @Column(name = "android_package_name", length = 255)
     private String androidPackageName;
     
-    @Column(name = "ios_bundle_id", length = 255, unique = true)
+    @Column(name = "ios_bundle_id", length = 255)
     private String iosBundleId;
 
     @Column(name = "ios_build_number")
@@ -92,6 +98,8 @@ public class AdminUserProject {
     @Column(name = "ios_version_name", length = 32)
     private String iosVersionName;
 
+    
+    
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
@@ -135,6 +143,16 @@ public class AdminUserProject {
     protected void onCreate() {
         this.createdAt = LocalDateTime.now();
         this.updatedAt = this.createdAt;
+
+        // Only generate if missing
+        if ((androidPackageName == null || androidPackageName.isBlank())
+                && envSuffix != null && appNumber != null) {
+            ensureAndroidPackageName();
+        }
+        if ((iosBundleId == null || iosBundleId.isBlank())
+                && envSuffix != null && appNumber != null) {
+            ensureIosBundleId();
+        }
     }
 
     @PreUpdate
@@ -142,21 +160,7 @@ public class AdminUserProject {
         this.updatedAt = LocalDateTime.now();
     }
 
-    // ---------------- FIX: generate package name ONCE ----------------
-    /**
-     * Ensure Android package name exists.
-     * Strategy: com.build4all.opl{linkId}
-     * Must be called ONLY after entity has an ID.
-     */
-    public String ensureAndroidPackageName() {
-        if (this.androidPackageName == null || this.androidPackageName.isBlank()) {
-            if (this.id == null) {
-                throw new IllegalStateException("Cannot generate androidPackageName before ID exists");
-            }
-            this.androidPackageName = "com.build4all.opl" + this.id + ".test";
-        }
-        return this.androidPackageName;
-    }
+   
     
     
 
@@ -189,15 +193,34 @@ public class AdminUserProject {
         }
     }
     
-    
-    public String ensureIosBundleId() {
-        if (this.iosBundleId == null || this.iosBundleId.isBlank()) {
-            if (this.id == null) {
-                throw new IllegalStateException("Cannot generate iosBundleId before ID exists");
-            }
-        
-            this.iosBundleId = "com.build4all.opl" + this.id + ".test";
+    private static String normEnv(String s) {
+        if (s == null || s.isBlank()) return "test";
+        s = s.trim();
+        if (s.startsWith(".")) s = s.substring(1);
+        return s.toLowerCase();
+    }
+
+    private static final String PKG_PREFIX = "com.build4all.opl";
+
+    public String ensureAndroidPackageName() {
+        if (this.envSuffix == null || this.envSuffix.isBlank()) {
+            throw new IllegalStateException("envSuffix is required before generating androidPackageName");
         }
+        if (this.appNumber == null) {
+            throw new IllegalStateException("appNumber is required before generating androidPackageName");
+        }
+        this.androidPackageName = PKG_PREFIX + this.appNumber + "." + normEnv(this.envSuffix);
+        return this.androidPackageName;
+    }
+
+    public String ensureIosBundleId() {
+        if (this.envSuffix == null || this.envSuffix.isBlank()) {
+            throw new IllegalStateException("envSuffix is required before generating iosBundleId");
+        }
+        if (this.appNumber == null) {
+            throw new IllegalStateException("appNumber is required before generating iosBundleId");
+        }
+        this.iosBundleId = PKG_PREFIX + this.appNumber + "." + normEnv(this.envSuffix);
         return this.iosBundleId;
     }
 
@@ -268,6 +291,12 @@ public class AdminUserProject {
 
     public Currency getCurrency() { return currency; }
     public void setCurrency(Currency currency) { this.currency = currency; }
+    
+    public String getEnvSuffix() { return envSuffix; }
+    public void setEnvSuffix(String envSuffix) { this.envSuffix = envSuffix; }
+
+    public Integer getAppNumber() { return appNumber; }
+    public void setAppNumber(Integer appNumber) { this.appNumber = appNumber; }
 
     public Integer getAndroidVersionCode() { return androidVersionCode; }
     public void setAndroidVersionCode(Integer androidVersionCode) { this.androidVersionCode = androidVersionCode; }

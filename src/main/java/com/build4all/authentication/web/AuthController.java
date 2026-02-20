@@ -1568,8 +1568,8 @@ public class AuthController {
     	        throw new IllegalArgumentException("password is required");
     	    }
     	    String p = password.trim();
-    	    if (p.length() < 6 || p.length() > 8) {
-    	        throw new IllegalArgumentException("password must be between 6 and 8 characters");
+    	    if (p.length() < 6 ) {
+    	        throw new IllegalArgumentException("password must be 8 characters");
     	    }
     	    if (!PASSWORD_SPECIAL.matcher(p).matches()) {
     	        throw new IllegalArgumentException("password must contain at least 1 special character");

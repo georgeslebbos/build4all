@@ -2,8 +2,10 @@ package com.build4all.app.service;
 
 import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.domain.AdminUserProject;
+import com.build4all.admin.domain.AppEnvCounter;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.admin.repository.AdminUsersRepository;
+import com.build4all.admin.repository.AppEnvCounterRepository;
 import com.build4all.app.domain.AppRequest;
 import com.build4all.app.domain.AppRuntimeConfig;
 import com.build4all.app.dto.CiDispatchResult;
@@ -18,6 +20,8 @@ import com.build4all.theme.domain.Theme;
 import com.build4all.theme.repository.ThemeRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -50,6 +54,13 @@ public class AppRequestService {
     // ✅ last-step: track jobs
     private final AppBuildJobService buildJobService;
 
+    // ✅ env suffix from application.properties (test/dev/prod...)
+    @Value("${build4all.envSuffix:test}")
+    private String envSuffix;
+
+    // ✅ per-env counter repo
+    private final AppEnvCounterRepository envCounterRepo;
+
     public AppRequestService(AppRequestRepository appRequestRepo,
                              AdminUserProjectRepository aupRepo,
                              AdminUsersRepository adminRepo,
@@ -59,7 +70,8 @@ public class AppRequestService {
                              CurrencyRepository currencyRepo,
                              AppRuntimeConfigRepository runtimeRepo,
                              LicensingService licensingService,
-                             AppBuildJobService buildJobService) {
+                             AppBuildJobService buildJobService,
+                             AppEnvCounterRepository envCounterRepo) {
         this.appRequestRepo = appRequestRepo;
         this.aupRepo = aupRepo;
         this.adminRepo = adminRepo;
@@ -70,9 +82,72 @@ public class AppRequestService {
         this.runtimeRepo = runtimeRepo;
         this.licensingService = licensingService;
         this.buildJobService = buildJobService;
+        this.envCounterRepo = envCounterRepo;
     }
 
-    /** Legacy JSON create (kept). */
+    // ------------------------------------------------------------------
+    // ✅ ENV + COUNTER HELPERS
+    // ------------------------------------------------------------------
+
+    private static String normEnv(String s) {
+        if (s == null || s.isBlank()) return "test";
+        s = s.trim();
+        if (s.startsWith(".")) s = s.substring(1);
+        return s.toLowerCase();
+    }
+
+    @Transactional
+    public int allocateAppNumberForEnv(String env) {
+        final String envKey = normEnv(env);
+
+        // 1) lock row if exists
+        AppEnvCounter c = envCounterRepo.findForUpdate(envKey).orElse(null);
+
+        // 2) if missing -> create starting from max+1 (or 1)
+        if (c == null) {
+            int start = aupRepo.maxAppNumberForEnv(envKey) + 1; // if none => 1
+
+            AppEnvCounter row = new AppEnvCounter();
+            row.setEnvSuffix(envKey);
+            row.setNextNumber(start);
+
+            try {
+                envCounterRepo.saveAndFlush(row);
+            } catch (DataIntegrityViolationException ignored) {
+                // another thread created it
+            }
+
+            c = envCounterRepo.findForUpdate(envKey)
+                    .orElseThrow(() -> new IllegalStateException("Cannot create/find counter for env=" + envKey));
+        }
+
+        // 3) sync counter with DB max (imports/manual inserts protection)
+        int max = aupRepo.maxAppNumberForEnv(envKey);
+        if (c.getNextNumber() <= max) {
+            c.setNextNumber(max + 1);
+        }
+
+        // 4) allocate
+        int n = c.getNextNumber();
+        c.setNextNumber(n + 1);
+        envCounterRepo.save(c);
+        return n;
+    }
+
+    /** ✅ Ensure link has envSuffix + appNumber BEFORE generating package/bundle */
+    private void ensureEnvAndNumber(AdminUserProject link) {
+        if (link.getEnvSuffix() == null || link.getEnvSuffix().isBlank()) {
+            link.setEnvSuffix(normEnv(envSuffix)); // from properties
+        }
+        if (link.getAppNumber() == null) {
+            link.setAppNumber(allocateAppNumberForEnv(link.getEnvSuffix()));
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Legacy JSON create (kept).
+    // ------------------------------------------------------------------
+
     public AppRequest createRequest(Long ownerId, Long projectId,
                                     String appName, String slug,
                                     String logoUrl, Long themeId,
@@ -319,7 +394,6 @@ public class AppRequestService {
             throw new IllegalStateException(msg);
         }
 
-        // ✅ last-step: record job
         buildJobService.recordAndroidDispatch(link, res.buildId());
 
         log.info("CI Android bundle rebuild dispatched OK (buildId={}, linkId={}, package={})",
@@ -349,6 +423,7 @@ public class AppRequestService {
         Project project = link.getProject();
 
         if (link.getIosBundleId() == null || link.getIosBundleId().isBlank()) {
+            ensureEnvAndNumber(link); // ✅ NEW
             link.ensureIosBundleId();
         }
 
@@ -400,7 +475,6 @@ public class AppRequestService {
             throw new IllegalStateException(msg);
         }
 
-        // ✅ last-step: record job
         buildJobService.recordIosDispatch(link, res.buildId());
 
         log.info("CI iOS rebuild dispatched OK (buildId={}, linkId={}, bundleId={})",
@@ -470,6 +544,9 @@ public class AppRequestService {
         Project project = projectRepo.findById(req.getProjectId())
                 .orElseThrow(() -> new IllegalArgumentException("Project not found"));
 
+        // ✅ NEW: make sure env+number exist before ensure bundle id
+        ensureEnvAndNumber(link);
+
         link.bumpIosVersion();
         link.ensureIosBundleId();
         link.setIpaUrl(null);
@@ -521,7 +598,6 @@ public class AppRequestService {
             throw new IllegalStateException(msg);
         }
 
-        // ✅ last-step: record job
         buildJobService.recordIosDispatch(link, res.buildId());
     }
 
@@ -582,6 +658,10 @@ public class AppRequestService {
         link.setIpaUrl(null);
 
         link = aupRepo.save(link);
+
+        // ✅ NEW: ensure env+number exist before ensure bundle id
+        ensureEnvAndNumber(link);
+
         link.bumpIosVersion();
         link.ensureIosBundleId();
         link = aupRepo.save(link);
@@ -630,7 +710,6 @@ public class AppRequestService {
             throw new IllegalStateException(msg);
         }
 
-        // ✅ last-step: record job
         buildJobService.recordIosDispatch(link, res.buildId());
 
         log.info("CI iOS dispatch OK (buildId={}, ownerId={}, projectId={}, linkId={}, slug={}, bundleId={})",
@@ -696,6 +775,9 @@ public class AppRequestService {
         link.setBundleUrl(null);
 
         link = aupRepo.save(link);
+
+        // ✅ NEW: ensure env+number exist before ensure package name
+        ensureEnvAndNumber(link);
         link.ensureAndroidPackageName();
         link = aupRepo.save(link);
 
@@ -741,7 +823,6 @@ public class AppRequestService {
             throw new IllegalStateException(msg);
         }
 
-        // ✅ last-step: record job
         buildJobService.recordAndroidDispatch(link, res.buildId());
 
         log.info("CI dispatch OK (buildId={}, ownerId={}, projectId={}, linkId={}, slug={})",
@@ -856,8 +937,6 @@ public class AppRequestService {
         return "/uploads/owner/" + ownerId + "/" + projectId + "/" + cleanSlug + "/" + safe;
     }
 
-    // ---------------- RESTORED METHODS (needed by CiCallbackController) ----------------
-
     @Transactional
     public void setApkUrlByLinkId(Long linkId, String apkUrl) {
         AdminUserProject link = aupRepo.findById(linkId)
@@ -881,8 +960,6 @@ public class AppRequestService {
         link.setIpaUrl(ipaUrl);
         aupRepo.save(link);
     }
-
-    // ---------------- helpers ----------------
 
     private static String slugifyOrFallback(String maybeSlug, String fallbackName) {
         if (maybeSlug != null && !maybeSlug.isBlank()) return slugify(maybeSlug);

@@ -2,19 +2,23 @@ package com.build4all.admin.service;
 
 import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.domain.AdminUserProject;
+import com.build4all.admin.domain.AppEnvCounter;
 import com.build4all.admin.dto.AdminAppAssignmentRequest;
 import com.build4all.admin.dto.AdminAppAssignmentResponse;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.admin.repository.AdminUsersRepository;
+import com.build4all.admin.repository.AppEnvCounterRepository;
 import com.build4all.app.domain.AppRuntimeConfig;
 import com.build4all.app.repository.AppRuntimeConfigRepository;
 import com.build4all.catalog.domain.Currency;
 import com.build4all.catalog.repository.CurrencyRepository;
 import com.build4all.project.domain.Project;
 import com.build4all.project.repository.ProjectRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -28,13 +32,6 @@ import java.util.List;
 import java.util.UUID;
 
 @Service
-/**
- * Business logic for managing AdminUserProject links (AUP).
- *
- * IMPORTANT:
- * - This service is for "assignment/config".
- * - It does NOT generate androidPackageName (that belongs to provisioning/build flow).
- */
 public class AdminUserProjectService {
 
     private final AdminUsersRepository adminRepo;
@@ -42,20 +39,30 @@ public class AdminUserProjectService {
     private final AdminUserProjectRepository linkRepo;
     private final CurrencyRepository currencyRepository;
     private final AppRuntimeConfigRepository runtimeRepo;
+    private final AppEnvCounterRepository envCounterRepo;
+
+    // ✅ env suffix from application.properties
+    @Value("${build4all.envSuffix:test}")
+    private String envSuffix;
 
     public AdminUserProjectService(AdminUsersRepository adminRepo,
                                    ProjectRepository projectRepo,
                                    AdminUserProjectRepository linkRepo,
                                    CurrencyRepository currencyRepository,
-                                   AppRuntimeConfigRepository runtimeRepo) {
+                                   AppRuntimeConfigRepository runtimeRepo,
+                                   AppEnvCounterRepository envCounterRepo) {
         this.adminRepo = adminRepo;
         this.projectRepo = projectRepo;
         this.linkRepo = linkRepo;
         this.currencyRepository = currencyRepository;
         this.runtimeRepo = runtimeRepo;
+        this.envCounterRepo = envCounterRepo;
     }
 
-    /** List all apps (rows) for an owner (adminId). */
+    // ---------------------------
+    // List / Get
+    // ---------------------------
+
     @Transactional(readOnly = true)
     public List<AdminAppAssignmentResponse> list(Long adminId) {
         return linkRepo.findByAdmin_AdminId(adminId).stream()
@@ -79,24 +86,68 @@ public class AdminUserProjectService {
                 .toList();
     }
 
-    /** Get one app row (owner+project+slug). */
     @Transactional(readOnly = true)
     public AdminUserProject get(Long adminId, Long projectId, String slug) {
         return linkRepo.findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slugify(slug))
                 .orElseThrow(() -> new IllegalArgumentException("App assignment not found"));
     }
 
-    /**
-     * Create or update a single APP under (owner, project) keyed by slug.
-     * - If slug omitted: derive from appName
-     * - Ensure uniqueness per (owner, project) by appending -2, -3...
-     *
-     * Upserts runtime config JSON (nav/home/features/branding/apiBaseUrlOverride).
-     */
+    // ---------------------------
+    // ✅ NEW: allocate app number per env
+    // ---------------------------
+
+    private static String normEnv(String s) {
+        if (s == null || s.isBlank()) return "test";
+        s = s.trim();
+        if (s.startsWith(".")) s = s.substring(1);
+        return s.toLowerCase();
+    }
+
+   
+
+    @Transactional
+    public int allocateAppNumberForEnv(String env) {
+        final String envKey = normEnv(env);
+
+        AppEnvCounter c = envCounterRepo.findForUpdate(envKey).orElse(null);
+
+        if (c == null) {
+            int start = linkRepo.maxAppNumberForEnv(envKey) + 1; // if none => 1
+            AppEnvCounter row = new AppEnvCounter();
+            row.setEnvSuffix(envKey);
+            row.setNextNumber(start);
+
+            try {
+                envCounterRepo.saveAndFlush(row);
+            } catch (DataIntegrityViolationException ignored) {
+                // another thread created it
+            }
+
+            c = envCounterRepo.findForUpdate(envKey)
+                    .orElseThrow(() -> new IllegalStateException("Cannot create/find counter for env=" + envKey));
+        }
+
+        // ✅ CRITICAL: sync counter with DB max in case old data was inserted
+        int max = linkRepo.maxAppNumberForEnv(envKey);
+        if (c.getNextNumber() <= max) {
+            c.setNextNumber(max + 1);
+        }
+
+        int n = c.getNextNumber();
+        c.setNextNumber(n + 1);
+        envCounterRepo.save(c);
+        return n;
+    }
+    // ---------------------------
+    // Assign / Upsert
+    // ---------------------------
+
     @Transactional
     public void assign(Long adminId, AdminAppAssignmentRequest req) {
 
-        // 1) Load owner/admin
+       
+
+        // 1) Load admin
         AdminUser admin = adminRepo.findByAdminId(adminId)
                 .orElseThrow(() -> new IllegalArgumentException("Admin not found"));
 
@@ -109,13 +160,26 @@ public class AdminUserProjectService {
                 ? slugify(req.getSlug())
                 : slugify(req.getAppName());
 
-        // 4) Ensure uniqueness per (owner, project)
-        String uniqueSlug = ensureUniqueSlug(admin.getAdminId(), project.getId(), baseSlug);
-
-        // 5) Find existing row by unique slug
+        // ✅ FIX: if slug already exists, update it (don’t auto create -2)
         AdminUserProject link = linkRepo
-                .findByAdmin_AdminIdAndProject_IdAndSlug(admin.getAdminId(), project.getId(), uniqueSlug)
+                .findByAdmin_AdminIdAndProject_IdAndSlug(admin.getAdminId(), project.getId(), baseSlug)
                 .orElse(null);
+
+        // 4) If not found, ensure uniqueness (create new slug if needed)
+        String uniqueSlug = (link != null)
+                ? baseSlug
+                : ensureUniqueSlug(admin.getAdminId(), project.getId(), baseSlug);
+
+        // if we changed slug due to uniqueness, re-load
+        if (link == null) {
+            link = linkRepo
+                    .findByAdmin_AdminIdAndProject_IdAndSlug(admin.getAdminId(), project.getId(), uniqueSlug)
+                    .orElse(null);
+        }
+
+    
+
+        final String currentEnv = normEnv(this.envSuffix); // ✅ final + normalized
 
         LocalDate now = LocalDate.now();
 
@@ -127,12 +191,37 @@ public class AdminUserProjectService {
                     req.getValidFrom() != null ? req.getValidFrom() : now,
                     req.getEndTo() != null ? req.getEndTo() : now.plusMonths(1)
             );
+
             link.setStatus("TEST");
             link.setSlug(uniqueSlug);
+
+            // ✅ NEW app => allocate numbers + ids ONCE
+            link.setEnvSuffix(currentEnv);
+            link.setAppNumber(allocateAppNumberForEnv(currentEnv));
+
+            link.ensureAndroidPackageName();
+            link.ensureIosBundleId();
+
         } else {
+            // update existing (NO env/appNumber regeneration)
             if (req.getLicenseId() != null) link.setLicenseId(req.getLicenseId());
             if (req.getValidFrom() != null) link.setValidFrom(req.getValidFrom());
             if (req.getEndTo() != null) link.setEndTo(req.getEndTo());
+
+            // ✅ Backfill only if old row had nulls (from old data)
+            if (link.getEnvSuffix() == null || link.getEnvSuffix().isBlank()) {
+                link.setEnvSuffix(currentEnv);
+            }
+            if (link.getAppNumber() == null) {
+                link.setAppNumber(allocateAppNumberForEnv(link.getEnvSuffix()));
+            }
+
+            if (link.getAndroidPackageName() == null || link.getAndroidPackageName().isBlank()) {
+                link.ensureAndroidPackageName();
+            }
+            if (link.getIosBundleId() == null || link.getIosBundleId().isBlank()) {
+                link.ensureIosBundleId();
+            }
         }
 
         // App metadata
@@ -155,11 +244,11 @@ public class AdminUserProjectService {
             link.setLicenseId("LIC-" + admin.getAdminId() + "-" + project.getId() + "-" + now + "-" + uniqueSlug);
         }
 
-        // Reset build artifacts on assign (clean slate)
+        // Reset build artifacts on assign
         link.setApkUrl(null);
         link.setBundleUrl(null);
 
-        // ✅ SAVE assignment row
+        // ✅ Save AUP
         AdminUserProject savedLink = linkRepo.save(link);
 
         // ✅ Upsert runtime config
@@ -169,7 +258,6 @@ public class AdminUserProjectService {
             return c;
         });
 
-        // Only overwrite when provided
         if (req.getNavJson() != null) cfg.setNavJson(req.getNavJson());
         if (req.getHomeJson() != null) cfg.setHomeJson(req.getHomeJson());
         if (req.getEnabledFeaturesJson() != null) cfg.setEnabledFeaturesJson(req.getEnabledFeaturesJson());
@@ -179,7 +267,10 @@ public class AdminUserProjectService {
         runtimeRepo.save(cfg);
     }
 
-    /** Upload & save logo, return its public URL. */
+    // ---------------------------
+    // Logo / License / Remove
+    // ---------------------------
+
     @Transactional
     public String updateAppLogo(Long adminId, Long projectId, String slug, MultipartFile file) throws IOException {
 
@@ -209,7 +300,6 @@ public class AdminUserProjectService {
         return publicUrl;
     }
 
-    /** Update only license/validity for an existing app (owner+project+slug). */
     @Transactional
     public void updateLicense(Long adminId, Long projectId, String slug, AdminAppAssignmentRequest req) {
 
@@ -224,14 +314,15 @@ public class AdminUserProjectService {
         linkRepo.save(link);
     }
 
-    /** Delete one app (row) under owner+project by slug. */
     @Transactional
     public void remove(Long adminId, Long projectId, String slug) {
         linkRepo.findByAdmin_AdminIdAndProject_IdAndSlug(adminId, projectId, slugify(slug))
                 .ifPresent(linkRepo::delete);
     }
 
-    // ---------- helpers ----------
+    // ---------------------------
+    // helpers
+    // ---------------------------
 
     private static String slugify(String s) {
         if (s == null) return "app";

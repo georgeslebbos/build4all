@@ -133,6 +133,7 @@ public class OwnerPaymentConfigController {
      * body: { enabled: true, configValues: { secretKey: "...", publishableKey: "..."} }
      */
     @PutMapping("/methods/{methodName}")
+    @Transactional
     public ResponseEntity<?> save(@RequestHeader("Authorization") String auth,
                                   @PathVariable Long ownerProjectId,
                                   @PathVariable String methodName,
@@ -140,40 +141,76 @@ public class OwnerPaymentConfigController {
 
         if (!hasRole(strip(auth), "OWNER", "SUPER_ADMIN")) {
             return ResponseEntity.status(403)
-                    .body(Map.of("message","OWNER or SUPER_ADMIN required"));
+                    .body(Map.of("error", "OWNER or SUPER_ADMIN required"));
         }
 
-        // 1) Ensure there is an actual gateway plugin with this code
-        // Example: "STRIPE" -> StripeGateway exists
-        registry.require(methodName);
+        final String code = methodName == null ? "" : methodName.trim().toUpperCase();
 
-        // 2) Ensure PaymentMethod exists in platform catalog table
-        PaymentMethod method = methodRepo.findByNameIgnoreCase(methodName)
-                .orElseThrow(() -> new IllegalArgumentException("PaymentMethod not found: " + methodName));
+        try {
+            // 1) Ensure gateway exists
+            registry.require(code);
 
-        // 3) Load existing per-project config OR create a new one
-        PaymentMethodConfig cfg = configRepo
-                .findByOwnerProjectIdAndPaymentMethod_NameIgnoreCase(ownerProjectId, methodName)
-                .orElseGet(PaymentMethodConfig::new);
+            // 2) Ensure PaymentMethod exists
+            PaymentMethod method = methodRepo.findByNameIgnoreCase(code)
+                    .orElseThrow(() -> new IllegalArgumentException("PaymentMethod not found: " + code));
 
-        // 4) Update config fields
-        cfg.setOwnerProjectId(ownerProjectId);
-        cfg.setPaymentMethod(method);
-        cfg.setEnabled(body.isEnabled());
+            // 3) Load existing config if any
+            PaymentMethodConfig cfg = configRepo
+                    .findByOwnerProjectIdAndPaymentMethod_NameIgnoreCase(ownerProjectId, code)
+                    .orElse(null);
 
-        // Convert configValues (Map) -> JSON string stored in DB
-        cfg.setConfigJson(configService.toJson(body.getConfigValues()));
+            // ✅ DISABLE: do NOT touch configJson
+            if (!body.isEnabled()) {
+                if (cfg != null) {
+                    cfg.setEnabled(false);
+                    configRepo.save(cfg);
+                }
+                return ResponseEntity.ok(Map.of(
+                        "ownerProjectId", ownerProjectId,
+                        "methodName", method.getName(),
+                        "enabled", false
+                ));
+            }
 
-        // 5) Save row
-        PaymentMethodConfig saved = configRepo.save(cfg);
+            // ✅ ENABLE: create if missing
+            if (cfg == null) cfg = new PaymentMethodConfig();
 
-        // Return a SAFE summary response (no secrets)
-        return ResponseEntity.ok(Map.of(
-                "id", saved.getId(),
-                "ownerProjectId", saved.getOwnerProjectId(),
-                "methodName", saved.getPaymentMethod().getName(),
-                "enabled", saved.isEnabled(),
-                "updatedAt", saved.getUpdatedAt()
-        ));
+            cfg.setOwnerProjectId(ownerProjectId);
+            cfg.setPaymentMethod(method);
+            cfg.setEnabled(true);
+
+            // handle null safely
+            Map<String, Object> incoming = body.getConfigValues();
+            if (incoming == null) incoming = new HashMap<>();
+
+            // Optional (recommended): merge with existing so empty password fields don't wipe secrets
+            Map<String, Object> merged = new HashMap<>();
+            if (cfg.getConfigJson() != null && !cfg.getConfigJson().isBlank()) {
+                try {
+                    merged.putAll(configService.parse(cfg.getConfigJson()).values());
+                } catch (Exception ignore) {
+                    // if old JSON is corrupted, we just overwrite with incoming
+                }
+            }
+            merged.putAll(incoming);
+
+            cfg.setConfigJson(configService.toJson(merged));
+
+            PaymentMethodConfig saved = configRepo.save(cfg);
+
+            return ResponseEntity.ok(Map.of(
+                    "id", saved.getId(),
+                    "ownerProjectId", saved.getOwnerProjectId(),
+                    "methodName", saved.getPaymentMethod().getName(),
+                    "enabled", saved.isEnabled(),
+                    "updatedAt", saved.getUpdatedAt()
+            ));
+
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (Exception ex) {
+            // don't leak stack trace to client
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to save payment config"));
+        }
     }
 }
