@@ -7,6 +7,8 @@ import com.build4all.admin.repository.AdminUsersRepository;
 import com.build4all.business.domain.Businesses;
 import com.build4all.business.repository.BusinessesRepository;
 
+import io.jsonwebtoken.Claims;
+
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,23 +23,20 @@ import org.springframework.security.web.authentication.WebAuthenticationDetailsS
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 
 /**
  * JWT Authentication filter that runs once per request.
  *
- * What it does:
- * - Reads Authorization: Bearer <token>
- * - Extracts subject (email/phone) + role from the JWT
- * - Loads the correct principal object (Users/AdminUser/Businesses) from DB based on the role
- * - Creates a Spring Security Authentication and stores it in SecurityContext
- *
- * Why this matters:
- * - After this filter runs, controllers/services can use:
- *   - SecurityContextHolder.getContext().getAuthentication()
- *   - @AuthenticationPrincipal
- *   - @PreAuthorize("hasRole('...')")
+ * Fixes:
+ * - USER/BUSINESS tokens use subject=id => load principal by claim "id" (NOT subject email/phone)
+ * - Prevent DB-reset / ID reuse hijack:
+ *     if token.iat < entity.createdAt => token is stale => do NOT authenticate
+ * - Clears TenantContext to avoid ThreadLocal leak
  */
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
@@ -65,132 +64,254 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             FilterChain filterChain
     ) throws ServletException, IOException {
 
-        // Read the Authorization header: "Bearer <jwt>"
-        String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
-
-        // No Authorization header or not "Bearer ..." --> skip auth and continue request normally.
-        // Result: request is treated as anonymous by Spring Security.
-        if (authHeader == null || !authHeader.toLowerCase().startsWith("bearer ")) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        // Extract raw JWT string (remove "Bearer ")
-        String token = authHeader.substring(7).trim();
-        //  set tenant early
-        Long ownerProjectId = jwtUtil.extractOwnerProjectIdClaim(token);
-        if (ownerProjectId != null) {
-            TenantContext.setOwnerProjectId(ownerProjectId);
-        }
-
         try {
-            // subject = identifier stored in JWT subject:
-            // - user email or phone
-            // - admin email
-            // - business email or phone (depending how you generate the token)
-            String subject = jwtUtil.extractUsername(token);
+            String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
 
-            // role = claim "role" inside JWT (e.g. USER, SUPER_ADMIN, BUSINESS, OWNER, MANAGER)
-            String roleName = jwtUtil.extractRole(token);
-            
-            
-
-            // DEBUG: If you are getting 403, this print helps confirm if token is valid and parsed.
-            // NOTE: Keep it during dev only.
-            System.out.println("✅ JWT OK: " + request.getMethod() + " " + request.getRequestURI()
-                    + " | subject=" + subject + " | role=" + roleName);
-
-            // If token parsing failed OR already authenticated earlier in the chain, do nothing.
-            // Example: another filter already set authentication (rare here, but good safety check).
-            if (subject == null || roleName == null ||
-                    SecurityContextHolder.getContext().getAuthentication() != null) {
+            // No Authorization header or not "Bearer ..." --> skip auth and continue.
+            if (authHeader == null || !authHeader.toLowerCase().startsWith("bearer ")) {
                 filterChain.doFilter(request, response);
                 return;
             }
 
-            // Default principal is the raw subject string.
-            // We try to upgrade it into a full entity object (Users/AdminUser/Businesses).
-            Object principal = subject;
+            String token = authHeader.substring(7).trim();
 
-            // Attach the correct entity depending on role.
-            // This is useful because later you can access principal fields directly in controllers.
+            // If token is invalid/expired, treat as anonymous (don’t block public endpoints).
+            if (!jwtUtil.validateToken(token)) {
+                SecurityContextHolder.clearContext();
+                filterChain.doFilter(request, response);
+                return;
+            }
+
+            // Parse claims once
+            Claims claims = jwtUtil.extractAllClaims(token);
+
+            String roleName = claims.get("role", String.class);
+            String subject = claims.getSubject(); // USER/BIZ => id string; ADMIN => email
+            Long idClaim = asLong(claims.get("id"));
+            Date issuedAt = claims.getIssuedAt();
+
+            // Set tenant early for downstream repos/services (if present)
+            Long ownerProjectId = asLong(claims.get("ownerProjectId"));
+            if (ownerProjectId != null) {
+                TenantContext.setOwnerProjectId(ownerProjectId);
+            }
+
+            // If role missing OR already authenticated earlier -> continue
+            if (roleName == null || roleName.isBlank()
+                    || SecurityContextHolder.getContext().getAuthentication() != null) {
+                filterChain.doFilter(request, response);
+                return;
+            }
+
+            Object principal = null;
+
             switch (roleName.toUpperCase()) {
 
                 case "USER" -> {
-                    // In your system, a USER token subject can be email OR phone.
-                    // You try email first, then phone.
-                    Users user = usersRepository.findByEmail(subject);
-                    if (user == null) {
-                        user = usersRepository.findByPhoneNumber(subject);
-                    }
-                    if (user != null) {
-                        principal = user; // principal becomes Users entity
-                    }
-                }
+                    // ✅ USER tokens: subject is id; use claim "id" as source of truth
+                    if (idClaim == null) {
+                        // fallback (very old tokens): maybe subject was email/phone
+                        Users u = tryFindUserBySubject(subject);
+                        if (u == null) {
+                            SecurityContextHolder.clearContext();
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+                        idClaim = u.getId();
+                        principal = u;
+                    } else {
+                        Optional<Users> userOpt = usersRepository.findById(idClaim);
+                        if (userOpt.isEmpty()) {
+                            SecurityContextHolder.clearContext();
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+                        Users user = userOpt.get();
 
-                case "SUPER_ADMIN", "OWNER" -> {
-                    // Admin/Owner tokens use email as subject (from AuthController token generation).
-                    Optional<AdminUser> adminOpt = adminUsersRepository.findByEmail(subject);
-                    if (adminOpt.isPresent()) {
-                        principal = adminOpt.get(); // principal becomes AdminUser entity
+                        // ✅ Prevent DB reset / ID reuse hijack
+                        if (isStaleToken(issuedAt, user.getCreatedAt())) {
+                            SecurityContextHolder.clearContext();
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+
+                        // ✅ Extra safety: token tenant must match DB tenant (when present)
+                        if (ownerProjectId != null
+                                && user.getOwnerProject() != null
+                                && user.getOwnerProject().getId() != null
+                                && !ownerProjectId.equals(user.getOwnerProject().getId())) {
+                            SecurityContextHolder.clearContext();
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+
+                        principal = user;
                     }
                 }
 
                 case "BUSINESS" -> {
-                    // Business tokens typically use email or phone as subject depending on token generation.
-                    // Here you assume findByEmail exists and subject is email.
-                    Optional<Businesses> bizOpt = businessesRepository.findByEmail(subject);
-                    if (bizOpt.isPresent()) {
-                        principal = bizOpt.get(); // principal becomes Businesses entity
+                    if (idClaim == null) {
+                        // fallback (old tokens): maybe subject was email/phone
+                        Businesses b = tryFindBusinessBySubject(subject, ownerProjectId);
+                        if (b == null) {
+                            SecurityContextHolder.clearContext();
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+                        idClaim = b.getId();
+                        principal = b;
+                    } else {
+                        Optional<Businesses> bizOpt = businessesRepository.findById(idClaim);
+                        if (bizOpt.isEmpty()) {
+                            SecurityContextHolder.clearContext();
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+                        Businesses biz = bizOpt.get();
+
+                        if (isStaleToken(issuedAt, biz.getCreatedAt())) {
+                            SecurityContextHolder.clearContext();
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+
+                        if (ownerProjectId != null
+                                && biz.getOwnerProjectLink() != null
+                                && biz.getOwnerProjectLink().getId() != null
+                                && !ownerProjectId.equals(biz.getOwnerProjectLink().getId())) {
+                            SecurityContextHolder.clearContext();
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+
+                        principal = biz;
                     }
-                    // If subject could be phone too, you may want a fallback:
-                    // businessesRepository.findByPhoneNumber(subject)
+                }
+
+                // ✅ treat MANAGER like admin user too (if you use it)
+                case "SUPER_ADMIN", "OWNER", "MANAGER" -> {
+                    AdminUser admin = null;
+
+                    // Prefer ID claim (adminId) if present
+                    if (idClaim != null) {
+                        admin = adminUsersRepository.findByAdminId(idClaim).orElse(null);
+                    }
+
+                    // Fallback to subject email
+                    if (admin == null && subject != null && !subject.isBlank()) {
+                        admin = adminUsersRepository.findByEmail(subject).orElse(null);
+                    }
+
+                    if (admin == null) {
+                        SecurityContextHolder.clearContext();
+                        filterChain.doFilter(request, response);
+                        return;
+                    }
+
+                    if (isStaleToken(issuedAt, admin.getCreatedAt())) {
+                        SecurityContextHolder.clearContext();
+                        filterChain.doFilter(request, response);
+                        return;
+                    }
+
+                    // Optional extra: if OWNER/MANAGER token includes ownerProjectId,
+                    // ensure this admin is actually linked to that AUP.
+                    if (ownerProjectId != null && (roleName.equalsIgnoreCase("OWNER") || roleName.equalsIgnoreCase("MANAGER"))) {
+                        boolean linked = admin.getProjectLinks() != null
+                                && admin.getProjectLinks().stream().anyMatch(l -> ownerProjectId.equals(l.getId()));
+                        if (!linked) {
+                            SecurityContextHolder.clearContext();
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+                    }
+
+                    principal = admin;
                 }
 
                 default -> {
-                    // For roles not handled yet (e.g., MANAGER, etc.),
-                    // we keep principal as a String subject for now.
-                    // NOTE: If MANAGER is also stored in AdminUser, you can include it in the Admin case.
+                    // Unknown role => do not authenticate
+                    SecurityContextHolder.clearContext();
+                    filterChain.doFilter(request, response);
+                    return;
                 }
             }
 
-            // Build authorities list used by Spring Security:
-            // - If roleName = "USER" => "ROLE_USER"
-            // - If roleName = "SUPER_ADMIN" => "ROLE_SUPER_ADMIN"
-            // This matches hasRole('USER') / hasRole('SUPER_ADMIN') usage in @PreAuthorize.
+            // If principal still null, don’t authenticate
+            if (principal == null) {
+                SecurityContextHolder.clearContext();
+                filterChain.doFilter(request, response);
+                return;
+            }
+
             List<GrantedAuthority> authorities = List.of(
                     new SimpleGrantedAuthority("ROLE_" + roleName.toUpperCase())
             );
 
-            // Create Authentication object:
-            // - principal: entity or subject string
-            // - credentials: null (we are not authenticating by password here; token already proves it)
-            // - authorities: derived from JWT role claim
             UsernamePasswordAuthenticationToken auth =
                     new UsernamePasswordAuthenticationToken(principal, null, authorities);
 
-            // Adds request details (IP, session id, etc.) for auditing/logging if needed
             auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-
-            // Store the Authentication into the SecurityContext.
-            // After this line:
-            // - request is authenticated
-            // - controllers can check roles
-            // - @AuthenticationPrincipal can resolve the principal object
             SecurityContextHolder.getContext().setAuthentication(auth);
 
-        } catch (Exception e) {
-            // Any parsing/validation exception:
-            // - keep SecurityContext empty
-            // - request continues as anonymous
-            // BUT NOW we log it to stop the "silent 403" nightmare.
-            SecurityContextHolder.clearContext();
+            filterChain.doFilter(request, response);
 
+        } catch (Exception e) {
+            SecurityContextHolder.clearContext();
+            // dev log
             System.out.println("❌ JWT FAILED: " + request.getMethod() + " " + request.getRequestURI()
                     + " | " + e.getClass().getSimpleName() + ": " + e.getMessage());
+
+            filterChain.doFilter(request, response);
+
+        } finally {
+            // ✅ prevent tenant leak across requests
+            TenantContext.clear();
+        }
+    }
+
+    private boolean isStaleToken(Date issuedAt, LocalDateTime createdAt) {
+        if (issuedAt == null || createdAt == null) return false;
+
+        // tiny buffer to avoid minor clock skew
+        var tokenIat = issuedAt.toInstant();
+        var accountCreated = createdAt.atZone(ZoneId.systemDefault()).toInstant().minusSeconds(10);
+
+        return tokenIat.isBefore(accountCreated);
+    }
+
+    private Long asLong(Object v) {
+        if (v == null) return null;
+        if (v instanceof Long l) return l;
+        if (v instanceof Integer i) return i.longValue();
+        if (v instanceof Number n) return n.longValue();
+        try { return Long.parseLong(v.toString()); } catch (Exception e) { return null; }
+    }
+
+    private Users tryFindUserBySubject(String subject) {
+        if (subject == null || subject.isBlank()) return null;
+        Users u = usersRepository.findByEmail(subject);
+        if (u == null) u = usersRepository.findByPhoneNumber(subject);
+        return u;
+    }
+
+    private Businesses tryFindBusinessBySubject(String subject, Long ownerProjectId) {
+        if (subject == null || subject.isBlank()) return null;
+
+        // Prefer tenant-aware if you have it
+        if (ownerProjectId != null) {
+            var byTenantEmail = businessesRepository.findByOwnerProjectLink_IdAndEmailIgnoreCase(ownerProjectId, subject);
+            if (byTenantEmail.isPresent()) return byTenantEmail.get();
+
+            var byTenantPhone = businessesRepository.findByOwnerProjectLink_IdAndPhoneNumber(ownerProjectId, subject);
+            if (byTenantPhone.isPresent()) return byTenantPhone.get();
         }
 
-        // Continue filter chain (controller execution happens after this)
-        filterChain.doFilter(request, response);
+        // Legacy fallback
+        var byEmail = businessesRepository.findByEmailIgnoreCase(subject);
+        if (byEmail.isPresent()) return byEmail.get();
+
+        var byPhone = businessesRepository.findByPhoneNumber(subject);
+        return byPhone.orElse(null);
     }
 }
