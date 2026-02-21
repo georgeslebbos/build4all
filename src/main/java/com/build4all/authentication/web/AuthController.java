@@ -1563,19 +1563,33 @@ public class AuthController {
     	    "^(?=.*[!@#$%^&*()_+\\-={}\\[\\]:;\"'|\\\\<>,.?/]).{6,8}$"
     	);
 
-    	private void validatePasswordOrThrow(String password) {
-    	    if (password == null || password.isBlank()) {
-    	        throw new IllegalArgumentException("password is required");
-    	    }
-    	    String p = password.trim();
-    	    if (p.length() < 6 ) {
-    	        throw new IllegalArgumentException("password must be 8 characters");
-    	    }
-    	    if (!PASSWORD_SPECIAL.matcher(p).matches()) {
-    	        throw new IllegalArgumentException("password must contain at least 1 special character");
-    	    }
-    	}
+ // ✅ Password rules:
+ // - min 8 chars
+ // - at least 1 special char
+ // - no whitespace
+ private static final int PASSWORD_MIN_LEN = 8;
 
+
+
+ private static final Pattern PASSWORD_HAS_WHITESPACE = Pattern.compile("\\s");
+
+ private void validatePasswordOrThrow(String password) {
+	    if (password == null) {
+	        throw new IllegalArgumentException("password is required");
+	    }
+
+	    // keep user input as-is, but remove leading/trailing spaces
+	    String p = password.trim();
+
+	    if (p.isEmpty()) {
+	        throw new IllegalArgumentException("password is required");
+	    }
+
+	    // ✅ ONLY RULE: at least 6 characters (no max)
+	    if (p.length() < 6) {
+	        throw new IllegalArgumentException("password must be at least 6 characters");
+	    }
+	}
 
 
 }
