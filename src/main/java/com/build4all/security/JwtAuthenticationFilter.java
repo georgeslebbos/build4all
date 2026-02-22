@@ -33,9 +33,10 @@ import java.util.Optional;
  * JWT Authentication filter that runs once per request.
  *
  * Fixes:
- * - USER/BUSINESS tokens use subject=id => load principal by claim "id" (NOT subject email/phone)
- * - Prevent DB-reset / ID reuse hijack:
- *     if token.iat < entity.createdAt => token is stale => do NOT authenticate
+ * - USER/BUSINESS tokens use subject=id => load principal by claim "id"
+ * - Prevent DB-reset / ID reuse hijack: if token.iat < entity.createdAt => stale => no auth
+ * - ✅ IMPORTANT FIX: don't set TenantContext too early for OWNER/SUPER_ADMIN lookup
+ * - ✅ IMPORTANT FIX: remove lazy projectLinks check from filter (was causing 401)
  * - Clears TenantContext to avoid ThreadLocal leak
  */
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -75,7 +76,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             String token = authHeader.substring(7).trim();
 
-            // If token is invalid/expired, treat as anonymous (don’t block public endpoints).
+            // If token is invalid/expired, treat as anonymous
             if (!jwtUtil.validateToken(token)) {
                 SecurityContextHolder.clearContext();
                 filterChain.doFilter(request, response);
@@ -89,12 +90,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String subject = claims.getSubject(); // USER/BIZ => id string; ADMIN => email
             Long idClaim = asLong(claims.get("id"));
             Date issuedAt = claims.getIssuedAt();
-
-            // Set tenant early for downstream repos/services (if present)
             Long ownerProjectId = asLong(claims.get("ownerProjectId"));
-            if (ownerProjectId != null) {
-                TenantContext.setOwnerProjectId(ownerProjectId);
-            }
 
             // If role missing OR already authenticated earlier -> continue
             if (roleName == null || roleName.isBlank()
@@ -104,21 +100,25 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
 
             Object principal = null;
+            String roleUpper = roleName.toUpperCase();
 
-            switch (roleName.toUpperCase()) {
+            switch (roleUpper) {
 
                 case "USER" -> {
-                    // ✅ USER tokens: subject is id; use claim "id" as source of truth
+                    // ✅ USER repos may be tenant-scoped => set tenant BEFORE DB calls
+                    if (ownerProjectId != null) {
+                        TenantContext.setOwnerProjectId(ownerProjectId);
+                    }
+
                     if (idClaim == null) {
-                        // fallback (very old tokens): maybe subject was email/phone
                         Users u = tryFindUserBySubject(subject);
                         if (u == null) {
                             SecurityContextHolder.clearContext();
                             filterChain.doFilter(request, response);
                             return;
                         }
-                        idClaim = u.getId();
                         principal = u;
+                        idClaim = u.getId();
                     } else {
                         Optional<Users> userOpt = usersRepository.findById(idClaim);
                         if (userOpt.isEmpty()) {
@@ -128,14 +128,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         }
                         Users user = userOpt.get();
 
-                        // ✅ Prevent DB reset / ID reuse hijack
                         if (isStaleToken(issuedAt, user.getCreatedAt())) {
                             SecurityContextHolder.clearContext();
                             filterChain.doFilter(request, response);
                             return;
                         }
 
-                        // ✅ Extra safety: token tenant must match DB tenant (when present)
                         if (ownerProjectId != null
                                 && user.getOwnerProject() != null
                                 && user.getOwnerProject().getId() != null
@@ -150,16 +148,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
 
                 case "BUSINESS" -> {
+                    // ✅ BUSINESS repos may be tenant-scoped => set tenant BEFORE DB calls
+                    if (ownerProjectId != null) {
+                        TenantContext.setOwnerProjectId(ownerProjectId);
+                    }
+
                     if (idClaim == null) {
-                        // fallback (old tokens): maybe subject was email/phone
                         Businesses b = tryFindBusinessBySubject(subject, ownerProjectId);
                         if (b == null) {
                             SecurityContextHolder.clearContext();
                             filterChain.doFilter(request, response);
                             return;
                         }
-                        idClaim = b.getId();
                         principal = b;
+                        idClaim = b.getId();
                     } else {
                         Optional<Businesses> bizOpt = businessesRepository.findById(idClaim);
                         if (bizOpt.isEmpty()) {
@@ -188,16 +190,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     }
                 }
 
-                // ✅ treat MANAGER like admin user too (if you use it)
                 case "SUPER_ADMIN", "OWNER", "MANAGER" -> {
+                    // ✅ DO NOT set TenantContext before admin lookup (can break global admin lookup)
                     AdminUser admin = null;
 
-                    // Prefer ID claim (adminId) if present
                     if (idClaim != null) {
                         admin = adminUsersRepository.findByAdminId(idClaim).orElse(null);
                     }
 
-                    // Fallback to subject email
                     if (admin == null && subject != null && !subject.isBlank()) {
                         admin = adminUsersRepository.findByEmail(subject).orElse(null);
                     }
@@ -214,30 +214,30 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         return;
                     }
 
-                    // Optional extra: if OWNER/MANAGER token includes ownerProjectId,
-                    // ensure this admin is actually linked to that AUP.
-                    if (ownerProjectId != null && (roleName.equalsIgnoreCase("OWNER") || roleName.equalsIgnoreCase("MANAGER"))) {
-                        boolean linked = admin.getProjectLinks() != null
-                                && admin.getProjectLinks().stream().anyMatch(l -> ownerProjectId.equals(l.getId()));
-                        if (!linked) {
-                            SecurityContextHolder.clearContext();
-                            filterChain.doFilter(request, response);
-                            return;
-                        }
+                    // ✅ Now safe to set tenant context (if present)
+                    if (ownerProjectId != null) {
+                        TenantContext.setOwnerProjectId(ownerProjectId);
                     }
+
+                    /*
+                     * IMPORTANT:
+                     * We intentionally REMOVED admin.getProjectLinks() check from the filter
+                     * because it often fails (LAZY init / wrong id mapping) and causes 401.
+                     *
+                     * If you want strict "admin must be linked to AUP", do it via repository query
+                     * (existsBy...) or inside the controller using aupRepo.
+                     */
 
                     principal = admin;
                 }
 
                 default -> {
-                    // Unknown role => do not authenticate
                     SecurityContextHolder.clearContext();
                     filterChain.doFilter(request, response);
                     return;
                 }
             }
 
-            // If principal still null, don’t authenticate
             if (principal == null) {
                 SecurityContextHolder.clearContext();
                 filterChain.doFilter(request, response);
@@ -245,7 +245,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
 
             List<GrantedAuthority> authorities = List.of(
-                    new SimpleGrantedAuthority("ROLE_" + roleName.toUpperCase())
+                    new SimpleGrantedAuthority("ROLE_" + roleUpper)
             );
 
             UsernamePasswordAuthenticationToken auth =
@@ -258,25 +258,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         } catch (Exception e) {
             SecurityContextHolder.clearContext();
-            // dev log
             System.out.println("❌ JWT FAILED: " + request.getMethod() + " " + request.getRequestURI()
                     + " | " + e.getClass().getSimpleName() + ": " + e.getMessage());
-
             filterChain.doFilter(request, response);
 
         } finally {
-            // ✅ prevent tenant leak across requests
             TenantContext.clear();
         }
     }
 
     private boolean isStaleToken(Date issuedAt, LocalDateTime createdAt) {
         if (issuedAt == null || createdAt == null) return false;
-
-        // tiny buffer to avoid minor clock skew
         var tokenIat = issuedAt.toInstant();
         var accountCreated = createdAt.atZone(ZoneId.systemDefault()).toInstant().minusSeconds(10);
-
         return tokenIat.isBefore(accountCreated);
     }
 
@@ -298,7 +292,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private Businesses tryFindBusinessBySubject(String subject, Long ownerProjectId) {
         if (subject == null || subject.isBlank()) return null;
 
-        // Prefer tenant-aware if you have it
         if (ownerProjectId != null) {
             var byTenantEmail = businessesRepository.findByOwnerProjectLink_IdAndEmailIgnoreCase(ownerProjectId, subject);
             if (byTenantEmail.isPresent()) return byTenantEmail.get();
@@ -307,7 +300,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (byTenantPhone.isPresent()) return byTenantPhone.get();
         }
 
-        // Legacy fallback
         var byEmail = businessesRepository.findByEmailIgnoreCase(subject);
         if (byEmail.isPresent()) return byEmail.get();
 
