@@ -322,15 +322,24 @@ public class UserService {
         if (isPublicProfile != null) user.setIsPublicProfile(isPublicProfile);
 
         // ✅ image remove
-        if (Boolean.TRUE.equals(imageRemoved)) {
-            user.setProfilePictureUrl(null);
-        }
+        String oldImageUrl = user.getProfilePictureUrl();
 
-        // ✅ image upload overrides
-        if (profileImage != null && !profileImage.isEmpty()) {
-            String url = saveProfileImage(profileImage); // you already have this helper
-            user.setProfilePictureUrl(url);
-        }
+     // remove current image if requested
+     if (Boolean.TRUE.equals(imageRemoved)) {
+         deleteManagedProfileFileQuietly(oldImageUrl);
+         user.setProfilePictureUrl(null);
+     }
+
+     // upload new image (replace old local image if exists)
+     if (profileImage != null && !profileImage.isEmpty()) {
+         // if not already removed above, delete old managed local file before replacing
+         if (!Boolean.TRUE.equals(imageRemoved)) {
+             deleteManagedProfileFileQuietly(oldImageUrl);
+         }
+
+         String url = saveProfileImage(profileImage);
+         user.setProfilePictureUrl(url);
+     }
 
         user.setUpdatedAt(LocalDateTime.now());
         return userRepository.save(user);
@@ -551,13 +560,9 @@ public class UserService {
         //   SELECT * FROM role WHERE LOWER(name)=LOWER('USER') LIMIT 1;
         user.setRole(getRoleOrThrow("USER"));
 
-        // File system write (not SQL)
         if (profileImage != null && !profileImage.isEmpty()) {
-            String filename = UUID.randomUUID() + "_" + profileImage.getOriginalFilename();
-            Path path = Paths.get("uploads");
-            if (!Files.exists(path)) Files.createDirectories(path);
-            Files.copy(profileImage.getInputStream(), path.resolve(filename), StandardCopyOption.REPLACE_EXISTING);
-            user.setProfilePictureUrl("/uploads/" + filename);
+            String storedPath = saveProfileImage(profileImage);
+            user.setProfilePictureUrl(storedPath);
         }
 
         user.setUpdatedAt(LocalDateTime.now());
@@ -669,6 +674,37 @@ public class UserService {
      * If you want persistent reset flow, store codes in a table.
      */
     private final Map<String, String> resetCodes = new ConcurrentHashMap<>();
+    
+    
+    private void deleteManagedProfileFileQuietly(String url) {
+        if (url == null || url.isBlank()) return;
+
+        try {
+            Path baseDir = null;
+            String prefix = null;
+
+            if (url.startsWith(USER_PROFILE_URL_PREFIX)) {
+                baseDir = USER_PROFILE_DIR;
+                prefix = USER_PROFILE_URL_PREFIX;
+            } else if (url.startsWith("/uploads/")) {
+                baseDir = Paths.get("uploads").toAbsolutePath().normalize();
+                prefix = "/uploads/";
+            } else {
+                // external URL (google/facebook/etc) -> don't touch filesystem
+                return;
+            }
+
+            String relative = url.substring(prefix.length()).replace("\\", "/");
+            if (relative.isBlank()) return;
+
+            Path filePath = baseDir.resolve(relative).normalize();
+            if (filePath.startsWith(baseDir)) {
+                Files.deleteIfExists(filePath);
+            }
+        } catch (Exception ignore) {
+            // no-op on purpose
+        }
+    }
 
     public boolean resetPassword(String email, Long ownerProjectLinkId) {
 
@@ -777,12 +813,28 @@ public class UserService {
     }
 
     /** Save a profile image into /uploads and return its public URL path. (No SQL) */
+    /** Save a profile image into private folder and return internal DB marker (NOT public static URL). */
     public String saveProfileImage(MultipartFile file) throws IOException {
-        String filename = UUID.randomUUID() + "_" + file.getOriginalFilename();
-        Path path = Paths.get("uploads");
-        if (!Files.exists(path)) Files.createDirectories(path);
-        Files.copy(file.getInputStream(), path.resolve(filename), StandardCopyOption.REPLACE_EXISTING);
-        return "/uploads/" + filename;
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("Profile image file is empty");
+        }
+
+        Files.createDirectories(USER_PROFILE_DIR);
+
+        String original = safeOriginalFilename(file.getOriginalFilename());
+        String filename = UUID.randomUUID() + "_" + original;
+
+        Path target = USER_PROFILE_DIR.resolve(filename).normalize();
+
+        // path traversal safety
+        if (!target.startsWith(USER_PROFILE_DIR)) {
+            throw new SecurityException("Invalid profile image path");
+        }
+
+        Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
+
+        // store internal marker in DB
+        return USER_PROFILE_URL_PREFIX + filename;
     }
 
     /** Password hash check (no SQL). */
@@ -1118,6 +1170,16 @@ public class UserService {
         // u.setGoogleId(null);
         // u.setFacebookId(null);
     }
+    
+    private static final Path USER_PROFILE_DIR =
+            Paths.get("uploadsPrivate", "users", "profiles").toAbsolutePath().normalize();
+
+    private static final String USER_PROFILE_URL_PREFIX = "/private-users/profiles/";
+
+    private String safeOriginalFilename(String original) {
+        if (original == null || original.isBlank()) return "file";
+        return Paths.get(original).getFileName().toString().replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
 
     /* ============== Legacy/global convenience methods ============== */
     // These ignore tenant (ownerProjectLinkId). Keep only if you still have old clients.
@@ -1445,8 +1507,6 @@ public class UserService {
     public boolean deleteUserProfileImage(Long userId) {
         if (userId == null) throw new IllegalArgumentException("userId is required");
 
-        // SQL:
-        //   SELECT * FROM users WHERE user_id=:userId LIMIT 1;
         Optional<Users> opt = userRepository.findById(userId);
         if (opt.isEmpty()) return false;
 
@@ -1454,29 +1514,37 @@ public class UserService {
         String url = user.getProfilePictureUrl();
         if (url == null || url.isBlank()) return false;
 
-        // File system delete (not SQL)
         try {
-            if (url.startsWith("/uploads/")) {
-                String fileName = url.substring("/uploads/".length()).replace("\\", "/");
-                if (!fileName.isBlank()) {
-                    Path uploads = Paths.get("uploads");
-                    Path filePath = uploads.resolve(fileName).normalize();
+            Path baseDir = null;
+            String prefix = null;
 
-                    // Security: prevent path traversal
-                    if (filePath.startsWith(uploads.toAbsolutePath()) || filePath.startsWith(uploads)) {
+            // ✅ New private profile path marker
+            if (url.startsWith(USER_PROFILE_URL_PREFIX)) {
+                baseDir = USER_PROFILE_DIR;
+                prefix = USER_PROFILE_URL_PREFIX;
+            }
+            // ✅ Legacy old path support
+            else if (url.startsWith("/uploads/")) {
+                baseDir = Paths.get("uploads").toAbsolutePath().normalize();
+                prefix = "/uploads/";
+            }
+
+            if (baseDir != null && prefix != null) {
+                String relative = url.substring(prefix.length()).replace("\\", "/");
+                if (!relative.isBlank()) {
+                    Path filePath = baseDir.resolve(relative).normalize();
+
+                    if (filePath.startsWith(baseDir)) {
                         Files.deleteIfExists(filePath);
                     }
                 }
             }
         } catch (Exception ignore) {
-            // If file delete fails, we still clear DB field.
+            // even if file delete fails, clear DB field
         }
 
         user.setProfilePictureUrl(null);
         user.setUpdatedAt(LocalDateTime.now());
-
-        // SQL:
-        //   UPDATE users SET profile_picture_url=NULL, updated_at=? WHERE user_id=?;
         userRepository.save(user);
 
         return true;

@@ -3,6 +3,7 @@ package com.build4all.security;
 import com.build4all.user.repository.UsersRepository;
 import com.build4all.admin.repository.AdminUsersRepository;      // 👈 NEW
 import com.build4all.business.repository.BusinessesRepository;  // 👈 NEW
+import org.springframework.http.HttpMethod;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -157,25 +158,25 @@ public class SecurityConfig implements WebMvcConfigurer {
 
                 // Authorization rules: decide which endpoints need authentication.
                 .authorizeHttpRequests(auth -> auth
-                        // Public endpoints (no token required)
-                        .requestMatchers(
-                                "/api/auth/**",
-                                "/api/auth/user/login-phone", // login, register, OTP, etc.
-                                "/api/ci/**",     // CI callbacks or build webhooks
-                                "/ws-chat/**",    // websocket endpoint (handshake might be public)
-                                "/error",// Spring default error endpoint (avoids weird blocking)
-                                "/api/public/runtime-config/**",
-                                "/api/public/runtime-config",
-                                "/api/public/runtime-config/by-link",
-                                "/api/public/ai/status/**",
-                                "/api/auth/demo/create-apple-review-account",
-                                "/api/auth/demo/seed-apple-review-account-all",
-                                "/api/users/reset-password",
-                                "/api/users/verify-reset-code",
-                                "/api/users/update-password",
-                                "/api/public/app-access/**"
-                        ).permitAll()
-
+                		
+                		.requestMatchers(HttpMethod.GET, "/uploads/**", "/uploadsPublish/**").permitAll()
+                		.requestMatchers(
+                		    "/api/auth/**",
+                		    "/api/ci/**",
+                		    "/ws-chat/**",
+                		    "/error",
+                		    "/api/public/runtime-config/**",
+                		    "/api/public/runtime-config",
+                		    "/api/public/runtime-config/by-link",
+                		    "/api/public/ai/status/**",
+                		    "/api/auth/demo/create-apple-review-account",
+                		    "/api/auth/demo/seed-apple-review-account-all",
+                		    "/api/users/reset-password",
+                		    "/api/users/verify-reset-code",
+                		    "/api/users/update-password",
+                		    "/api/public/app-access/**"
+                		).permitAll()
+                	
                         // Any other endpoint requires authentication (JWT must be valid).
                         .anyRequest().authenticated()
                 )
