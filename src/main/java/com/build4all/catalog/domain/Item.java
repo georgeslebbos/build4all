@@ -57,6 +57,9 @@ public abstract class Item {
 
     @Column(name = "taxable", nullable = false)
     private boolean taxable = true;
+    
+    @Column(name = "sku", length = 100)
+    private String sku;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "tax_class", nullable = false)
@@ -125,6 +128,9 @@ public abstract class Item {
 
     public String getItemName() { return name; }
     public void setItemName(String name) { this.name = name; }
+    
+    public String getSku() { return sku; }
+    public void setSku(String sku) { this.sku = sku; }
 
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }

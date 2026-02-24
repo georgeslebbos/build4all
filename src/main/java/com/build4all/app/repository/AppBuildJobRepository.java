@@ -4,6 +4,9 @@ import com.build4all.app.domain.AppBuildJob;
 import com.build4all.app.domain.BuildPlatform;
 import com.build4all.app.domain.BuildJobStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -19,7 +22,11 @@ public interface AppBuildJobRepository extends JpaRepository<AppBuildJob, Long> 
     );
 
     List<AppBuildJob> findTop20ByApp_IdOrderByCreatedAtDesc(Long appId);
-    
+
     Optional<AppBuildJob> findTop1ByApp_IdOrderByCreatedAtDesc(Long appId);
 
+    // ✅ Stable delete (returns count, no null primitive issue)
+    @Modifying
+    @Query("delete from AppBuildJob j where j.app.id = :appId")
+    int deleteAllByAppId(@Param("appId") Long appId);
 }

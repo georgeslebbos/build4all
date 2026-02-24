@@ -20,6 +20,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -54,6 +56,16 @@ public class OwnerAppRequestController {
         this.jwtUtil = jwtUtil;
         this.adminRepo = adminRepo;
         this.buildJobRepo = buildJobRepo;
+    }
+    
+    private String rootCauseMessage(Throwable ex) {
+        Throwable root = ex;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return (root.getMessage() == null || root.getMessage().isBlank())
+                ? root.getClass().getSimpleName()
+                : root.getMessage();
     }
 
     // ------------------------------------------------------------------
@@ -209,6 +221,76 @@ public class OwnerAppRequestController {
         }
     }
 
+    
+    @Transactional
+    @DeleteMapping(value = "/apps/{linkId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> removeApp(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable Long linkId
+    ) {
+        try {
+            // owner check only (still needed)
+        	requireOwnerLinkAccess(authHeader, linkId);
+
+            AdminUserProject link = aupRepo.findById(linkId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "App link not found"));
+
+            // ✅ idempotent behavior (nice UX): if already deleted, don't fail
+            if (link.isDeleted()) {
+                Map<String, Object> body = new HashMap<>();
+                body.put("message", "App already deleted");
+                body.put("ownerProjectLinkId", link.getId());
+                body.put("softDeleted", true);
+                body.put("alreadyDeleted", true);
+                return ResponseEntity.ok(body);
+            }
+
+            // save info for response
+            Long ownerId = (link.getAdmin() != null) ? link.getAdmin().getAdminId() : null;
+            Long projectId = (link.getProject() != null) ? link.getProject().getId() : null;
+            String appName = nz(link.getAppName());
+            String slug = nz(link.getSlug());
+
+            // ✅ SOFT DELETE
+            link.setStatus("DELETED");
+
+            // optional but recommended: stop showing downloadable artifacts
+            link.setApkUrl(null);
+            link.setBundleUrl(null);
+            link.setIpaUrl(null);
+
+            // optional: close validity immediately
+            link.setEndTo(java.time.LocalDate.now());
+
+            // OPTIONAL (recommended): free slug so user can recreate same slug later
+            // If you want this, uncomment next line + add helper method below
+            // link.setSlug(makeDeletedSlug(link));
+
+            aupRepo.saveAndFlush(link);
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("message", "App deleted successfully");
+            body.put("ownerProjectLinkId", linkId);
+            body.put("ownerId", ownerId);
+            body.put("projectId", projectId);
+            body.put("appName", appName);
+            body.put("slug", slug);
+            body.put("softDeleted", true);
+
+            return ResponseEntity.ok(body);
+
+        } catch (ResponseStatusException ex) {
+            return ResponseEntity.status(ex.getStatusCode()).body(Map.of(
+                    "error", ex.getReason()
+            ));
+        } catch (Exception ex) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "error", "Failed to delete app",
+                    "details", ex.getClass().getSimpleName(),
+                    "rootCause", rootCauseMessage(ex)
+            ));
+        }
+    }
     // ✅ AUTO flow (iOS)
     @PostMapping(
             value = "/app-requests/auto/ios",
@@ -454,7 +536,7 @@ public class OwnerAppRequestController {
             @RequestParam(required = false) String brandingJson
     ) {
         try {
-            requireOwnerLinkAccess(authHeader, linkId);
+            requireOwnerActiveLinkAccess(authHeader, linkId);
 
             AdminUserProject link = service.rebuildAndroidBundleSamePackage(
                     linkId,
@@ -503,7 +585,7 @@ public class OwnerAppRequestController {
             String ownerEmail = jwtUtil.extractUsername(token);
             String ownerName = extractOwnerNameFromToken(token);
 
-            requireOwnerLinkAccess(authHeader, linkId);
+            requireOwnerActiveLinkAccess(authHeader, linkId);
 
             AdminUserProject link = service.rebuildAndroidAndIos(
                     linkId,
@@ -557,7 +639,7 @@ public class OwnerAppRequestController {
             String ownerEmail = jwtUtil.extractUsername(token);
             String ownerName = extractOwnerNameFromToken(token);
 
-            requireOwnerLinkAccess(authHeader, linkId);
+            requireOwnerActiveLinkAccess(authHeader, linkId);
 
             AdminUserProject link = service.rebuildIosIpaSameBundle(
                     linkId,
@@ -613,7 +695,7 @@ public class OwnerAppRequestController {
             String ownerEmail = jwtUtil.extractUsername(token);
             String ownerName = extractOwnerNameFromToken(token);
 
-            requireOwnerLinkAccess(authHeader, linkId);
+            requireOwnerActiveLinkAccess(authHeader, linkId);
 
             AdminUserProject link = service.rebuildAndroidAndIos(
                     linkId,
@@ -756,6 +838,24 @@ public class OwnerAppRequestController {
         Long linkOwnerId = (link.getAdmin() != null) ? link.getAdmin().getAdminId() : null;
         if (linkOwnerId == null || !linkOwnerId.equals(tokenAdminId)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden: link does not belong to this owner");
+        }
+    }
+    
+    private void requireOwnerActiveLinkAccess(String authHeader, Long linkId) {
+        String token = extractToken(authHeader);
+        Long tokenAdminId = jwtUtil.extractAdminId(token);
+
+        AdminUserProject link = aupRepo.findById(linkId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Link not found"));
+
+        Long linkOwnerId = (link.getAdmin() != null) ? link.getAdmin().getAdminId() : null;
+        if (linkOwnerId == null || !linkOwnerId.equals(tokenAdminId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden: link does not belong to this owner");
+        }
+
+        // ✅ block deleted apps from any action
+        if (link.isDeleted()) {
+            throw new ResponseStatusException(HttpStatus.GONE, "This app has been deleted");
         }
     }
 }

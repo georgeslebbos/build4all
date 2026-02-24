@@ -185,10 +185,24 @@ public class ProductController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
+        } catch (DataIntegrityViolationException e) {
+            String msg = String.valueOf(
+                    e.getMostSpecificCause() != null ? e.getMostSpecificCause().getMessage() : e.getMessage()
+            ).toLowerCase();
+
+            if (msg.contains("uk_items_aup_sku_ci")) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body(Map.of("error", "SKU already exists in this app"));
+            }
+
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of("error", "Data conflict"));
+        
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", e.getMessage()));
         }
+        
     }
 
     /* ------------------------ update ------------------------ */
@@ -292,6 +306,19 @@ public class ProductController {
             }
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
+        } catch (DataIntegrityViolationException e) {
+            String msg = String.valueOf(
+                    e.getMostSpecificCause() != null ? e.getMostSpecificCause().getMessage() : e.getMessage()
+            ).toLowerCase();
+
+            if (msg.contains("uk_items_aup_sku_ci")) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body(Map.of("error", "SKU already exists in this app"));
+            }
+
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of("error", "Data conflict"));
+        
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", e.getMessage()));

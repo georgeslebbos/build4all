@@ -42,82 +42,79 @@ public interface AdminUserProjectRepository extends JpaRepository<AdminUserProje
 
     
     @Query("""
-    		  select
-    		    l.id                 as linkId,
-    		    p.id                 as projectId,
-    		    p.projectName        as projectName,
-    		    l.slug               as slug,
-    		    l.appName            as appName,
-    		    l.status             as status,
-    		    l.apkUrl             as apkUrl,
-    		    l.ipaUrl             as ipaUrl,
-    		    l.bundleUrl          as bundleUrl,
-    		    l.logoUrl            as logoUrl,
-    		    l.androidPackageName as androidPackageName,
-    		    l.iosBundleId        as iosBundleId,
+    	      select
+    	        l.id                 as linkId,
+    	        p.id                 as projectId,
+    	        p.projectName        as projectName,
+    	        l.slug               as slug,
+    	        l.appName            as appName,
+    	        l.status             as status,
+    	        l.apkUrl             as apkUrl,
+    	        l.ipaUrl             as ipaUrl,
+    	        l.bundleUrl          as bundleUrl,
+    	        l.logoUrl            as logoUrl,
+    	        l.androidPackageName as androidPackageName,
+    	        l.iosBundleId        as iosBundleId,
 
-    		    
-    		    (
-    		      select concat('', j.status)
-    		      from AppBuildJob j
-    		      where j.app.id = l.id
-    		        and j.platform = com.build4all.app.domain.BuildPlatform.ANDROID
-    		        and j.id = (
-    		          select max(j2.id)
-    		          from AppBuildJob j2
-    		          where j2.app.id = l.id
-    		            and j2.platform = com.build4all.app.domain.BuildPlatform.ANDROID
-    		        )
-    		    ) as androidBuildStatus,
+    	        (
+    	          select concat('', j.status)
+    	          from AppBuildJob j
+    	          where j.app.id = l.id
+    	            and j.platform = com.build4all.app.domain.BuildPlatform.ANDROID
+    	            and j.id = (
+    	              select max(j2.id)
+    	              from AppBuildJob j2
+    	              where j2.app.id = l.id
+    	                and j2.platform = com.build4all.app.domain.BuildPlatform.ANDROID
+    	            )
+    	        ) as androidBuildStatus,
 
-    		  
-    		    (
-    		      select j.error
-    		      from AppBuildJob j
-    		      where j.app.id = l.id
-    		        and j.platform = com.build4all.app.domain.BuildPlatform.ANDROID
-    		        and j.id = (
-    		          select max(j2.id)
-    		          from AppBuildJob j2
-    		          where j2.app.id = l.id
-    		            and j2.platform = com.build4all.app.domain.BuildPlatform.ANDROID
-    		        )
-    		    ) as androidBuildError,
+    	        (
+    	          select j.error
+    	          from AppBuildJob j
+    	          where j.app.id = l.id
+    	            and j.platform = com.build4all.app.domain.BuildPlatform.ANDROID
+    	            and j.id = (
+    	              select max(j2.id)
+    	              from AppBuildJob j2
+    	              where j2.app.id = l.id
+    	                and j2.platform = com.build4all.app.domain.BuildPlatform.ANDROID
+    	            )
+    	        ) as androidBuildError,
 
-    		 
-    		    (
-    		      select concat('', j.status)
-    		      from AppBuildJob j
-    		      where j.app.id = l.id
-    		        and j.platform = com.build4all.app.domain.BuildPlatform.IOS
-    		        and j.id = (
-    		          select max(j2.id)
-    		          from AppBuildJob j2
-    		          where j2.app.id = l.id
-    		            and j2.platform = com.build4all.app.domain.BuildPlatform.IOS
-    		        )
-    		    ) as iosBuildStatus,
+    	        (
+    	          select concat('', j.status)
+    	          from AppBuildJob j
+    	          where j.app.id = l.id
+    	            and j.platform = com.build4all.app.domain.BuildPlatform.IOS
+    	            and j.id = (
+    	              select max(j2.id)
+    	              from AppBuildJob j2
+    	              where j2.app.id = l.id
+    	                and j2.platform = com.build4all.app.domain.BuildPlatform.IOS
+    	            )
+    	        ) as iosBuildStatus,
 
-    		 
-    		    (
-    		      select j.error
-    		      from AppBuildJob j
-    		      where j.app.id = l.id
-    		        and j.platform = com.build4all.app.domain.BuildPlatform.IOS
-    		        and j.id = (
-    		          select max(j2.id)
-    		          from AppBuildJob j2
-    		          where j2.app.id = l.id
-    		            and j2.platform = com.build4all.app.domain.BuildPlatform.IOS
-    		        )
-    		    ) as iosBuildError
+    	        (
+    	          select j.error
+    	          from AppBuildJob j
+    	          where j.app.id = l.id
+    	            and j.platform = com.build4all.app.domain.BuildPlatform.IOS
+    	            and j.id = (
+    	              select max(j2.id)
+    	              from AppBuildJob j2
+    	              where j2.app.id = l.id
+    	                and j2.platform = com.build4all.app.domain.BuildPlatform.IOS
+    	            )
+    	        ) as iosBuildError
 
-    		  from AdminUserProject l
-    		  join l.project p
-    		  where l.admin.adminId = :ownerId
-    		  order by l.createdAt desc
-    		""")
-    		List<OwnerProjectView> findOwnerProjectsSlim(@Param("ownerId") Long ownerId);
+    	      from AdminUserProject l
+    	      join l.project p
+    	      where l.admin.adminId = :ownerId
+    	        and upper(coalesce(l.status, 'ACTIVE')) <> 'DELETED'
+    	      order by l.createdAt desc
+    	    """)
+    	List<OwnerProjectView> findOwnerProjectsSlim(@Param("ownerId") Long ownerId);
 
 
     Optional<AdminUserProject> findByIdAndAdmin_AdminId(Long id, Long ownerId);
@@ -153,25 +150,25 @@ public interface AdminUserProjectRepository extends JpaRepository<AdminUserProje
 
     		
     @Query("""
-          select new com.build4all.project.dto.OwnerAppInProjectDTO(
-            a.id,
-            a.slug,
-            a.appName,
-            a.status,
-            a.apkUrl,
-            a.ipaUrl,
-            a.bundleUrl
-          )
-          from AdminUserProject a
-          where a.project.id = :projectId
-            and a.admin.adminId = :adminId
-          order by a.createdAt desc
-        """)
-    List<com.build4all.project.dto.OwnerAppInProjectDTO> findAppsByProjectAndOwner(
-            @Param("projectId") Long projectId,
-            @Param("adminId") Long adminId
-    );
-
+    	      select new com.build4all.project.dto.OwnerAppInProjectDTO(
+    	        a.id,
+    	        a.slug,
+    	        a.appName,
+    	        a.status,
+    	        a.apkUrl,
+    	        a.ipaUrl,
+    	        a.bundleUrl
+    	      )
+    	      from AdminUserProject a
+    	      where a.project.id = :projectId
+    	        and a.admin.adminId = :adminId
+    	        and upper(coalesce(a.status, 'ACTIVE')) <> 'DELETED'
+    	      order by a.createdAt desc
+    	    """)
+    	List<com.build4all.project.dto.OwnerAppInProjectDTO> findAppsByProjectAndOwner(
+    	        @Param("projectId") Long projectId,
+    	        @Param("adminId") Long adminId
+    	);
     @Query("""
           select a.admin.aiEnabled
           from AdminUserProject a
@@ -192,11 +189,43 @@ public interface AdminUserProjectRepository extends JpaRepository<AdminUserProje
           where a.id = :linkId
         """)
     Optional<String> findOwnerNameByLinkId(@Param("linkId") Long linkId);
+    
+    
+    @Query("""
+    	    select a
+    	    from AdminUserProject a
+    	    where a.id = :linkId
+    	      and upper(coalesce(a.status, 'ACTIVE')) <> 'DELETED'
+    	""")
+    	Optional<AdminUserProject> findActiveById(@Param("linkId") Long linkId);
+
+    	@Query("""
+    	    select a
+    	    from AdminUserProject a
+    	    where a.slug = :slug
+    	      and upper(coalesce(a.status, 'ACTIVE')) <> 'DELETED'
+    	""")
+    	Optional<AdminUserProject> findActiveBySlug(@Param("slug") String slug);
+
+    	@Query("""
+    	    select a
+    	    from AdminUserProject a
+    	    where a.admin.adminId = :adminId
+    	      and a.project.id = :projectId
+    	      and a.slug = :slug
+    	      and upper(coalesce(a.status, 'ACTIVE')) <> 'DELETED'
+    	""")
+    	Optional<AdminUserProject> findActiveByAdmin_AdminIdAndProject_IdAndSlug(
+    	        @Param("adminId") Long adminId,
+    	        @Param("projectId") Long projectId,
+    	        @Param("slug") String slug
+    	);
 
     // =====================================================================
     // ✅ SUPER ADMIN SAFE QUERIES (DTOs) — FIXES LazyInitializationException
     // =====================================================================
 
+    
     
     
 

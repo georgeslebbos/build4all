@@ -10,9 +10,7 @@ import java.math.BigDecimal;
 @PrimaryKeyJoinColumn(name = "item_id")  // FK to items.item_id
 public class Product extends Item {
 
-    // Business code (NOT the DB @Id)
-    @Column(name = "sku",unique = true)
-    private String sku;
+ 
 
     @Enumerated(EnumType.STRING)
     @Column(name = "product_type", nullable = false)
@@ -47,8 +45,7 @@ public class Product extends Item {
 
     // ===== Getters & Setters =====
 
-    public String getSku() { return sku; }
-    public void setSku(String sku) { this.sku = sku; }
+  
 
     public ProductType getProductType() { return productType; }
     public void setProductType(ProductType productType) { this.productType = productType; }

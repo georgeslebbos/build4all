@@ -151,25 +151,20 @@ public class ProductService {
         return null;
     }
 
-    private void assertSkuUniquePerTenant(Long ownerProjectId, String sku, Long currentProductIdOrNull) {
-        if (sku == null || sku.isBlank()) return;
+    private void assertSkuUniquePerTenant(Long ownerProjectId, String rawSku, Long currentProductIdOrNull) {
+        String sku = normalizeSku(rawSku);
+        if (sku == null) return; // no sku => allowed
 
-        boolean exists = productRepository.existsByOwnerProject_IdAndSkuIgnoreCase(ownerProjectId, sku);
-        if (!exists) return;
+        boolean exists = (currentProductIdOrNull == null)
+                ? productRepository.existsByOwnerProject_IdAndSkuIgnoreCase(ownerProjectId, sku)
+                : productRepository.existsByOwnerProject_IdAndSkuIgnoreCaseAndIdNot(ownerProjectId, sku, currentProductIdOrNull);
 
-        if (currentProductIdOrNull == null) {
+        if (exists) {
             throw new IllegalArgumentException("SKU already exists in this app");
         }
+    
 
-        // If updating, allow same product keep same sku
-        Product existing = productRepository.findByOwnerProject_Id(ownerProjectId).stream()
-                .filter(p -> p.getSku() != null && p.getSku().equalsIgnoreCase(sku))
-                .findFirst()
-                .orElse(null);
-
-        if (existing != null && !existing.getId().equals(currentProductIdOrNull)) {
-            throw new IllegalArgumentException("SKU already exists in this app");
-        }
+     
     }
 
     /* =========================================================
@@ -190,7 +185,8 @@ public class ProductService {
         Currency currency = resolveCurrencyOrDefault(request.getCurrencyId());
 
         // ✅ SKU tenant-safe uniqueness
-        assertSkuUniquePerTenant(ownerProject.getId(), request.getSku(), null);
+        String normalizedSku = normalizeSku(request.getSku());
+        assertSkuUniquePerTenant(ownerProject.getId(), normalizedSku, null);
 
         Product p = new Product();
 
@@ -213,8 +209,10 @@ public class ProductService {
         p.setHeightCm(request.getHeightCm());
         p.setLengthCm(request.getLengthCm());
 
-        p.setSku(request.getSku());
-        p.setProductType(request.getProductType());
+        p.setSku(normalizedSku);
+        if (request.getProductType() != null) {
+            p.setProductType(request.getProductType());
+        }
         p.setVirtualProduct(request.isVirtualProduct());
         p.setDownloadable(request.isDownloadable());
         p.setDownloadUrl(request.getDownloadUrl());
@@ -254,10 +252,11 @@ public class ProductService {
         }
 
         if (request.getSku() != null) {
-            assertSkuUniquePerTenant(ownerProjectId, request.getSku(), id);
-            p.setSku(request.getSku());
+            String normalizedSku = normalizeSku(request.getSku());
+            assertSkuUniquePerTenant(ownerProjectId, normalizedSku, id);
+            p.setSku(normalizedSku); // if blank => null (clears sku)
         }
-
+        
         if (request.getName() != null) p.setItemName(request.getName());
         if (request.getDescription() != null) p.setDescription(request.getDescription());
         if (request.getPrice() != null) p.setPrice(request.getPrice());
@@ -608,5 +607,12 @@ public class ProductService {
     private String capitalize(String s) {
         if (s == null || s.isBlank()) return s;
         return s.substring(0, 1).toUpperCase() + s.substring(1);
+    }
+    
+    private String normalizeSku(String raw) {
+        if (raw == null) return null;
+        String s = raw.trim();
+        if (s.isBlank()) return null; // treat empty as no sku
+        return s.toUpperCase();       // optional but recommended
     }
 }

@@ -162,8 +162,6 @@ public class SecurityConfig implements WebMvcConfigurer {
                                 "/api/auth/**",
                                 "/api/auth/user/login-phone", // login, register, OTP, etc.
                                 "/api/ci/**",     // CI callbacks or build webhooks
-                                "/uploads/**",    // serve uploaded images/files
-                                "/uploadsPublish/**",
                                 "/ws-chat/**",    // websocket endpoint (handshake might be public)
                                 "/error",// Spring default error endpoint (avoids weird blocking)
                                 "/api/public/runtime-config/**",
@@ -174,7 +172,8 @@ public class SecurityConfig implements WebMvcConfigurer {
                                 "/api/auth/demo/seed-apple-review-account-all",
                                 "/api/users/reset-password",
                                 "/api/users/verify-reset-code",
-                                "/api/users/update-password"
+                                "/api/users/update-password",
+                                "/api/public/app-access/**"
                         ).permitAll()
 
                         // Any other endpoint requires authentication (JWT must be valid).

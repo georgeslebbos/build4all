@@ -31,6 +31,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     // SKU uniqueness per tenant
     boolean existsByOwnerProject_IdAndSkuIgnoreCase(Long ownerProjectId, String sku);
+    
+    boolean existsByOwnerProject_IdAndSkuIgnoreCaseAndIdNot(Long ownerProjectId, String sku, Long id);
 
     List<Product> findByIdIn(List<Long> ids);
 

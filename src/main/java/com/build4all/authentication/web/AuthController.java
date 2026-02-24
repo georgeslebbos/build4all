@@ -318,10 +318,32 @@ public class AuthController {
 
         String status = existingUser.getStatus().getName();
         if ("DELETED".equalsIgnoreCase(status)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "This account has been deleted and cannot be accessed."));
-        }
+        	if ("DELETED".equalsIgnoreCase(status)) {
+        	    String tempToken = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
 
+        	    Map<String, Object> deletedUserData = new HashMap<>();
+        	    deletedUserData.put("id", existingUser.getId());
+        	    deletedUserData.put("username", existingUser.getUsername());
+        	    deletedUserData.put("firstName", existingUser.getFirstName());
+        	    deletedUserData.put("lastName", existingUser.getLastName());
+        	    deletedUserData.put("email", existingUser.getEmail());
+        	    deletedUserData.put("profilePictureUrl", existingUser.getProfilePictureUrl());
+        	    deletedUserData.put("ownerProjectLinkId", ownerProjectLinkId);
+
+        	    return ResponseEntity.ok(Map.of(
+        	            "wasDeleted", true,
+        	            "canRestoreDeleted", true, // always true now
+        	            "message", "This account was deleted. Confirm reactivation.",
+        	            "token", tempToken,
+        	            "user", deletedUserData,
+        	            "userType", "user",
+        	            "ownerProjectLinkId", ownerProjectLinkId
+        	    ));
+        	}
+
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "This account has been deleted and the restore period has expired."));
+        }
         if ("INACTIVE".equalsIgnoreCase(status)) {
             // ✅ IMPORTANT: with strict JwtUtil, USER token MUST include tenant
             String tempToken = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
@@ -390,33 +412,27 @@ public class AuthController {
 
         String currentStatus = existingUser.getStatus().getName();
         if ("DELETED".equalsIgnoreCase(currentStatus)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "This account has been deleted and cannot be accessed."));
-        }
-
-        if ("INACTIVE".equalsIgnoreCase(currentStatus)) {
-            // ✅ IMPORTANT: with strict JwtUtil, USER token MUST include tenant
             String tempToken = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
 
-            Map<String, Object> inactiveUserData = new HashMap<>();
-            inactiveUserData.put("id", existingUser.getId());
-            inactiveUserData.put("username", existingUser.getUsername());
-            inactiveUserData.put("phoneNumber", existingUser.getPhoneNumber());
-            inactiveUserData.put("firstName", existingUser.getFirstName());
-            inactiveUserData.put("lastName", existingUser.getLastName());
-            inactiveUserData.put("profilePictureUrl", existingUser.getProfilePictureUrl());
-            inactiveUserData.put("ownerProjectLinkId", ownerProjectLinkId);
+            Map<String, Object> deletedUserData = new HashMap<>();
+            deletedUserData.put("id", existingUser.getId());
+            deletedUserData.put("username", existingUser.getUsername());
+            deletedUserData.put("phoneNumber", existingUser.getPhoneNumber());
+            deletedUserData.put("firstName", existingUser.getFirstName());
+            deletedUserData.put("lastName", existingUser.getLastName());
+            deletedUserData.put("profilePictureUrl", existingUser.getProfilePictureUrl());
+            deletedUserData.put("ownerProjectLinkId", ownerProjectLinkId);
 
             return ResponseEntity.ok(Map.of(
-                    "wasInactive", true,
-                    "message", "Your account is inactive. Confirm reactivation.",
+                    "wasDeleted", true,
+                    "canRestoreDeleted", true, // always true now
+                    "message", "This account was deleted. Confirm reactivation.",
                     "token", tempToken,
-                    "user", inactiveUserData,
+                    "user", deletedUserData,
                     "userType", "user",
                     "ownerProjectLinkId", ownerProjectLinkId
             ));
         }
-
         existingUser.setLastLogin(LocalDateTime.now());
         userService.save(existingUser);
 
@@ -469,10 +485,14 @@ public class AuthController {
         }
 
         String currentStatus = user.getStatus().getName();
-        if (!"INACTIVE".equalsIgnoreCase(currentStatus)) {
-            return ResponseEntity.badRequest().body(Map.of("error", "User is not inactive"));
+        boolean isInactive = "INACTIVE".equalsIgnoreCase(currentStatus);
+        boolean isDeleted = "DELETED".equalsIgnoreCase(currentStatus);
+
+        if (!isInactive && !isDeleted) {
+            return ResponseEntity.badRequest().body(Map.of("error", "User is neither inactive nor recoverable deleted"));
         }
 
+       
         licensingService.requireUserSlotAvailable(ownerProjectLinkId);
         
         UserStatus activeStatus = userStatusRepository.findByNameIgnoreCase("ACTIVE")
@@ -1592,4 +1612,19 @@ public class AuthController {
 	}
 
 
+ private static final long USER_DELETED_RESTORE_WINDOW_DAYS = 30;
+
+ private boolean canRestoreDeletedUser(Users user) {
+     if (user == null || user.getStatus() == null) return false;
+
+     String status = user.getStatus().getName();
+     if (!"DELETED".equalsIgnoreCase(status)) return false;
+
+     // ⚠️ For now we use updatedAt as "deletedAt" proxy
+     // Better later: add a real deletedAt column
+     LocalDateTime deletedAt = user.getUpdatedAt();
+     if (deletedAt == null) return false;
+
+     return !deletedAt.isBefore(LocalDateTime.now().minusDays(USER_DELETED_RESTORE_WINDOW_DAYS));
+ }
 }

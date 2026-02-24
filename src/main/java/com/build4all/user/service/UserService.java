@@ -271,7 +271,7 @@ public class UserService {
                 <h2>Welcome to build4all</h2>
                 <p>Use this code to verify your email:</p>
                 <h1>%s</h1>
-                <p style="color:#777">Expires in 10 minutes.</p>
+             
                 </body></html>
             """.formatted(code);
 
@@ -389,7 +389,7 @@ public class UserService {
                   <h2>build4all Verification</h2>
                   <p>Your new verification code is:</p>
                   <h1>%s</h1>
-                  <p style="color:#777">Expires in 10 minutes.</p>
+                  
                 </body></html>
             """.formatted(code);
 
@@ -687,7 +687,7 @@ public class UserService {
             <html><body style="font-family: Arial; text-align:center; padding:20px">
             <h2>Reset Your Password</h2>
             <p>Use this code to proceed:</p><h1>%s</h1>
-            <p style="color:#777">Expires in 10 minutes.</p></body></html>
+            </body></html>
         """.formatted(code);
         emailService.sendHtmlEmail(email, "Password Reset Code", html);
 

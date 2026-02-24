@@ -336,8 +336,7 @@ public class AppRequestService {
             String enabledFeaturesJson,
             String brandingJson
     ) {
-        AdminUserProject link = aupRepo.findById(linkId)
-                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
+    	AdminUserProject link = getActiveLinkOrThrow(linkId);
 
         enforceLicenseForBuild(link);
 
@@ -414,9 +413,7 @@ public class AppRequestService {
             String ownerEmail,
             String ownerName
     ) {
-        AdminUserProject link = aupRepo.findById(linkId)
-                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
-
+    	AdminUserProject link = getActiveLinkOrThrow(linkId);
         enforceLicenseForBuild(link);
 
         AdminUser owner = link.getAdmin();
@@ -939,24 +936,21 @@ public class AppRequestService {
 
     @Transactional
     public void setApkUrlByLinkId(Long linkId, String apkUrl) {
-        AdminUserProject link = aupRepo.findById(linkId)
-                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
+        AdminUserProject link = getActiveLinkOrThrow(linkId);
         link.setApkUrl(apkUrl);
         aupRepo.save(link);
     }
 
     @Transactional
     public void setBundleUrlByLinkId(Long linkId, String bundleUrl) {
-        AdminUserProject link = aupRepo.findById(linkId)
-                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
+        AdminUserProject link = getActiveLinkOrThrow(linkId);
         link.setBundleUrl(bundleUrl);
         aupRepo.save(link);
     }
 
     @Transactional
     public void setIpaUrlByLinkId(Long linkId, String ipaUrl) {
-        AdminUserProject link = aupRepo.findById(linkId)
-                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
+        AdminUserProject link = getActiveLinkOrThrow(linkId);
         link.setIpaUrl(ipaUrl);
         aupRepo.save(link);
     }
@@ -986,5 +980,29 @@ public class AppRequestService {
                 .replaceAll("[^a-z0-9]+", "-")
                 .replaceAll("(^-|-$)", "");
         return (out == null || out.isBlank()) ? "app" : out;
+    }
+    
+    private void ensureAppNotDeleted(AdminUserProject link) {
+        if (link == null) {
+            throw new IllegalArgumentException("OwnerProject link not found");
+        }
+
+        // Prefer entity helper if you already have it
+        if (link.isDeleted()) {
+            throw new IllegalStateException("This app is deleted and cannot be accessed");
+        }
+
+        // If you DON'T trust/know isDeleted(), use this instead:
+        // if (link.getStatus() != null && "DELETED".equalsIgnoreCase(link.getStatus().trim())) {
+        //     throw new IllegalStateException("This app is deleted and cannot be accessed");
+        // }
+    }
+
+    private AdminUserProject getActiveLinkOrThrow(Long linkId) {
+        AdminUserProject link = aupRepo.findById(linkId)
+                .orElseThrow(() -> new IllegalArgumentException("OwnerProject link not found: " + linkId));
+
+        ensureAppNotDeleted(link);
+        return link;
     }
 }
