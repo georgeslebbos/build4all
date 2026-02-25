@@ -25,6 +25,7 @@ import com.build4all.business.domain.Businesses;
 import com.build4all.business.repository.BusinessStatusRepository;
 import com.build4all.business.repository.BusinessesRepository;
 import com.build4all.business.service.BusinessService;
+import com.build4all.common.errors.ApiException;
 import com.build4all.licensing.service.LicensingService;
 import com.build4all.project.domain.Project;
 import com.build4all.project.repository.ProjectRepository;
@@ -184,37 +185,28 @@ public class AuthController {
 
 
     @PostMapping(
-    	    value = "/send-verification",
-    	    consumes = MediaType.APPLICATION_JSON_VALUE,
-    	    produces = MediaType.APPLICATION_JSON_VALUE
-    	)
-    	public ResponseEntity<?> sendVerificationJson(@RequestBody Map<String, Object> body) {
-    	    try {
-    	        String email = body.get("email") != null ? body.get("email").toString() : null;
-    	        String phoneNumber = body.get("phoneNumber") != null ? body.get("phoneNumber").toString() : null;
-    	        String password = body.get("password") != null ? body.get("password").toString() : null;
+            value = "/send-verification",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public ResponseEntity<?> sendVerificationJson(@RequestBody Map<String, Object> body) {
+        String email = body.get("email") != null ? body.get("email").toString() : null;
+        String phoneNumber = body.get("phoneNumber") != null ? body.get("phoneNumber").toString() : null;
+        String password = body.get("password") != null ? body.get("password").toString() : null;
 
-    	        if (password == null || password.isBlank()) {
-    	            throw new IllegalArgumentException("password is required");
-    	        }
-    	        validatePasswordOrThrow(password);
+        if (password == null || password.isBlank()) {
+            throw new IllegalArgumentException("password is required");
+        }
+        validatePasswordOrThrow(password);
 
-    	        
-    	        Long ownerProjectLinkId = body.get("ownerProjectLinkId") != null
-    	                ? Long.valueOf(body.get("ownerProjectLinkId").toString())
-    	                : null;
+        Long ownerProjectLinkId = body.get("ownerProjectLinkId") != null
+                ? Long.valueOf(body.get("ownerProjectLinkId").toString())
+                : null;
 
-    	        
-    	        // reuse existing logic
-    	        return sendVerification(email, phoneNumber, password, ownerProjectLinkId);
-
-    	    } catch (Exception e) {
-    	        e.printStackTrace();
-    	        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-    	                .body(Map.of("error", "Server error: " + e.getMessage()));
-    	    }
-    	}
-
+        // ✅ Let global handler return proper ApiException (409 + code + details.pendingId)
+        return sendVerification(email, phoneNumber, password, ownerProjectLinkId);
+    }
+    
     @PostMapping("/user/verify-phone-code")
     public ResponseEntity<?> verifyUserPhoneCode(@RequestBody Map<String, String> request) {
         try {
@@ -1543,12 +1535,34 @@ public class AuthController {
 
             userService.resendVerificationCodeForRegistration(email, phone, ownerProjectLinkId);
 
-            return ResponseEntity.ok(Map.of("message", "Verification code resent"));
+            return ResponseEntity.ok(Map.of(
+                    "message", "Verification code resent",
+                    "alreadyVerified", false
+            ));
+
+        } catch (ApiException e) {
+            // ✅ Special handling for verified pending user
+            if ("PENDING_ALREADY_VERIFIED".equals(e.getCode())) {
+                Object pendingId = e.getDetails() != null ? e.getDetails().get("pendingId") : null;
+
+                return ResponseEntity.ok(Map.of(
+                        "message", "Already verified. Continue profile setup.",
+                        "alreadyVerified", true,
+                        "pendingId", pendingId
+                ));
+            }
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("error", e.getMessage());
+            body.put("code", e.getCode());
+            if (e.getDetails() != null) body.put("details", e.getDetails());
+
+            return ResponseEntity.status(e.getStatus()).body(body);
+
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
         }
     }
-
 
     private Boolean hasMxOrARecordSafe(String domain) {
         try {

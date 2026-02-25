@@ -6,6 +6,8 @@ import com.build4all.catalog.domain.Country;
 import com.build4all.catalog.domain.Region;
 import com.build4all.catalog.repository.CountryRepository;
 import com.build4all.catalog.repository.RegionRepository;
+import com.build4all.licensing.dto.OwnerAppAccessResponse;
+import com.build4all.licensing.service.LicensingService;
 import com.build4all.security.JwtUtil;
 import com.build4all.tax.domain.TaxRule;
 import com.build4all.tax.dto.TaxPreviewRequest;
@@ -33,6 +35,7 @@ public class TaxController {
 
     private final TaxService taxService;
     private final JwtUtil jwtUtil;
+    private final LicensingService licensingService;
 
     private final AdminUserProjectRepository adminUserProjectRepository;
     private final CountryRepository countryRepository;
@@ -41,20 +44,48 @@ public class TaxController {
     private final TaxServiceImpl taxServiceImpl;
 
     public TaxController(TaxService taxService,
-                         JwtUtil jwtUtil,
-                         AdminUserProjectRepository adminUserProjectRepository,
-                         CountryRepository countryRepository,
-                         RegionRepository regionRepository,
-                         TaxServiceImpl taxServiceImpl) {
-        this.taxService = taxService;
-        this.jwtUtil = jwtUtil;
-        this.adminUserProjectRepository = adminUserProjectRepository;
-        this.countryRepository = countryRepository;
-        this.regionRepository = regionRepository;
-        this.taxServiceImpl = taxServiceImpl;
-    }
-
+            JwtUtil jwtUtil,
+            AdminUserProjectRepository adminUserProjectRepository,
+            CountryRepository countryRepository,
+            RegionRepository regionRepository,
+            TaxServiceImpl taxServiceImpl,
+            LicensingService licensingService) {
+this.taxService = taxService;
+this.jwtUtil = jwtUtil;
+this.adminUserProjectRepository = adminUserProjectRepository;
+this.countryRepository = countryRepository;
+this.regionRepository = regionRepository;
+this.taxServiceImpl = taxServiceImpl;
+this.licensingService = licensingService;
+}
     /* ===================== helpers ===================== */
+    
+    
+    private ResponseEntity<?> blockIfSubscriptionExceeded(Long ownerProjectId) {
+        try {
+            OwnerAppAccessResponse access = licensingService.getOwnerDashboardAccess(ownerProjectId);
+
+            if (access == null || !access.isCanAccessDashboard()) {
+                String reason = (access != null && access.getBlockingReason() != null)
+                        ? access.getBlockingReason()
+                        : "SUBSCRIPTION_LIMIT_EXCEEDED";
+
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                        "error", "Subscription limit exceeded. Upgrade your plan or reduce usage.",
+                        "code", "SUBSCRIPTION_LIMIT_EXCEEDED",
+                        "blockingReason", reason,
+                        "ownerProjectId", ownerProjectId
+                ));
+            }
+
+            return null;
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                    "error", "Unable to validate subscription right now.",
+                    "code", "SUBSCRIPTION_CHECK_UNAVAILABLE"
+            ));
+        }
+    }
 
     private String strip(String auth) {
         return auth == null ? "" : auth.replaceFirst("(?i)^Bearer\\s+", "").trim();
@@ -163,6 +194,8 @@ public class TaxController {
             @RequestBody TaxRuleRequest req
     ) {
         String token = strip(auth);
+        
+        
 
         if (!jwtUtil.validateToken(token)) {
             return unauthorized("Invalid token");
@@ -174,6 +207,9 @@ public class TaxController {
 
         try {
             Long ownerProjectId = tenantFromTokenOrThrow(auth); // ✅ from token (Bearer ok)
+            
+            ResponseEntity<?> blocked = blockIfSubscriptionExceeded(ownerProjectId);
+            if (blocked != null) return blocked;
             TaxRule created = taxService.createRule(fromRequestResolved(ownerProjectId, req));
             return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(created));
         } catch (RuntimeException ex) {

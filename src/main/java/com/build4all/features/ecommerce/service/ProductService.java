@@ -411,15 +411,41 @@ public class ProductService {
 
     @Transactional(Transactional.TxType.SUPPORTS)
     public List<ProductResponse> listDiscounted(Long ownerProjectId) {
-        if (ownerProjectId == null) throw new IllegalArgumentException("ownerProjectId is required");
+        if (ownerProjectId == null) {
+            throw new IllegalArgumentException("ownerProjectId is required");
+        }
 
-        // ✅ now real flash sale due to repo query tightening
-        return productRepository.findActiveDiscountedByOwnerProject(ownerProjectId)
+        LocalDateTime now = LocalDateTime.now();
+
+        return productRepository.findActiveDiscountedByOwnerProject(ownerProjectId, now)
                 .stream()
+                .filter(this::isRealActiveFlashSale)
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
 
+    private boolean isRealActiveFlashSale(Product p) {
+        if (p == null) return false;
+
+        String status = p.getStatus() == null ? "" : p.getStatus().trim();
+        boolean statusOk = status.equalsIgnoreCase("Published")
+                || status.equalsIgnoreCase("Available")
+                || status.equalsIgnoreCase("Active")
+                || status.equalsIgnoreCase("Upcoming"); // ✅ add this if you want
+        if (!statusOk) return false;
+
+        if (p.getPrice() == null || p.getSalePrice() == null) return false;
+        if (p.getSalePrice().compareTo(p.getPrice()) >= 0) return false;
+        if (p.getSalePrice().compareTo(java.math.BigDecimal.ZERO) <= 0) return false;
+
+        LocalDateTime now = LocalDateTime.now();
+
+        if (p.getSaleStart() == null || p.getSaleEnd() == null) return false;
+        if (now.isBefore(p.getSaleStart())) return false;
+        if (now.isAfter(p.getSaleEnd())) return false;
+
+        return true;
+    }
     /* =========================================================
        DELETE (TENANT SAFE)
        ========================================================= */

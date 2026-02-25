@@ -6,6 +6,8 @@ import com.build4all.importer.model.ImportOptions;
 import com.build4all.importer.model.ReplaceScope;
 import com.build4all.importer.service.ExcelSeederService;
 import com.build4all.importer.service.TenantContextResolver;
+import com.build4all.licensing.guard.OwnerSubscriptionGuard;
+
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -26,19 +28,15 @@ public class ExcelImportController {
 
     private final ExcelSeederService service;
     private final TenantContextResolver tenantContextResolver;
-
-    public ExcelImportController(ExcelSeederService service, TenantContextResolver tenantContextResolver) {
-        this.service = service;
-        this.tenantContextResolver = tenantContextResolver;
-    }
-
-    @PostMapping("/excel/validate")
-    public ResponseEntity<ExcelValidationResult> validate(
-            @RequestParam("file") MultipartFile file
-    ) throws Exception {
-        return ResponseEntity.ok(service.validateExcel(file));
-    }
-
+    private final OwnerSubscriptionGuard ownerSubscriptionGuard;
+    
+    public ExcelImportController(ExcelSeederService service,
+            TenantContextResolver tenantContextResolver,
+            OwnerSubscriptionGuard ownerSubscriptionGuard) {
+this.service = service;
+this.tenantContextResolver = tenantContextResolver;
+this.ownerSubscriptionGuard = ownerSubscriptionGuard;
+}
     @PostMapping("/excel")
     public ResponseEntity<ExcelImportResult> importExcel(
             HttpServletRequest request,
@@ -48,6 +46,14 @@ public class ExcelImportController {
     ) throws Exception {
 
         Long ownerProjectId = tenantContextResolver.resolveOwnerProjectId(request);
+
+        // ✅ NEW subscription guard
+        ResponseEntity<?> blocked = ownerSubscriptionGuard.blockIfWriteNotAllowed(ownerProjectId);
+        if (blocked != null) {
+            // method returns ResponseEntity<ExcelImportResult>, so cast is awkward.
+            // easiest: change method signature to ResponseEntity<?> (recommended).
+            return (ResponseEntity<ExcelImportResult>) blocked;
+        }
 
         return ResponseEntity.ok(
                 service.importExcel(file, new ImportOptions(replace, replaceScope), ownerProjectId)

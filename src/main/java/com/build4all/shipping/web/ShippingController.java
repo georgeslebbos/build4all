@@ -6,6 +6,7 @@ import com.build4all.catalog.domain.Country;
 import com.build4all.catalog.domain.Region;
 import com.build4all.catalog.repository.CountryRepository;
 import com.build4all.catalog.repository.RegionRepository;
+import com.build4all.licensing.guard.OwnerSubscriptionGuard;
 import com.build4all.security.JwtUtil;
 import com.build4all.shipping.domain.ShippingMethod;
 import com.build4all.shipping.domain.ShippingMethodType;
@@ -35,24 +36,27 @@ public class ShippingController {
     private final ShippingService shippingService;
     private final ShippingMethodRepository methodRepository;
     private final JwtUtil jwtUtil;
+    private final OwnerSubscriptionGuard ownerSubscriptionGuard;
 
     private final AdminUserProjectRepository adminUserProjectRepository;
     private final CountryRepository countryRepository;
     private final RegionRepository regionRepository;
 
     public ShippingController(ShippingService shippingService,
-                              ShippingMethodRepository methodRepository,
-                              JwtUtil jwtUtil,
-                              AdminUserProjectRepository adminUserProjectRepository,
-                              CountryRepository countryRepository,
-                              RegionRepository regionRepository) {
-        this.shippingService = shippingService;
-        this.methodRepository = methodRepository;
-        this.jwtUtil = jwtUtil;
-        this.adminUserProjectRepository = adminUserProjectRepository;
-        this.countryRepository = countryRepository;
-        this.regionRepository = regionRepository;
-    }
+            ShippingMethodRepository methodRepository,
+            JwtUtil jwtUtil,
+            AdminUserProjectRepository adminUserProjectRepository,
+            CountryRepository countryRepository,
+            RegionRepository regionRepository,
+            OwnerSubscriptionGuard ownerSubscriptionGuard) {
+this.shippingService = shippingService;
+this.methodRepository = methodRepository;
+this.jwtUtil = jwtUtil;
+this.adminUserProjectRepository = adminUserProjectRepository;
+this.countryRepository = countryRepository;
+this.regionRepository = regionRepository;
+this.ownerSubscriptionGuard = ownerSubscriptionGuard;
+}
 
     /* ===================== helpers ===================== */
 
@@ -265,7 +269,11 @@ public class ShippingController {
             @RequestBody ShippingMethodRequest req
     ) {
         try {
-            Long ownerProjectId = jwtUtil.requireOwnerProjectId(auth); // ✅ token is source of truth
+            Long ownerProjectId = jwtUtil.requireOwnerProjectId(auth); // token source of truth
+
+            // ✅ NEW subscription guard
+            ResponseEntity<?> blocked = ownerSubscriptionGuard.blockIfWriteNotAllowed(ownerProjectId);
+            if (blocked != null) return blocked;
 
             if (req.getName() == null || req.getName().isBlank()) {
                 throw new IllegalArgumentException("name is required");
@@ -278,7 +286,7 @@ public class ShippingController {
                     .orElseThrow(() -> new IllegalArgumentException("Invalid ownerProjectId in token: " + ownerProjectId));
 
             ShippingMethod method = new ShippingMethod();
-            method.setOwnerProject(ownerProject); // ✅ set once on create
+            method.setOwnerProject(ownerProject);
 
             applyRequestToMethodCore(req, method);
             applyCountryRegion(req, method);
@@ -302,7 +310,11 @@ public class ShippingController {
             @RequestBody ShippingMethodRequest req
     ) {
         try {
-            Long ownerProjectId = jwtUtil.requireOwnerProjectId(auth); // ✅ from token
+        	   Long ownerProjectId = jwtUtil.requireOwnerProjectId(auth); // token source of truth
+
+               // ✅ NEW subscription guard
+               ResponseEntity<?> blocked = ownerSubscriptionGuard.blockIfWriteNotAllowed(ownerProjectId);
+               if (blocked != null) return blocked;
 
             ShippingMethod method = methodRepository
                     .findByIdAndOwnerProject_Id(id, ownerProjectId)

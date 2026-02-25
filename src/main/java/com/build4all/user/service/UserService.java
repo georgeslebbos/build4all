@@ -311,7 +311,12 @@ public class UserService {
             String newU = username.trim();
             if (!newU.equalsIgnoreCase(user.getUsername())
                     && userRepository.existsByUsernameIgnoreCaseAndOwnerProject_Id(newU, ownerProjectLinkId)) {
-                throw new RuntimeException("Username already in use in this app.");
+            	throw new ApiException(
+            	        HttpStatus.CONFLICT,
+            	        "USERNAME_ALREADY_USED",
+            	        "Username already in use in this app.",
+            	        Map.of("field", "username")
+            	);
             }
             user.setUsername(newU);
         }
@@ -383,9 +388,13 @@ public class UserService {
 
         // (Optional) if already verified, you can block resend:
         if (Boolean.TRUE.equals(pending.isVerified())) {
-            throw new RuntimeException("This pending registration is already verified.");
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "PENDING_ALREADY_VERIFIED",
+                    "Pending already verified. Continue profile setup.",
+                    Map.of("pendingId", pending.getId())
+            );
         }
-
         String code = phoneProvided ? "123456" : String.format("%06d", new Random().nextInt(999999));
 
         pending.setVerificationCode(code);

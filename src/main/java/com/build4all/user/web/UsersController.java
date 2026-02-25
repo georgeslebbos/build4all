@@ -104,37 +104,77 @@ public class UsersController {
     @GetMapping("/{id}")
     public ResponseEntity<?> getUserById(
             @PathVariable Long id,
-            @RequestParam Long ownerProjectLinkId
+            @RequestParam Long ownerProjectLinkId,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
     ) {
         try {
-            /**
-             * SQL executed by userService.getUserDtoByIdAndOwnerProject(id, ownerProjectLinkId)
-             *
-             * In service it calls:
-             *   userRepository.fetchByIdAndOwnerProjectId(id, ownerProjectLinkId)
-             *
-             * JPQL fetch-join translates roughly to:
-             *   SELECT u.*, op.*, admin.*, project.*
-             *   FROM users u
-             *   JOIN admin_user_project op ON u.aup_id = op.id
-             *   LEFT JOIN admin_users admin ON op.admin_id = admin.admin_id
-             *   LEFT JOIN projects project ON op.project_id = project.id
-             *   WHERE u.user_id = :id AND op.id = :ownerProjectLinkId
-             *   LIMIT 1;
-             *
-             * Then DTO mapping is in-memory (no SQL).
-             */
+            // 1) Require Bearer token
+            if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Missing or invalid token"));
+            }
+
+            String jwt = authHeader.substring(7).trim();
+
+            // 2) Validate token
+            if (!jwtUtil.validateToken(jwt)) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Invalid or expired token"));
+            }
+
+            String role = Optional.ofNullable(jwtUtil.extractRole(jwt))
+                    .orElse("")
+                    .toUpperCase();
+
+            // 3) Enforce tenant match for tenant-scoped roles
+            // SUPER_ADMIN may be global and may not have ownerProjectId claim
+            if (!"SUPER_ADMIN".equals(role)) {
+                try {
+                    jwtUtil.requireTenantMatch(jwt, ownerProjectLinkId);
+                } catch (RuntimeException e) {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                            .body(Map.of("error", "Tenant mismatch"));
+                }
+            }
+
+            // 4) Object-level authorization (IDOR/BOLA fix)
+            switch (role) {
+                case "SUPER_ADMIN":
+                case "OWNER":
+                case "MANAGER":
+                    // allowed (already tenant-checked except SUPER_ADMIN)
+                    break;
+
+                case "USER":
+                    Long tokenUserId = jwtUtil.extractId(jwt);
+                    if (!Objects.equals(tokenUserId, id)) {
+                        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                                .body(Map.of("error", "Access denied"));
+                    }
+                    break;
+
+                // If you do NOT want businesses to access user details, deny explicitly
+                case "BUSINESS":
+                default:
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                            .body(Map.of("error", "Access denied"));
+            }
+
+            // 5) Fetch only after authz passes
             UserDto dto = userService.getUserDtoByIdAndOwnerProject(id, ownerProjectLinkId);
             return ResponseEntity.ok(dto);
 
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
+            // Avoid leaking whether user exists in another tenant (optional hardening)
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", "User not found"));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Server error"));
         }
     }
-
     /* =====================================================
        DELETE USER (self or SUPER_ADMIN)
        ===================================================== */
@@ -256,11 +296,18 @@ public class UsersController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (RuntimeException e) {
-            // ✅ Access denied => 403 (مش 404)
-            if ("Access denied".equalsIgnoreCase(e.getMessage())) {
-                return ResponseEntity.status(403).body(Map.of("error", e.getMessage()));
+            String msg = e.getMessage() == null ? "Unexpected error" : e.getMessage();
+
+            if ("Access denied".equalsIgnoreCase(msg)) {
+                return ResponseEntity.status(403).body(Map.of("error", msg));
             }
-            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
+
+            // ✅ duplicate username should be 409, not 404
+            if (msg.toLowerCase().contains("username already")) {
+                return ResponseEntity.status(409).body(Map.of("error", msg));
+            }
+
+            return ResponseEntity.status(404).body(Map.of("error", msg));
         }catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", "Server error: " + e.getMessage()));
         }
@@ -729,17 +776,14 @@ public class UsersController {
        ===================================================== */
 
     @PostMapping({
-            "/{userId}/update-category",   // new canonical (preferred)
-            "/{userId}/categories",        // legacy
-            "/{userId}/categoriess",       // legacy typo you had in apps
-            "/{userId}/UpdateCategory",    // legacy PascalCase
-            "/{userId}/UpdateInterest"     // legacy PascalCase 2
+        "/{userId}/categoriess",       // legacy typo only
+        "/{userId}/UpdateCategory",    // legacy
+        "/{userId}/UpdateInterest"     // legacy
     })
     public ResponseEntity<?> replaceUserCategoriesCompat(
             @PathVariable Long userId,
             @RequestBody List<Long> categoryIds
     ) {
-        // SQL: same as replaceUserCategories(...) above.
         userService.replaceUserCategories(userId, categoryIds);
         return ResponseEntity.ok(Map.of("message", "User categories replaced successfully"));
     }

@@ -6,6 +6,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.build4all.home.banner.dto.HomeBannerResponse;
 import com.build4all.home.banner.service.HomeBannerService;
+import com.build4all.licensing.guard.OwnerSubscriptionGuard;
 import com.build4all.security.JwtUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import org.springframework.http.HttpStatus;
@@ -22,12 +23,15 @@ public class HomeBannerController {
 
     private final HomeBannerService bannerService;
     private final JwtUtil jwtUtil;
-
-    public HomeBannerController(HomeBannerService bannerService, JwtUtil jwtUtil) {
-        this.bannerService = bannerService;
-        this.jwtUtil = jwtUtil;
-    }
-
+    private final OwnerSubscriptionGuard ownerSubscriptionGuard;
+    
+    public HomeBannerController(HomeBannerService bannerService,
+            JwtUtil jwtUtil,
+            OwnerSubscriptionGuard ownerSubscriptionGuard) {
+this.bannerService = bannerService;
+this.jwtUtil = jwtUtil;
+this.ownerSubscriptionGuard = ownerSubscriptionGuard;
+}
     /* ------------------------ helpers (same pattern as ProductController) ------------------------ */
 
     private String strip(String auth) {
@@ -131,8 +135,22 @@ public class HomeBannerController {
         try {
             Long ownerId = jwtUtil.extractId(token);
 
+            // ✅ Stronger: ownerProjectId must come from token (or at least match token claim)
+            Long tokenOwnerProjectId = jwtUtil.requireOwnerProjectId(auth);
+            if (!tokenOwnerProjectId.equals(ownerProjectId)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Tenant mismatch"));
+            }
+
+            // ✅ NEW subscription guard
+            ResponseEntity<?> blocked = ownerSubscriptionGuard.blockIfWriteNotAllowed(tokenOwnerProjectId);
+            if (blocked != null) return blocked;
+
             HomeBannerRequest req = new HomeBannerRequest();
-            req.setOwnerProjectId(ownerProjectId);
+
+            // ✅ trust token tenant, not request param
+            req.setOwnerProjectId(tokenOwnerProjectId);
+
             req.setTitle(title);
             req.setSubtitle(subtitle);
             req.setTargetType(targetType);
@@ -141,9 +159,6 @@ public class HomeBannerController {
             req.setSortOrder(sortOrder);
             req.setActive(active);
 
-            // parse optional datetime strings if you want:
-            // if you already send ISO LocalDateTime strings from Flutter/Postman,
-            // you can do:
             if (startAt != null && !startAt.isBlank()) req.setStartAt(LocalDateTime.parse(startAt));
             if (endAt != null && !endAt.isBlank()) req.setEndAt(LocalDateTime.parse(endAt));
 
@@ -188,7 +203,14 @@ public class HomeBannerController {
         }
 
         try {
-            Long ownerId = jwtUtil.extractId(token);
+        	Long ownerId = jwtUtil.extractId(token);
+
+            // ✅ Stronger: ownerProjectId must come from token (or at least match token claim)
+            Long tokenOwnerProjectId = jwtUtil.requireOwnerProjectId(auth);
+          
+            // ✅ NEW subscription guard
+            ResponseEntity<?> blocked = ownerSubscriptionGuard.blockIfWriteNotAllowed(tokenOwnerProjectId);
+            if (blocked != null) return blocked;
 
             HomeBannerRequest req = new HomeBannerRequest();
             req.setImageUrl(imageUrl);

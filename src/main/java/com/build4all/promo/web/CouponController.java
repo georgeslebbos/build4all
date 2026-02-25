@@ -1,5 +1,7 @@
 package com.build4all.promo.web;
 
+import com.build4all.licensing.dto.OwnerAppAccessResponse;
+import com.build4all.licensing.service.LicensingService;
 import com.build4all.promo.domain.Coupon;
 import com.build4all.promo.dto.CouponRequest;
 import com.build4all.promo.dto.CouponResponse;
@@ -20,10 +22,39 @@ public class CouponController {
 
     private final CouponService couponService;
     private final JwtUtil jwtUtil;
+    private final LicensingService licensingService;
 
-    public CouponController(CouponService couponService, JwtUtil jwtUtil) {
+    public CouponController(CouponService couponService, JwtUtil jwtUtil, LicensingService licensingService) {
         this.couponService = couponService;
         this.jwtUtil = jwtUtil;
+        this.licensingService = licensingService;
+    }
+    
+    
+    private ResponseEntity<?> blockIfSubscriptionExceeded(Long ownerProjectId) {
+        try {
+            OwnerAppAccessResponse access = licensingService.getOwnerDashboardAccess(ownerProjectId);
+
+            if (access == null || !access.isCanAccessDashboard()) {
+                String reason = (access != null && access.getBlockingReason() != null)
+                        ? access.getBlockingReason()
+                        : "SUBSCRIPTION_LIMIT_EXCEEDED";
+
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                        "error", "Subscription limit exceeded. Upgrade your plan or reduce usage.",
+                        "code", "SUBSCRIPTION_LIMIT_EXCEEDED",
+                        "blockingReason", reason,
+                        "ownerProjectId", ownerProjectId
+                ));
+            }
+
+            return null;
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                    "error", "Unable to validate subscription right now.",
+                    "code", "SUBSCRIPTION_CHECK_UNAVAILABLE"
+            ));
+        }
     }
 
     private boolean hasRole(String tokenOrBearer, String... roles) {
@@ -62,6 +93,9 @@ public class CouponController {
 
         try {
             Long ownerProjectId = tenantFromToken(auth);
+            
+            ResponseEntity<?> blocked = blockIfSubscriptionExceeded(ownerProjectId);
+            if (blocked != null) return blocked;
 
             // ✅ do NOT trust client tenant
             req.setOwnerProjectId(ownerProjectId);

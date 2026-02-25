@@ -7,6 +7,8 @@ import com.build4all.features.ecommerce.dto.ProductRequest;
 import com.build4all.features.ecommerce.dto.ProductResponse;
 import com.build4all.features.ecommerce.dto.ProductUpdateRequest;
 import com.build4all.features.ecommerce.service.ProductService;
+import com.build4all.licensing.dto.OwnerAppAccessResponse;
+import com.build4all.licensing.service.LicensingService;
 import com.build4all.security.JwtUtil;
 import com.build4all.tax.domain.TaxClass;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -30,10 +32,39 @@ public class ProductController {
 
     private final ProductService productService;
     private final JwtUtil jwtUtil;
-
-    public ProductController(ProductService productService, JwtUtil jwtUtil) {
+    private final LicensingService licensingService;
+    
+    public ProductController(ProductService productService, JwtUtil jwtUtil, LicensingService licensingService) {
         this.productService = productService;
         this.jwtUtil = jwtUtil;
+        this.licensingService = licensingService;
+    }
+    
+    private ResponseEntity<?> blockIfSubscriptionExceeded(Long ownerProjectId) {
+        try {
+            OwnerAppAccessResponse access = licensingService.getOwnerDashboardAccess(ownerProjectId);
+
+            if (access == null || !access.isCanAccessDashboard()) {
+                String reason = (access != null && access.getBlockingReason() != null)
+                        ? access.getBlockingReason()
+                        : "SUBSCRIPTION_LIMIT_EXCEEDED";
+
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                        "error", "Subscription limit exceeded. Upgrade your plan or reduce usage.",
+                        "code", "SUBSCRIPTION_LIMIT_EXCEEDED",
+                        "blockingReason", reason,
+                        "ownerProjectId", ownerProjectId
+                ));
+            }
+
+            return null; // allowed
+        } catch (Exception e) {
+            // fail-closed (safer than allowing write when licensing check fails)
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                    "error", "Unable to validate subscription right now.",
+                    "code", "SUBSCRIPTION_CHECK_UNAVAILABLE"
+            ));
+        }
     }
 
     private String strip(String auth) {
@@ -129,6 +160,9 @@ public class ProductController {
 
         Long tokenOwnerProjectId = resolveOwnerProjectIdFromToken(token);
         if (tokenOwnerProjectId == null) return tenantMissing();
+        
+        ResponseEntity<?> blocked = blockIfSubscriptionExceeded(tokenOwnerProjectId);
+        if (blocked != null) return blocked;
 
         if (itemTypeId == null && categoryId == null) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -252,6 +286,9 @@ public class ProductController {
 
         Long tokenOwnerProjectId = resolveOwnerProjectIdFromToken(token);
         if (tokenOwnerProjectId == null) return tenantMissing();
+        
+        ResponseEntity<?> blocked = blockIfSubscriptionExceeded(tokenOwnerProjectId);
+        if (blocked != null) return blocked;
 
         try {
             ProductUpdateRequest req = new ProductUpdateRequest();
@@ -485,7 +522,9 @@ public class ProductController {
     ) {
         String token = strip(auth);
         if (invalidToken(token)) return unauthorized();
-        if (!hasRole(token, "USER", "OWNER")) return forbidden("Only USER/OWNER can access discounted products.");
+        if (!hasRole(token, "USER", "OWNER")) {
+            return forbidden("Only USER/OWNER can access discounted products.");
+        }
 
         Long ownerProjectId = resolveOwnerProjectIdFromToken(token);
         if (ownerProjectId == null) return tenantMissing();

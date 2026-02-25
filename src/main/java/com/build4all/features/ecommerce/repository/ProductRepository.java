@@ -1,5 +1,6 @@
 package com.build4all.features.ecommerce.repository;
 
+import com.build4all.catalog.domain.Item;
 import com.build4all.features.ecommerce.domain.Product;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -44,21 +45,22 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * - now within window
      */
     @Query("""
-           SELECT p
-           FROM Product p
-           WHERE p.ownerProject.id = :ownerProjectId
-             AND LOWER(p.status) = 'published'
-             AND p.salePrice IS NOT NULL
-             AND p.salePrice > 0
-             AND p.price IS NOT NULL
-             AND p.salePrice < p.price
-             AND p.saleStart IS NOT NULL
-             AND p.saleEnd IS NOT NULL
-             AND p.saleStart <= CURRENT_TIMESTAMP
-             AND p.saleEnd >= CURRENT_TIMESTAMP
-           ORDER BY p.saleEnd ASC
-           """)
-    List<Product> findActiveDiscountedByOwnerProject(@Param("ownerProjectId") Long ownerProjectId);
+    	       SELECT p
+    	       FROM Product p
+    	       WHERE p.ownerProject.id = :ownerProjectId
+    	         AND LOWER(COALESCE(p.status, '')) IN ('published', 'available', 'active','upcoming')
+    	         AND p.salePrice IS NOT NULL
+    	         AND p.salePrice > 0
+    	         AND p.price IS NOT NULL
+    	         AND p.salePrice < p.price
+    	         AND (p.saleStart IS NULL OR p.saleStart <= :now)
+    	         AND (p.saleEnd IS NULL OR p.saleEnd >= :now)
+    	       ORDER BY p.id DESC
+    	       """)
+    	List<Product> findActiveDiscountedByOwnerProject(
+    	        @Param("ownerProjectId") Long ownerProjectId,
+    	        @Param("now") LocalDateTime now
+    	);
 
     // Tenant-safe fetch
     @Query("""

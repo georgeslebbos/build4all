@@ -1,5 +1,6 @@
 package com.build4all.order.web;
 
+import com.build4all.licensing.guard.OwnerSubscriptionGuard;
 import com.build4all.order.domain.Order;
 import com.build4all.order.domain.OrderItem;
 import com.build4all.order.domain.OrderStatus;
@@ -86,6 +87,7 @@ public class OrderController {
     private final OrderStatusRepository statusRepo;
 
     private final OrderPaymentWriteService paymentWrite;
+    private final OwnerSubscriptionGuard ownerSubscriptionGuard;
     /**
      * ✅ NEW:
      * Payment read helper that computes:
@@ -101,20 +103,22 @@ public class OrderController {
     private final OrderPaymentReadService paymentRead;
 
     public OrderController(com.build4all.order.service.OrderService orderService,
-                           JwtUtil jwt,
-                           OrderItemRepository orderItemRepo,
-                           OrderRepository orderRepo,
-                           OrderStatusRepository statusRepo,
-                           OrderPaymentReadService paymentRead,
-                           OrderPaymentWriteService paymentWrite) {
-        this.orderService = orderService;
-        this.jwt = jwt;
-        this.orderItemRepo = orderItemRepo;
-        this.orderRepo = orderRepo;
-        this.statusRepo = statusRepo;
-        this.paymentRead = paymentRead;
-        this.paymentWrite = paymentWrite;
-    }
+            JwtUtil jwt,
+            OrderItemRepository orderItemRepo,
+            OrderRepository orderRepo,
+            OrderStatusRepository statusRepo,
+            OrderPaymentReadService paymentRead,
+            OrderPaymentWriteService paymentWrite,
+            OwnerSubscriptionGuard ownerSubscriptionGuard) {
+this.orderService = orderService;
+this.jwt = jwt;
+this.orderItemRepo = orderItemRepo;
+this.orderRepo = orderRepo;
+this.statusRepo = statusRepo;
+this.paymentRead = paymentRead;
+this.paymentWrite = paymentWrite;
+this.ownerSubscriptionGuard = ownerSubscriptionGuard;
+}
 
     /**
      * Strip "Bearer " prefix (if present) from Authorization header.

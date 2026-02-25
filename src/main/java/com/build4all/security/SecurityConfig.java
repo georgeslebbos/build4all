@@ -39,6 +39,8 @@ import java.util.List;
 @Configuration
 @EnableMethodSecurity(prePostEnabled = true) // enables @PreAuthorize / @PostAuthorize on methods
 public class SecurityConfig implements WebMvcConfigurer {
+	
+	
 
 	
 	
@@ -80,6 +82,7 @@ public class SecurityConfig implements WebMvcConfigurer {
         return new BCryptPasswordEncoder();
     }
 
+    
     /* =========================================================
      * 3) JWT Authentication Filter bean
      * =========================================================
@@ -112,6 +115,10 @@ public class SecurityConfig implements WebMvcConfigurer {
         );
     }
 
+    @Bean
+    public ApiRateLimitFilter apiRateLimitFilter(JwtUtil jwtUtil) {
+        return new ApiRateLimitFilter(jwtUtil);
+    }
     /* =========================================================
      * 4) Main Security Filter Chain
      * =========================================================
@@ -123,7 +130,8 @@ public class SecurityConfig implements WebMvcConfigurer {
      */
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
-                                                   JwtAuthenticationFilter jwtAuthenticationFilter)
+            ApiRateLimitFilter apiRateLimitFilter,
+            JwtAuthenticationFilter jwtAuthenticationFilter)
             throws Exception {
 
         http
@@ -183,6 +191,7 @@ public class SecurityConfig implements WebMvcConfigurer {
 
                 // Insert your JWT filter before the built-in UsernamePasswordAuthenticationFilter.
                 // This ensures JWT auth happens early and sets the SecurityContext.
+                .addFilterBefore(apiRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
