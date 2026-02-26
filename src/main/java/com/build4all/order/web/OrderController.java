@@ -553,12 +553,30 @@ this.ownerSubscriptionGuard = ownerSubscriptionGuard;
      * Returns the user's orders in the Flutter “card” structure.
      */
     @GetMapping("/myorders")
-    @Operation(summary = "USER: List all my orders (card model)")
     public ResponseEntity<?> myOrders(@RequestHeader("Authorization") String auth) {
         Long userId = jwt.extractId(strip(auth));
-        var rows = orderItemRepo.findUserOrderCards(userId);
-        var shaped = rows.stream().map(this::toUserCardShape).toList();
-        return ResponseEntity.ok(shaped);
+
+        var cards = orderRepo.findUserOrderCardsGrouped(userId);
+
+        // ✅ attach payment info (UNPAID / PARTIAL / PAID) using your ledger
+        Map<Long, BigDecimal> totals = new HashMap<>();
+        for (var c : cards) {
+            Long orderId = ((Number)c.get("orderId")).longValue();
+            BigDecimal total = (BigDecimal) c.getOrDefault("totalPrice", BigDecimal.ZERO);
+            totals.put(orderId, total);
+        }
+
+        var payByOrderId = paymentRead.summariesForOrders(totals);
+
+        for (var c : cards) {
+            Long orderId = ((Number)c.get("orderId")).longValue();
+            var ps = payByOrderId.get(orderId);
+            c.put("payment", paymentToMap(ps));          // {paymentState, paidAmount, ...}
+            c.put("fullyPaid", ps != null && ps.isFullyPaid());
+            c.put("orderStatusUi", titleCaseStatus(String.valueOf(c.get("orderStatus"))));
+        }
+
+        return ResponseEntity.ok(cards);
     }
 
     /**
@@ -568,11 +586,10 @@ this.ownerSubscriptionGuard = ownerSubscriptionGuard;
      * - CANCEL_REQUESTED (because user still sees it as “pending resolution”)
      */
     @GetMapping("/myorders/pending")
-    @Operation(summary = "USER: List my pending orders (PENDING + CANCEL_REQUESTED)")
     public ResponseEntity<?> myPending(@RequestHeader("Authorization") String auth) {
         Long userId = jwt.extractId(strip(auth));
-        var rows = orderItemRepo.findUserOrderCardsByStatuses(userId, List.of("PENDING", "CANCEL_REQUESTED"));
-        return ResponseEntity.ok(rows.stream().map(this::toUserCardShape).toList());
+        var cards = orderRepo.findUserOrderCardsGroupedByStatuses(userId, List.of("PENDING", "CANCEL_REQUESTED"));
+        return ResponseEntity.ok(cards);
     }
 
     /** GET /api/orders/myorders/completed */
@@ -584,6 +601,59 @@ this.ownerSubscriptionGuard = ownerSubscriptionGuard;
         return ResponseEntity.ok(rows.stream().map(this::toUserCardShape).toList());
     }
 
+    
+    @GetMapping("/myorders/{orderId}")
+    public ResponseEntity<?> myOrderDetails(@RequestHeader("Authorization") String auth,
+                                            @PathVariable Long orderId) {
+
+        Long userId = jwt.extractId(strip(auth));
+
+        // ✅ IMPORTANT: fetch order + items in ONE query
+        Order order = orderRepo.findByIdAndUserIdWithItems(orderId, userId)
+                .orElseThrow(() -> new NoSuchElementException("Order not found"));
+
+        // ✅ Convert status FK to STRING (avoid lazy serialization)
+        String statusName = (order.getStatus() != null) ? order.getStatus().getName() : null;
+
+        // ✅ payment summary
+        var ps = paymentRead.summaryForOrder(order.getId(), order.getTotalPrice());
+
+        Map<String, Object> header = new LinkedHashMap<>();
+        header.put("orderId", order.getId());
+        header.put("orderDate", order.getOrderDate());
+        header.put("orderStatus", statusName);
+        header.put("orderStatusUi", titleCaseStatus(statusName));
+        header.put("totalPrice", order.getTotalPrice());
+        header.put("fullyPaid", ps.isFullyPaid());
+        header.put("payment", paymentToMap(ps));
+
+        List<Map<String, Object>> items = new ArrayList<>();
+        if (order.getOrderItems() != null) {
+            for (OrderItem oi : order.getOrderItems()) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("orderItemId", oi.getId());
+                row.put("quantity", oi.getQuantity());
+                row.put("unitPrice", oi.getPrice());
+
+                Object it = oi.getItem();
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("itemId", it != null ? tryGet(it, "getId") : null);
+                item.put("itemName", it != null ? tryGet(it, "getName", "getItemName", "getTitle") : null);
+                item.put("imageUrl", it != null ? tryGet(it, "getImageUrl", "getImage", "getImagePath") : null);
+                item.put("location", it != null ? tryGet(it, "getLocation", "getAddress", "getPlace") : null);
+                item.put("startDatetime", it != null ? tryGet(it, "getStartDatetime", "getStartDateTime", "getStartAt") : null);
+
+                row.put("item", item);
+                items.add(row);
+            }
+        }
+
+        return ResponseEntity.ok(Map.of(
+                "order", header,
+                "items", items,
+                "itemsCount", items.size()
+        ));
+    }
     /** GET /api/orders/myorders/canceled */
     @GetMapping("/myorders/canceled")
     @Operation(summary = "USER: List my canceled orders")

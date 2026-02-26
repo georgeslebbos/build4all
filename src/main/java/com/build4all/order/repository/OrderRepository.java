@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -131,6 +132,51 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
            WHERE o.id = :id
            """)
     Optional<Order> findByIdWithItems(@Param("id") Long id);
+    
+    
+    @Query("""
+            select new map(
+                o.id as orderId,
+                o.orderDate as orderDate,
+                o.status.name as orderStatus,
+                o.totalPrice as totalPrice,
+                count(oi.id) as linesCount,
+                coalesce(sum(oi.quantity), 0) as itemsCount,
+                min(i.imageUrl) as previewImageUrl,
+                min(i.name) as previewItemName
+            )
+            from Order o
+            left join o.orderItems oi
+            left join oi.item i
+            where o.user.id = :userId
+            group by o.id, o.orderDate, o.status.name, o.totalPrice
+            order by o.orderDate desc
+        """)
+        List<Map<String,Object>> findUserOrderCardsGrouped(@Param("userId") Long userId);
+
+        @Query("""
+            select new map(
+                o.id as orderId,
+                o.orderDate as orderDate,
+                o.status.name as orderStatus,
+                o.totalPrice as totalPrice,
+                count(oi.id) as linesCount,
+                coalesce(sum(oi.quantity), 0) as itemsCount,
+                min(i.imageUrl) as previewImageUrl,
+                min(i.name) as previewItemName
+            )
+            from Order o
+            left join o.orderItems oi
+            left join oi.item i
+            where o.user.id = :userId
+              and upper(o.status.name) in :statuses
+            group by o.id, o.orderDate, o.status.name, o.totalPrice
+            order by o.orderDate desc
+        """)
+        List<Map<String,Object>> findUserOrderCardsGroupedByStatuses(
+                @Param("userId") Long userId,
+                @Param("statuses") List<String> statuses
+        );
 
     /**
      * Quick recent list (top 5) for a user.
@@ -184,6 +230,19 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
            """)
     List<Order> findAllByBusinessId(@Param("businessId") Long businessId);
 
+    
+ // OrderRepository.java
+    @Query("""
+    	    select distinct o
+    	    from Order o
+    	    left join fetch o.status s
+    	    left join fetch o.orderItems oi
+    	    left join fetch oi.item i
+    	    where o.id = :orderId
+    	      and o.user.id = :userId
+    	""")
+    	Optional<Order> findByIdAndUserIdWithItems(@Param("orderId") Long orderId,
+    	                                          @Param("userId") Long userId);
     /* =========================================================================================
        PUBLIC marketplace / discovery use case (existing)
        ========================================================================================= */

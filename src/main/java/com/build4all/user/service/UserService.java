@@ -318,6 +318,7 @@ public class UserService {
             	        Map.of("field", "username")
             	);
             }
+            
             user.setUsername(newU);
         }
 

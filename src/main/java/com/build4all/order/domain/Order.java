@@ -83,10 +83,9 @@ public class Order {
      * Stored as a foreign key to order_status table (status_id).
      * Examples: PENDING, COMPLETED, CANCELED, REFUNDED, ...
      */
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "status_id", nullable = false)
     private OrderStatus status;
-
     /**
      * Grand total amount for the order (items + shipping + taxes - discount).
      * precision=10, scale=2 => up to 99999999.99 (depends on DB)
