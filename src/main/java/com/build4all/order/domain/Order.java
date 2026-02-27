@@ -123,6 +123,12 @@ public class Order {
     /** City in shipping address (optional) */
     @Column(name = "shipping_city")
     private String shippingCity;
+    
+    
+    @Column(name = "shipping_full_name", length = 200)
+    private String shippingFullName;
+
+  
 
     /** Postal/ZIP code (optional) */
     @Column(name = "shipping_postal_code")
@@ -224,6 +230,9 @@ public class Order {
 
     public List<OrderItem> getOrderItems() { return orderItems; }
     public void setOrderItems(List<OrderItem> orderItems) { this.orderItems = orderItems; }
+    
+    public String getShippingFullName() { return shippingFullName; }
+    public void setShippingFullName(String shippingFullName) { this.shippingFullName = shippingFullName; }
 
     public Country getShippingCountry() {
         return shippingCountry;

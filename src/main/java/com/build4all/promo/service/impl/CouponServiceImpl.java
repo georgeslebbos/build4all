@@ -82,6 +82,25 @@ public class CouponServiceImpl implements CouponService {
 
         return toResponse(coupon);
     }
+    
+    
+    @Override
+    public void consumeOrThrow(Long ownerProjectId, String code) {
+        if (ownerProjectId == null) throw new IllegalArgumentException("ownerProjectId is required");
+        if (code == null || code.isBlank()) throw new IllegalArgumentException("coupon code is required");
+
+        int updated = couponRepository.consumeIfAvailable(ownerProjectId, code.trim());
+        if (updated != 1) {
+            throw new IllegalArgumentException("Coupon max uses reached (or coupon inactive)");
+        }
+    }
+
+    @Override
+    public void releaseOne(Long ownerProjectId, String code) {
+        if (ownerProjectId == null) return;
+        if (code == null || code.isBlank()) return;
+        couponRepository.releaseOne(ownerProjectId, code.trim());
+    }
 
     /* ============================
        UPDATE / DELETE / GET / LIST

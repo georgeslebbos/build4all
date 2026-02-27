@@ -28,6 +28,9 @@ public interface CouponService {
      * ✅ Tenant-scoped get.
      */
     Coupon get(Long ownerProjectId, Long id);
+    
+    void consumeOrThrow(Long ownerProjectId, String code);
+    void releaseOne(Long ownerProjectId, String code); // optional
 
     /**
      * List all coupons for a given ownerProjectId (one app).

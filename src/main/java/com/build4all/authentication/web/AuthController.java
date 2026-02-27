@@ -34,13 +34,16 @@ import com.build4all.role.domain.Role;
 import com.build4all.role.repository.RoleRepository;
 
 import com.build4all.security.JwtUtil;
-
+import com.build4all.security.TenantContext;
+import com.build4all.security.refresh.service.AuthRefreshTokenService;
+import com.build4all.security.service.AuthTokenRevocationService;
 import com.build4all.user.domain.UserStatus;
 import com.build4all.user.domain.Users;
 import com.build4all.user.repository.UserStatusRepository;
 import com.build4all.user.repository.UsersRepository;
 import com.build4all.user.service.UserService;
 
+import io.jsonwebtoken.Claims;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -89,7 +92,8 @@ public class AuthController {
     @Autowired private BusinessService businessService;
     @Autowired private AdminUserService adminUserService;
     @Autowired private UsersRepository userRepository;
-
+    @Autowired private AuthTokenRevocationService tokenRevocationService;
+    @Autowired private AuthRefreshTokenService refreshTokenService;
 
     @Autowired private RoleRepository roleRepository;
 
@@ -114,6 +118,9 @@ public class AuthController {
     @Autowired private LicensingService licensingService;
 
 
+    
+    public static class RefreshRequest { public String refreshToken; }
+    public static class LogoutRequest { public String refreshToken; }
     /* =====================================================================================
      *  USER REGISTRATION (OWNER-LINKED / MULTI-TENANT)
      *  Steps: send-verification -> verify email/phone -> complete-profile
@@ -205,6 +212,102 @@ public class AuthController {
 
         // ✅ Let global handler return proper ApiException (409 + code + details.pendingId)
         return sendVerification(email, phoneNumber, password, ownerProjectLinkId);
+    }
+    
+    
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refresh(@RequestBody RefreshRequest req) {
+        try {
+            if (req == null || req.refreshToken == null || req.refreshToken.isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Missing refreshToken"));
+            }
+
+            var rotated = refreshTokenService.rotate(req.refreshToken);
+
+            String type = rotated.subjectType();
+            Long id = rotated.subjectId();
+            Long ownerProjectId = rotated.ownerProjectId();
+
+            String accessToken;
+
+            switch (type) {
+                case "USER" -> {
+                    if (ownerProjectId != null) TenantContext.setOwnerProjectId(ownerProjectId);
+                    Users u = userRepository.findById(id).orElseThrow(() -> new RuntimeException("User not found"));
+                    accessToken = jwtUtil.generateToken(u, ownerProjectId);
+                }
+                case "BUSINESS" -> {
+                    if (ownerProjectId != null) TenantContext.setOwnerProjectId(ownerProjectId);
+                    Businesses b = businessRepository.findById(id).orElseThrow(() -> new RuntimeException("Business not found"));
+                    accessToken = jwtUtil.generateToken(b);
+                }
+                case "ADMIN" -> {
+                    AdminUser a = adminUserService.findById(id).orElseThrow(() -> new RuntimeException("Admin not found"));
+                    accessToken = jwtUtil.generateToken(a, ownerProjectId);
+                }
+                default -> {
+                    return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid refresh subject"));
+                }
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "token", accessToken,                 // ✅ keep old key
+                    "accessToken", accessToken,           // optional
+                    "refreshToken", rotated.newRefreshToken()
+            ));
+
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Refresh failed"));
+        } finally {
+            TenantContext.clear();
+        }
+    }
+    @PostMapping("/logout")
+    public ResponseEntity<?> logout(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader,
+            @RequestBody(required = false) LogoutRequest body
+    ) {
+        try {
+            // (A) revoke access فورًا (مثل ما عندك)
+            if (authHeader != null && !authHeader.isBlank()) {
+                String token = authHeader.replaceFirst("(?i)^Bearer\\s+", "").trim();
+                if (jwtUtil.validateToken(token)) {
+                    Claims claims = jwtUtil.extractAllClaims(token);
+                    String role = claims.get("role", String.class);
+                    Long id = asLong(claims.get("id"));
+
+                    if (role != null && id != null) {
+                        String roleUpper = role.toUpperCase();
+                        String subjectType = switch (roleUpper) {
+                            case "USER" -> "USER";
+                            case "BUSINESS" -> "BUSINESS";
+                            case "SUPER_ADMIN", "OWNER", "MANAGER" -> "ADMIN";
+                            default -> null;
+                        };
+                        if (subjectType != null) tokenRevocationService.revokeNow(subjectType, id);
+                    }
+                }
+            }
+
+            // (B) revoke refresh (session)
+            if (body != null && body.refreshToken != null && !body.refreshToken.isBlank()) {
+                refreshTokenService.revoke(body.refreshToken);
+            }
+
+            return ResponseEntity.ok(Map.of("message", "Logged out"));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Logout failed"));
+        }
+    }
+    
+    
+    private Long asLong(Object v) {
+        if (v == null) return null;
+        if (v instanceof Long l) return l;
+        if (v instanceof Integer i) return i.longValue();
+        if (v instanceof Number n) return n.longValue();
+        try { return Long.parseLong(v.toString()); } catch (Exception e) { return null; }
     }
     
     @PostMapping("/user/verify-phone-code")
@@ -364,6 +467,9 @@ public class AuthController {
 
         // ✅ IMPORTANT: with strict JwtUtil, USER token MUST include tenant
         String token = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
+        String refreshToken = refreshTokenService.issue("USER", existingUser.getId(), ownerProjectLinkId);
+
+     
 
         Map<String, Object> userData = new HashMap<>();
         userData.put("id", existingUser.getId());
@@ -377,6 +483,7 @@ public class AuthController {
         return ResponseEntity.ok(Map.of(
                 "message", "User login successful",
                 "token", token,
+                "refreshToken", refreshToken,
                 "user", userData,
                 "wasInactive", false
         ));
@@ -496,6 +603,9 @@ public class AuthController {
 
         // ✅ IMPORTANT: with strict JwtUtil, USER token MUST include tenant
         String token = jwtUtil.generateToken(user, ownerProjectLinkId);
+        String refreshToken = refreshTokenService.issue("USER", user.getId(), ownerProjectLinkId);
+
+        
 
         Map<String, Object> userData = new HashMap<>();
         userData.put("id", user.getId());
@@ -506,11 +616,13 @@ public class AuthController {
         userData.put("profilePictureUrl", user.getProfilePictureUrl());
         userData.put("ownerProjectLinkId", ownerProjectLinkId);
 
-        return ResponseEntity.ok(Map.of(
-                "message", "Account reactivated successfully",
-                "token", token,
-                "user", userData
-        ));
+      
+        		return ResponseEntity.ok(Map.of(
+                        "message", "Account reactivated successfully",
+                        "token", token,
+                        "refreshToken", refreshToken,
+                        "user", userData
+                ));
     }
 
     /* =====================================================================================
@@ -828,6 +940,9 @@ public class AuthController {
         }
 
         String token = jwtUtil.generateToken(admin, ownerProjectId);
+        String refreshToken = refreshTokenService.issue("ADMIN", admin.getAdminId(), ownerProjectId);
+
+      
 
         Map<String, Object> managerData = new HashMap<>();
         managerData.put("id", admin.getAdminId());
@@ -846,6 +961,7 @@ public class AuthController {
         return ResponseEntity.ok(Map.of(
                 "message", "Manager login successful",
                 "token", token,
+                "refreshToken", refreshToken,
                 "manager", managerData,
                 "business", businessData,
                 "ownerProjectId", ownerProjectId
@@ -882,7 +998,9 @@ public class AuthController {
 
         // ✅ SUPER_ADMIN is global. ownerProjectId is optional.
         String token = jwtUtil.generateToken(admin, null);
+        String refreshToken = refreshTokenService.issue("ADMIN", admin.getAdminId(), null);
 
+      
         Map<String, Object> adminData = new HashMap<>();
         adminData.put("id", admin.getAdminId());
         adminData.put("username", admin.getUsername());
@@ -894,6 +1012,7 @@ public class AuthController {
         return ResponseEntity.ok(Map.of(
                 "message", "Super Admin login successful",
                 "token", token,
+                "refreshToken", refreshToken,
                 "admin", adminData
         ));
     }
@@ -1065,7 +1184,26 @@ public class AuthController {
                     "Access denied for this role");
         }
 
-        String token = jwtUtil.generateToken(admin);
+        Long ownerProjectId = null;
+
+        if ("OWNER".equalsIgnoreCase(role)) {
+            List<AdminUserProject> links = adminUserProjectRepo.findByAdmin_AdminId(admin.getAdminId());
+            if (links == null || links.isEmpty()) {
+                return authError(HttpStatus.BAD_REQUEST, "OWNER_NO_APP",
+                        "Owner has no AdminUserProject link.");
+            }
+            ownerProjectId = links.get(0).getId();
+        } else if ("MANAGER".equalsIgnoreCase(role)) {
+            if (admin.getBusiness() != null && admin.getBusiness().getOwnerProjectLink() != null) {
+                ownerProjectId = admin.getBusiness().getOwnerProjectLink().getId();
+            }
+        }
+
+        // SUPER_ADMIN stays null
+        String token = jwtUtil.generateToken(admin, ownerProjectId);
+        String refreshToken = refreshTokenService.issue("ADMIN", admin.getAdminId(), ownerProjectId);
+
+       
 
         Map<String, Object> adminData = new HashMap<>();
         adminData.put("id", admin.getAdminId());
@@ -1078,10 +1216,11 @@ public class AuthController {
         return ResponseEntity.ok(Map.of(
                 "message", "Login successful",
                 "token", token,
+                "refreshToken", refreshToken,
                 "role", role,
+                "ownerProjectId", ownerProjectId,
                 "admin", adminData
         ));
-        
         
         
     }

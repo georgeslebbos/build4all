@@ -32,6 +32,7 @@ import org.springframework.stereotype.Service;
 
 import com.build4all.payment.dto.StartPaymentResponse;
 import com.build4all.payment.service.PaymentOrchestratorService;
+import com.build4all.promo.service.CouponService;
 import com.build4all.payment.repository.PaymentMethodRepository;
 import com.build4all.payment.domain.PaymentMethod;
 
@@ -97,6 +98,8 @@ public class OrderServiceImpl implements OrderService {
 
     /** Region lookup (shipping address) */
     private final RegionRepository regionRepo;
+    
+    private final CouponService couponService;
 
     /** Cart items delete/cleanup after checkout */
     private final CartItemRepository cartItemRepo;
@@ -154,21 +157,26 @@ public class OrderServiceImpl implements OrderService {
      * Constructor injection for all dependencies.
      * Spring will auto-wire these based on beans/repositories.
      */
-    public OrderServiceImpl(OrderItemRepository orderItemRepo,
-                            OrderRepository orderRepo,
-                            UsersRepository usersRepo,
-                            ItemRepository itemRepo,
-                            CurrencyRepository currencyRepo,
-                            OrderStatusRepository orderStatusRepo,
-                            CountryRepository countryRepo,
-                            RegionRepository regionRepo,
-                            CheckoutPricingService checkoutPricingService,
-                            CartRepository cartRepo,
-                            CartItemRepository cartItemRepo,
-                            PaymentOrchestratorService paymentOrchestrator,
-                            PaymentMethodRepository paymentMethodRepo,
-                            OrderPaymentReadService paymentRead,
-                            OrderPaymentWriteService paymentWrite) {
+    public OrderServiceImpl(
+    	    OrderItemRepository orderItemRepo,
+    	    OrderRepository orderRepo,
+    	    UsersRepository usersRepo,
+    	    ItemRepository itemRepo,
+    	    CurrencyRepository currencyRepo,
+    	    OrderStatusRepository orderStatusRepo,
+    	    CountryRepository countryRepo,
+    	    RegionRepository regionRepo,
+    	    CheckoutPricingService checkoutPricingService,
+    	    CartRepository cartRepo,
+    	    CartItemRepository cartItemRepo,
+    	    PaymentOrchestratorService paymentOrchestrator,
+    	    PaymentMethodRepository paymentMethodRepo,
+    	    OrderPaymentReadService paymentRead,
+    	    OrderPaymentWriteService paymentWrite,
+    	    CouponService couponService // ✅ ADD
+    	) {
+    	  
+    	   this.couponService = couponService; // ✅ ADD
         this.orderItemRepo = orderItemRepo;
         this.orderRepo = orderRepo;
         this.usersRepo = usersRepo;
@@ -598,6 +606,7 @@ public class OrderServiceImpl implements OrderService {
                     .orElseThrow(() -> new IllegalStateException("Order not found"));
             releaseStockForOrder(full);
 
+            releaseCouponForOrderIfAny(full);
             String provider = (order.getPaymentMethod() == null || order.getPaymentMethod().getName() == null)
                     ? "CASH"
                     : order.getPaymentMethod().getName();
@@ -894,6 +903,8 @@ public class OrderServiceImpl implements OrderService {
             throw new IllegalArgumentException("currencyId is required");
         if (request.getPaymentMethod() == null || request.getPaymentMethod().isBlank())
             throw new IllegalArgumentException("paymentMethod is required");
+        
+        
 
         // Normalize payment method code (STRIPE/CASH/PAYPAL...)
         // We store codes in DB and process them in uppercase consistently.
@@ -984,7 +995,19 @@ public class OrderServiceImpl implements OrderService {
                 shippingRegion = regionRepo.findById(addr.getRegionId())
                         .orElseThrow(() -> new IllegalArgumentException("Shipping region not found"));
             }
+            
+            
+            
         }
+        
+        String shippingName = (addr.getFullName() != null) ? addr.getFullName().trim() : "";
+        if (shippingName.isBlank()) {
+            String fn = user.getFirstName() == null ? "" : user.getFirstName().trim();
+            String ln = user.getLastName() == null ? "" : user.getLastName().trim();
+            String full = (fn + " " + ln).trim();
+            shippingName = full.isBlank() ? String.valueOf(user.getUsername()) : full;
+        }
+     
 
         // ---- Delegate full pricing (shipping + tax + coupon) to CheckoutPricingService
         // This is the single place where totals are computed consistently.
@@ -994,11 +1017,19 @@ public class OrderServiceImpl implements OrderService {
                 request
         );
 
+     // ✅ Consume coupon usage (max uses) atomically
+        String couponCode = priced.getCouponCode(); // IMPORTANT: use priced, not request
+        if (couponCode != null && !couponCode.isBlank()) {
+            couponService.consumeOrThrow(ownerProjectId, couponCode);
+        }
+        
         // Attach PaymentMethod entity on order header
         // Ensures order stores which payment method was selected in checkout UI.
         PaymentMethod pmEntity = paymentMethodRepo.findByNameIgnoreCase(paymentMethodCode)
                 .orElseThrow(() -> new IllegalArgumentException("Payment method not found in platform: " + paymentMethodCode));
 
+        
+        
         // ---- Create Order header using priced totals ----
         // We always create the order BEFORE payment (server-driven flow).
         Order order = new Order();
@@ -1025,6 +1056,7 @@ public class OrderServiceImpl implements OrderService {
             order.setShippingMethodName(addr.getShippingMethodName());
             order.setShippingAddress(addr.getAddressLine());
             order.setShippingPhone(addr.getPhone());
+            order.setShippingFullName(shippingName);
         }
 
         // Pricing totals saved on header (auditing/reporting)
@@ -1442,6 +1474,27 @@ public class OrderServiceImpl implements OrderService {
             return order.getPaymentMethod().getName().trim().toUpperCase(Locale.ROOT);
         }
         return "CASH";
+    }
+    
+    
+    private Long resolveOwnerProjectIdFromOrder(Order order) {
+        if (order == null || order.getOrderItems() == null) return null;
+        for (OrderItem oi : order.getOrderItems()) {
+            if (oi == null || oi.getItem() == null || oi.getItem().getOwnerProject() == null) continue;
+            if (oi.getItem().getOwnerProject().getId() != null) return oi.getItem().getOwnerProject().getId();
+        }
+        return null;
+    }
+
+    private void releaseCouponForOrderIfAny(Order order) {
+        if (order == null) return;
+        String code = order.getCouponCode();
+        if (code == null || code.isBlank()) return;
+
+        Long ownerProjectId = resolveOwnerProjectIdFromOrder(order);
+        if (ownerProjectId == null) return;
+
+        couponService.releaseOne(ownerProjectId, code);
     }
 
 

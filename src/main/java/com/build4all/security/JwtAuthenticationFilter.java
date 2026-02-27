@@ -6,6 +6,7 @@ import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.repository.AdminUsersRepository;
 import com.build4all.business.domain.Businesses;
 import com.build4all.business.repository.BusinessesRepository;
+import com.build4all.security.service.AuthTokenRevocationService;
 
 import io.jsonwebtoken.Claims;
 
@@ -45,17 +46,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final UsersRepository usersRepository;
     private final AdminUsersRepository adminUsersRepository;
     private final BusinessesRepository businessesRepository;
+    private final AuthTokenRevocationService tokenRevocationService;
 
     public JwtAuthenticationFilter(
             JwtUtil jwtUtil,
             UsersRepository usersRepository,
             AdminUsersRepository adminUsersRepository,
-            BusinessesRepository businessesRepository
+            BusinessesRepository businessesRepository,
+            AuthTokenRevocationService tokenRevocationService
     ) {
         this.jwtUtil = jwtUtil;
         this.usersRepository = usersRepository;
         this.adminUsersRepository = adminUsersRepository;
         this.businessesRepository = businessesRepository;
+        this.tokenRevocationService = tokenRevocationService;
     }
 
     @Override
@@ -101,6 +105,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             Object principal = null;
             String roleUpper = roleName.toUpperCase();
+
+            // ✅ IMPORTANT: set tenant early for USER/BUSINESS before ANY tenant-scoped DB call
+            if (("USER".equals(roleUpper) || "BUSINESS".equals(roleUpper)) && ownerProjectId != null) {
+                TenantContext.setOwnerProjectId(ownerProjectId);
+            }
+
+            String subjectType = switch (roleUpper) {
+                case "USER" -> "USER";
+                case "BUSINESS" -> "BUSINESS";
+                case "SUPER_ADMIN", "OWNER", "MANAGER" -> "ADMIN";
+                default -> null;
+            };
+
+            // ✅ Revocation check (now runs in correct tenant context for USER/BUSINESS)
+            if (subjectType != null && idClaim != null && issuedAt != null) {
+                if (tokenRevocationService.isRevoked(subjectType, idClaim, issuedAt)) {
+                    SecurityContextHolder.clearContext();
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+            }
 
             switch (roleUpper) {
 

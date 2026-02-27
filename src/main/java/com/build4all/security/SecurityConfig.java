@@ -3,6 +3,8 @@ package com.build4all.security;
 import com.build4all.user.repository.UsersRepository;
 import com.build4all.admin.repository.AdminUsersRepository;      // 👈 NEW
 import com.build4all.business.repository.BusinessesRepository;  // 👈 NEW
+import com.build4all.security.service.AuthTokenRevocationService;
+
 import org.springframework.http.HttpMethod;
 
 import org.springframework.context.annotation.Bean;
@@ -105,13 +107,15 @@ public class SecurityConfig implements WebMvcConfigurer {
             JwtUtil jwtUtil,
             UsersRepository usersRepository,
             AdminUsersRepository adminUsersRepository,
-            BusinessesRepository businessesRepository
+            BusinessesRepository businessesRepository,
+            AuthTokenRevocationService tokenRevocationService
     ) {
         return new JwtAuthenticationFilter(
                 jwtUtil,
                 usersRepository,
                 adminUsersRepository,
-                businessesRepository
+                businessesRepository,
+                tokenRevocationService
         );
     }
 

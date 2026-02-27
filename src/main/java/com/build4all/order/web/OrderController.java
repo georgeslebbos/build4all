@@ -783,6 +783,7 @@ this.ownerSubscriptionGuard = ownerSubscriptionGuard;
             res.put("postalCode", null);
             res.put("address", null);
             res.put("phone", null);
+            res.put("fullName", null);
             return ResponseEntity.ok(res);
         }
 
@@ -801,6 +802,7 @@ this.ownerSubscriptionGuard = ownerSubscriptionGuard;
         res.put("postalCode", last.getShippingPostalCode());
         res.put("address", last.getShippingAddress());
         res.put("phone", last.getShippingPhone());
+        res.put("fullName", last.getShippingFullName());
 
         return ResponseEntity.ok(res);
     }
