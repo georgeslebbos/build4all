@@ -8,11 +8,13 @@ import com.build4all.catalog.repository.CategoryRepository;
 import com.build4all.notifications.service.EmailService;
 import com.build4all.role.domain.Role;
 import com.build4all.role.repository.RoleRepository;
+import com.build4all.user.domain.PendingEmailChange;
 import com.build4all.user.domain.PendingUser;
 import com.build4all.user.domain.UserCategories;
 import com.build4all.user.domain.UserStatus;
 import com.build4all.user.domain.Users;
 import com.build4all.user.dto.UserDto;
+import com.build4all.user.repository.PendingEmailChangeRepository;
 import com.build4all.user.repository.PendingUserRepository;
 import com.build4all.user.repository.UserCategoriesRepository;
 import com.build4all.user.repository.UserStatusRepository;
@@ -61,9 +63,32 @@ public class UserService {
     @Autowired private PendingUserRepository pendingUserRepository;
     @Autowired private UserStatusRepository userStatusRepository;
     @Autowired private RoleRepository roleRepository;
+    @Autowired private PendingEmailChangeRepository pendingEmailChangeRepository;
 
     /** Tenant link repository: AdminUserProject table (often called admin_user_project / aup). */
     @Autowired private AdminUserProjectRepository aupRepo;
+    
+    
+    private static final int EMAIL_CHANGE_TTL_MIN = 15;
+    private static final int EMAIL_CHANGE_MAX_ATTEMPTS = 5;
+    private static final int EMAIL_CHANGE_RESEND_COOLDOWN_SEC = 60;
+
+    private String generateOtp6() {
+        return String.format("%06d", new Random().nextInt(1_000_000));
+    }
+
+    private void sendEmailChangeOtp(String to, String code) {
+        String html = """
+            <html><body style="font-family: Arial; text-align:center; padding:20px">
+              <h2>Confirm your new email</h2>
+              <p>Use this code to verify your new email address:</p>
+              <h1 style="letter-spacing:6px">%s</h1>
+              <p>This code expires in <b>%d minutes</b>.</p>
+            </body></html>
+        """.formatted(code, EMAIL_CHANGE_TTL_MIN);
+
+        emailService.sendHtmlEmail(to, "Confirm your new email", html);
+    }
 
     private final EmailService emailService;
     public UserService(EmailService emailService) { this.emailService = emailService; }
@@ -122,6 +147,163 @@ public class UserService {
         if (ownerProjectLinkId == null) throw new IllegalArgumentException("ownerProjectLinkId is required");
         return aupRepo.findById(ownerProjectLinkId)
                 .orElseThrow(() -> new RuntimeException("AdminUserProject not found: " + ownerProjectLinkId));
+    }
+    
+    
+    @Transactional
+    public void requestEmailChange(
+            Long userId,
+            Long ownerProjectLinkId,
+            Long tokenUserId,
+            String newEmail
+    ) {
+        if (userId == null || ownerProjectLinkId == null)
+            throw new IllegalArgumentException("userId and ownerProjectLinkId are required");
+
+        if (tokenUserId == null || !userId.equals(tokenUserId))
+            throw new RuntimeException("Access denied");
+
+        if (newEmail == null || newEmail.isBlank())
+            throw new ApiException(HttpStatus.BAD_REQUEST, "EMAIL_REQUIRED", "New email is required", Map.of("field", "email"));
+
+        String normalized = newEmail.trim().toLowerCase();
+        validateEmailOrThrow(normalized);
+
+        Users user = getUserById(userId, ownerProjectLinkId); // tenant-safe
+        AdminUserProject link = linkById(ownerProjectLinkId);
+
+        // If same email -> nothing to do
+        if (user.getEmail() != null && user.getEmail().trim().equalsIgnoreCase(normalized)) {
+            return;
+        }
+
+        // tenant-safe uniqueness: allow if it's THIS user, reject if another user
+        Optional<Users> existing = userRepository.findByEmailIgnoreCaseAndOwnerProject_Id(normalized, ownerProjectLinkId);
+        if (existing.isPresent() && !Objects.equals(existing.get().getId(), userId)) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "EMAIL_ALREADY_USED",
+                    "Email already in use in this app.",
+                    Map.of("field", "email")
+            );
+        }
+
+        // Upsert pending change (1 pending per user per tenant)
+        PendingEmailChange pending = pendingEmailChangeRepository
+                .findByUser_IdAndOwnerProject_Id(userId, ownerProjectLinkId)
+                .orElseGet(PendingEmailChange::new);
+
+        String code = generateOtp6();
+        LocalDateTime now = LocalDateTime.now();
+
+        pending.setUser(user);
+        pending.setOwnerProject(link);
+        pending.setNewEmail(normalized);
+        pending.setCodeHash(passwordEncoder.encode(code)); // store hash, not raw
+        pending.setAttempts(0);
+        pending.setCreatedAt(now);
+        pending.setExpiresAt(now.plusMinutes(EMAIL_CHANGE_TTL_MIN));
+        pending.setLastSentAt(now);
+
+        pendingEmailChangeRepository.save(pending);
+
+        sendEmailChangeOtp(normalized, code);
+    }
+
+    @Transactional
+    public void verifyEmailChange(
+            Long userId,
+            Long ownerProjectLinkId,
+            Long tokenUserId,
+            String code
+    ) {
+        if (userId == null || ownerProjectLinkId == null)
+            throw new IllegalArgumentException("userId and ownerProjectLinkId are required");
+
+        if (tokenUserId == null || !userId.equals(tokenUserId))
+            throw new RuntimeException("Access denied");
+
+        if (code == null || code.isBlank())
+            throw new ApiException(HttpStatus.BAD_REQUEST, "CODE_REQUIRED", "Verification code is required", Map.of("field", "code"));
+
+        PendingEmailChange pending = pendingEmailChangeRepository
+                .findByUser_IdAndOwnerProject_Id(userId, ownerProjectLinkId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        "NO_PENDING_EMAIL_CHANGE",
+                        "No pending email change request found.",
+                        Map.of()
+                ));
+
+        LocalDateTime now = LocalDateTime.now();
+
+        // expired -> delete + fail (old email remains)
+        if (pending.getExpiresAt() != null && pending.getExpiresAt().isBefore(now)) {
+            pendingEmailChangeRepository.delete(pending);
+            throw new ApiException(HttpStatus.GONE, "CODE_EXPIRED", "Verification code expired. Request again.", Map.of());
+        }
+
+        // attempts protection
+        pending.setAttempts(pending.getAttempts() + 1);
+        if (pending.getAttempts() > EMAIL_CHANGE_MAX_ATTEMPTS) {
+            pendingEmailChangeRepository.delete(pending);
+            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "TOO_MANY_ATTEMPTS", "Too many attempts. Request a new code.", Map.of());
+        }
+
+        if (!passwordEncoder.matches(code.trim(), pending.getCodeHash())) {
+            pendingEmailChangeRepository.save(pending);
+            throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_CODE", "Invalid verification code.", Map.of("field", "code"));
+        }
+
+        // ✅ verified -> update real user email now
+        Users user = getUserById(userId, ownerProjectLinkId);
+        user.setEmail(pending.getNewEmail());
+        user.setUpdatedAt(now);
+        userRepository.save(user);
+
+        pendingEmailChangeRepository.delete(pending);
+    }
+
+    @Transactional
+    public void resendEmailChangeCode(
+            Long userId,
+            Long ownerProjectLinkId,
+            Long tokenUserId
+    ) {
+        if (tokenUserId == null || !userId.equals(tokenUserId))
+            throw new RuntimeException("Access denied");
+
+        PendingEmailChange pending = pendingEmailChangeRepository
+                .findByUser_IdAndOwnerProject_Id(userId, ownerProjectLinkId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        "NO_PENDING_EMAIL_CHANGE",
+                        "No pending email change request found.",
+                        Map.of()
+                ));
+
+        LocalDateTime now = LocalDateTime.now();
+
+        if (pending.getLastSentAt() != null &&
+                pending.getLastSentAt().plusSeconds(EMAIL_CHANGE_RESEND_COOLDOWN_SEC).isAfter(now)) {
+            throw new ApiException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "RESEND_COOLDOWN",
+                    "Please wait before resending the code.",
+                    Map.of("cooldownSeconds", EMAIL_CHANGE_RESEND_COOLDOWN_SEC)
+            );
+        }
+
+        String code = generateOtp6();
+        pending.setCodeHash(passwordEncoder.encode(code));
+        pending.setAttempts(0);
+        pending.setCreatedAt(now);
+        pending.setExpiresAt(now.plusMinutes(EMAIL_CHANGE_TTL_MIN));
+        pending.setLastSentAt(now);
+
+        pendingEmailChangeRepository.save(pending);
+
+        sendEmailChangeOtp(pending.getNewEmail(), code);
     }
 
     /* ====================== LOGIN (tenant-safe OPTIONAL) ===================== */

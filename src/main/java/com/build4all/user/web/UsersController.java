@@ -1,5 +1,6 @@
 package com.build4all.user.web;
 
+import com.build4all.common.errors.ApiException;
 import com.build4all.security.JwtUtil;
 import com.build4all.user.domain.UserStatus;
 import com.build4all.user.domain.Users;
@@ -39,6 +40,31 @@ public class UsersController {
 
     private final UserService userService;
     public UsersController(UserService userService) { this.userService = userService; }
+    
+    
+    private ResponseEntity<?> asResponse(ApiException e) {
+        HttpStatus status = HttpStatus.BAD_REQUEST;
+
+        // Avoid compile risk if ApiException methods differ
+        try {
+            var m = e.getClass().getMethod("getStatus");
+            Object s = m.invoke(e);
+            if (s instanceof HttpStatus hs) status = hs;
+        } catch (Exception ignore) {}
+
+        Object code = null;
+        Object details = null;
+
+        try { code = e.getClass().getMethod("getErrorCode").invoke(e); } catch (Exception ignore) {}
+        try { details = e.getClass().getMethod("getDetails").invoke(e); } catch (Exception ignore) {}
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", e.getMessage());
+        if (code != null) body.put("code", code);
+        if (details != null) body.put("details", details);
+
+        return ResponseEntity.status(status).body(body);
+    }
 
     /* =====================================================
        LIST ALL (tenant-scoped)
@@ -268,6 +294,10 @@ public class UsersController {
             @RequestParam String firstName,
             @RequestParam String lastName,
             @RequestParam(required = false) String username,
+
+            // ✅ NEW: email change must be verified
+            @RequestParam(required = false) String email,
+
             @RequestParam(required = false) Boolean isPublicProfile,
             @RequestParam(required = false) Boolean imageRemoved,
             @RequestPart(required = false) MultipartFile profileImage,
@@ -279,8 +309,22 @@ public class UsersController {
             }
 
             String jwt = token.substring(7).trim();
+
+            // ✅ good practice: validate token
+            if (!jwtUtil.validateToken(jwt)) {
+                return ResponseEntity.status(401).body(Map.of("error","Invalid or expired token"));
+            }
+
+            // ✅ tenant mismatch protection (same style as your GET /{id})
+            try {
+                jwtUtil.requireTenantMatch(jwt, ownerProjectLinkId);
+            } catch (RuntimeException e) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Tenant mismatch"));
+            }
+
             Long tokenUserId = jwtUtil.extractId(jwt); // ✅ userId from claim
 
+            // ✅ Update normal profile fields (NOT email)
             Users updated = userService.updateUserProfile(
                     id, ownerProjectLinkId, tokenUserId,
                     username, firstName, lastName,
@@ -288,11 +332,26 @@ public class UsersController {
                     imageRemoved
             );
 
+            boolean emailVerificationRequired = false;
 
-            return ResponseEntity.ok(Map.of(
-                    "message", "Profile updated successfully",
-                    "user", new UserDto(updated)
-            ));
+            // ✅ If email is sent -> request verification, but DO NOT update email now
+            if (email != null && !email.isBlank()) {
+                userService.requestEmailChange(id, ownerProjectLinkId, tokenUserId, email);
+                emailVerificationRequired = true;
+            }
+
+            Map<String, Object> resp = new LinkedHashMap<>();
+            resp.put("message", emailVerificationRequired
+                    ? "Profile updated. Verification code sent to new email."
+                    : "Profile updated successfully");
+            resp.put("emailVerificationRequired", emailVerificationRequired);
+            resp.put("user", new UserDto(updated)); // email will still be the OLD one until verify
+            if (emailVerificationRequired) resp.put("pendingEmail", email.trim());
+
+            return ResponseEntity.ok(resp);
+
+        } catch (ApiException e) {
+            return asResponse(e);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (RuntimeException e) {
@@ -302,18 +361,92 @@ public class UsersController {
                 return ResponseEntity.status(403).body(Map.of("error", msg));
             }
 
-            // ✅ duplicate username should be 409, not 404
             if (msg.toLowerCase().contains("username already")) {
                 return ResponseEntity.status(409).body(Map.of("error", msg));
             }
 
             return ResponseEntity.status(404).body(Map.of("error", msg));
-        }catch (Exception e) {
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", "Server error: " + e.getMessage()));
+        }
+    }
+    
+    @PostMapping("/{id}/email-change/verify")
+    public ResponseEntity<?> verifyEmailChange(
+            @PathVariable Long id,
+            @RequestParam Long ownerProjectLinkId,
+            @RequestBody Map<String, String> body,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String token
+    ) {
+        try {
+            if (token == null || !token.startsWith("Bearer ")) {
+                return ResponseEntity.status(401).body(Map.of("error","Missing or invalid token"));
+            }
+            String jwt = token.substring(7).trim();
+
+            if (!jwtUtil.validateToken(jwt)) {
+                return ResponseEntity.status(401).body(Map.of("error","Invalid or expired token"));
+            }
+
+            try {
+                jwtUtil.requireTenantMatch(jwt, ownerProjectLinkId);
+            } catch (RuntimeException e) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Tenant mismatch"));
+            }
+
+            Long tokenUserId = jwtUtil.extractId(jwt);
+            if (!Objects.equals(tokenUserId, id)) {
+                return ResponseEntity.status(403).body(Map.of("error", "Access denied"));
+            }
+
+            String code = body.get("code");
+            userService.verifyEmailChange(id, ownerProjectLinkId, tokenUserId, code);
+
+            return ResponseEntity.ok(Map.of("message", "Email updated successfully"));
+        } catch (ApiException e) {
+            return asResponse(e);
+        } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", "Server error: " + e.getMessage()));
         }
     }
 
+    @PostMapping("/{id}/email-change/resend")
+    public ResponseEntity<?> resendEmailChange(
+            @PathVariable Long id,
+            @RequestParam Long ownerProjectLinkId,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String token
+    ) {
+        try {
+            if (token == null || !token.startsWith("Bearer ")) {
+                return ResponseEntity.status(401).body(Map.of("error","Missing or invalid token"));
+            }
+            String jwt = token.substring(7).trim();
 
+            if (!jwtUtil.validateToken(jwt)) {
+                return ResponseEntity.status(401).body(Map.of("error","Invalid or expired token"));
+            }
+
+            try {
+                jwtUtil.requireTenantMatch(jwt, ownerProjectLinkId);
+            } catch (RuntimeException e) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Tenant mismatch"));
+            }
+
+            Long tokenUserId = jwtUtil.extractId(jwt);
+            if (!Objects.equals(tokenUserId, id)) {
+                return ResponseEntity.status(403).body(Map.of("error", "Access denied"));
+            }
+
+            userService.resendEmailChangeCode(id, ownerProjectLinkId, tokenUserId);
+
+            return ResponseEntity.ok(Map.of("message", "Verification code resent"));
+        } catch (ApiException e) {
+            return asResponse(e);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", "Server error: " + e.getMessage()));
+        }
+    }
+    
     @PostMapping("/verify-reset-code")
     public ResponseEntity<Map<String, String>> verifyCode(
             @RequestBody Map<String, String> body,
