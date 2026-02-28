@@ -191,6 +191,8 @@ public interface OrderService {
     CheckoutSummaryResponse checkout(Long userId, CheckoutRequest request);
 
 	CheckoutSummaryResponse checkoutFromCart(Long userId, @Valid CheckoutRequest request);
+	
+	CheckoutSummaryResponse quoteCheckoutFromCart(Long userId, CheckoutRequest request);
 
 	void failCashOrder(Long orderItemId, Long businessId, String reason);
 }

@@ -165,6 +165,12 @@ public class Order {
     @Column(name = "shipping_tax_total", precision = 10, scale = 2)
     private BigDecimal shippingTaxTotal = BigDecimal.ZERO;
 
+    
+    @Column(name = "order_code", length = 32, unique = true)
+    private String orderCode;
+
+    @Column(name = "order_seq")
+    private Long orderSeq;
     // --- Coupon ---
 
     /** Coupon code applied at checkout (if any) */
@@ -224,6 +230,12 @@ public class Order {
 
     public OrderStatus getStatus() { return status; }
     public void setStatus(OrderStatus status) { this.status = status; }
+    
+    public String getOrderCode() { return orderCode; }
+    public void setOrderCode(String orderCode) { this.orderCode = orderCode; }
+
+    public Long getOrderSeq() { return orderSeq; }
+    public void setOrderSeq(Long orderSeq) { this.orderSeq = orderSeq; }
 
     public BigDecimal getTotalPrice() { return totalPrice; }
     public void setTotalPrice(BigDecimal totalPrice) { this.totalPrice = totalPrice; }

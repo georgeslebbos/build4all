@@ -140,6 +140,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
                 o.orderDate as orderDate,
                 o.status.name as orderStatus,
                 o.totalPrice as totalPrice,
+                o.orderCode as orderCode,
                 count(oi.id) as linesCount,
                 coalesce(sum(oi.quantity), 0) as itemsCount,
                 min(i.imageUrl) as previewImageUrl,

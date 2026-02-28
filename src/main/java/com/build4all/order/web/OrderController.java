@@ -737,6 +737,16 @@ this.ownerSubscriptionGuard = ownerSubscriptionGuard;
         orderService.requestCancel(orderItemId, userId);
         return ResponseEntity.ok().build();
     }
+    
+    
+    @PostMapping("/checkout/quote")
+    public ResponseEntity<?> quote(@RequestHeader("Authorization") String auth,
+                                   @Valid @RequestBody CheckoutRequest request) {
+
+      Long userId = jwt.extractId(strip(auth));
+      CheckoutSummaryResponse quote = orderService.quoteCheckoutFromCart(userId, request);
+      return ResponseEntity.ok(quote);
+    }
 
     /**
      * GET /api/orders/myorders/last-shipping

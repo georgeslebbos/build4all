@@ -15,6 +15,7 @@ import com.build4all.catalog.repository.ItemRepository;
 import com.build4all.catalog.repository.RegionRepository;
 import com.build4all.order.domain.Order;
 import com.build4all.order.domain.OrderItem;
+import com.build4all.order.domain.OrderSequence;
 import com.build4all.order.domain.OrderStatus;
 import com.build4all.order.dto.CartLine;
 import com.build4all.order.dto.CheckoutRequest;
@@ -22,6 +23,7 @@ import com.build4all.order.dto.CheckoutSummaryResponse;
 import com.build4all.order.dto.ShippingAddressDTO;
 import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.order.repository.OrderRepository;
+import com.build4all.order.repository.OrderSequenceRepository;
 import com.build4all.order.repository.OrderStatusRepository;
 import com.build4all.order.service.CheckoutPricingService;
 import com.build4all.order.service.OrderService;
@@ -104,7 +106,8 @@ public class OrderServiceImpl implements OrderService {
     /** Cart items delete/cleanup after checkout */
     private final CartItemRepository cartItemRepo;
     
-    
+    private final OrderSequenceRepository orderSeqRepo;
+
 
     // Pricing engine: shipping + taxes + coupons
     /**
@@ -173,7 +176,9 @@ public class OrderServiceImpl implements OrderService {
     	    PaymentMethodRepository paymentMethodRepo,
     	    OrderPaymentReadService paymentRead,
     	    OrderPaymentWriteService paymentWrite,
-    	    CouponService couponService // ✅ ADD
+    	    CouponService couponService ,
+    	    OrderSequenceRepository orderSeqRepo
+    	    
     	) {
     	  
     	   this.couponService = couponService; // ✅ ADD
@@ -192,6 +197,7 @@ public class OrderServiceImpl implements OrderService {
         this.paymentMethodRepo = paymentMethodRepo;
         this.paymentRead = paymentRead;
         this.paymentWrite = paymentWrite;
+        this.orderSeqRepo = orderSeqRepo;
     }
 
     /* ===============================
@@ -891,7 +897,120 @@ public class OrderServiceImpl implements OrderService {
      * - Client needs BOTH:
      *   (1) publishableKey (pk_...) to initialize Stripe SDK
      *   (2) clientSecret (pi_..._secret_...) to confirm the payment
+     *   
+     *   
      */
+    
+    
+    private String appPrefix(Long ownerProjectId) {
+    	  
+    	  return "APP" + ownerProjectId;
+    	}
+
+    	private String formatCode(String prefix, long seq) {
+    	  return prefix + "-" + java.time.Year.now().getValue() + "-" + String.format("%06d", seq);
+    	}
+
+    	private synchronized void assignOrderCode(Order order, Long ownerProjectId) {
+    	  OrderSequence seq = orderSeqRepo.findForUpdate(ownerProjectId)
+    	      .orElseGet(() -> {
+    	        OrderSequence s = new OrderSequence();
+    	        s.setOwnerProjectId(ownerProjectId);
+    	        s.setNextSeq(1L);
+    	        return s;
+    	      });
+
+    	  long current = seq.getNextSeq();
+    	  seq.setNextSeq(current + 1);
+    	  orderSeqRepo.save(seq);
+
+    	  String code = formatCode(appPrefix(ownerProjectId), current);
+    	  order.setOrderSeq(current);
+    	  order.setOrderCode(code);
+    	}
+    	
+    	
+    	@Override
+    	public CheckoutSummaryResponse quoteCheckoutFromCart(Long userId, CheckoutRequest request) {
+
+    	  if (userId == null) throw new IllegalArgumentException("userId is required");
+    	  if (request == null) throw new IllegalArgumentException("request is required");
+    	  if (request.getCurrencyId() == null) throw new IllegalArgumentException("currencyId is required");
+
+    	  Cart cart = cartRepo.findByUser_IdAndStatus(userId, CartStatus.ACTIVE)
+    	      .orElseThrow(() -> new IllegalStateException("No active cart"));
+
+    	  if (cart.getItems() == null || cart.getItems().isEmpty())
+    	      throw new IllegalStateException("Cart is empty");
+
+    	  // build lines (server-trusted)
+    	  Map<Long, Integer> qtyByItemId = new LinkedHashMap<>();
+    	  for (CartItem ci : cart.getItems()) {
+    	    if (ci.getItem() == null || ci.getItem().getId() == null) continue;
+    	    if (ci.getQuantity() <= 0) continue;
+    	    qtyByItemId.merge(ci.getItem().getId(), ci.getQuantity(), Integer::sum);
+    	  }
+
+    	  if (qtyByItemId.isEmpty()) throw new IllegalStateException("Cart has no valid items");
+
+    	  List<CartLine> lines = new ArrayList<>();
+    	  Long ownerProjectId = null;
+
+    	  for (var e : qtyByItemId.entrySet()) {
+    	    Long itemId = e.getKey();
+    	    int qty = e.getValue();
+
+    	    Item item = itemRepo.findById(itemId)
+    	        .orElseThrow(() -> new IllegalArgumentException("Item not found: " + itemId));
+
+    	    // tenant isolation
+    	    if (item.getOwnerProject() == null || item.getOwnerProject().getId() == null)
+    	      throw new IllegalStateException("Item " + item.getId() + " has no ownerProject");
+
+    	    Long opId = item.getOwnerProject().getId();
+    	    if (ownerProjectId == null) ownerProjectId = opId;
+    	    else if (!ownerProjectId.equals(opId))
+    	      throw new IllegalArgumentException("All cart items must belong to the same app");
+
+    	    // stock/capacity validation (READ ONLY)
+    	    Integer stock = readStock(item);
+    	    if (stock != null) {
+    	      if (qty > stock) throw new IllegalStateException("Only " + stock + " left for itemId=" + itemId);
+    	    } else {
+    	      Integer cap = readSeatsCapacity(item);
+    	      if (cap != null) {
+    	        int alreadyReserved = orderItemRepo.sumQuantityByItemIdAndStatusNames(
+    	            item.getId(), List.of("PENDING", "COMPLETED", "CANCEL_REQUESTED")
+    	        );
+    	        int remaining = cap - alreadyReserved;
+    	        if (qty > remaining) throw new IllegalStateException("Only " + remaining + " seats left for itemId=" + itemId);
+    	      }
+    	    }
+
+    	    BigDecimal unit = resolveUnitPrice(item);
+    	    CartLine line = new CartLine();
+    	    line.setItemId(itemId);
+    	    line.setQuantity(qty);
+    	    line.setUnitPrice(unit);
+    	    line.setLineSubtotal(unit.multiply(BigDecimal.valueOf(qty)));
+    	    lines.add(line);
+    	  }
+
+    	  request.setLines(lines);
+
+    	  // pricing + coupon validation is done inside pricing service (validateForOrder)
+    	  CheckoutSummaryResponse priced = checkoutPricingService.priceCheckout(
+    	      ownerProjectId,
+    	      request.getCurrencyId(),
+    	      request
+    	  );
+
+    	  // IMPORTANT: do NOT consume coupon here
+    	  // IMPORTANT: do NOT start payment here
+    	  // IMPORTANT: do NOT create order here
+
+    	  return priced;
+    	}
     @Override
     public CheckoutSummaryResponse checkout(Long userId, CheckoutRequest request) {
 
@@ -1068,6 +1187,7 @@ public class OrderServiceImpl implements OrderService {
 
         // Save order header first:
         // - We need orderId to create PaymentTransaction (foreign key / reference)
+        assignOrderCode(order, ownerProjectId);
         order = orderRepo.save(order);
 
         // ---- Create OrderItem lines ----
@@ -1093,6 +1213,7 @@ public class OrderServiceImpl implements OrderService {
             // Timestamps
             oi.setCreatedAt(LocalDateTime.now());
             oi.setUpdatedAt(LocalDateTime.now());
+            
 
             orderItemRepo.save(oi);
         }
@@ -1358,6 +1479,9 @@ public class OrderServiceImpl implements OrderService {
         // Run existing checkout pipeline (pricing + order + payment + cart clear)
         return checkout(userId, request);
     }
+    
+    
+    
 
 
     /* -------------------- helpers (stock/capacity detection) -------------------- */
