@@ -135,49 +135,52 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     
     
     @Query("""
-            select new map(
-                o.id as orderId,
-                o.orderDate as orderDate,
-                o.status.name as orderStatus,
-                o.totalPrice as totalPrice,
-                o.orderCode as orderCode,
-                count(oi.id) as linesCount,
-                coalesce(sum(oi.quantity), 0) as itemsCount,
-                min(i.imageUrl) as previewImageUrl,
-                min(i.name) as previewItemName
-            )
-            from Order o
-            left join o.orderItems oi
-            left join oi.item i
-            where o.user.id = :userId
-            group by o.id, o.orderDate, o.status.name, o.totalPrice
-            order by o.orderDate desc
-        """)
-        List<Map<String,Object>> findUserOrderCardsGrouped(@Param("userId") Long userId);
-
-        @Query("""
-            select new map(
-                o.id as orderId,
-                o.orderDate as orderDate,
-                o.status.name as orderStatus,
-                o.totalPrice as totalPrice,
-                count(oi.id) as linesCount,
-                coalesce(sum(oi.quantity), 0) as itemsCount,
-                min(i.imageUrl) as previewImageUrl,
-                min(i.name) as previewItemName
-            )
-            from Order o
-            left join o.orderItems oi
-            left join oi.item i
-            where o.user.id = :userId
-              and upper(o.status.name) in :statuses
-            group by o.id, o.orderDate, o.status.name, o.totalPrice
-            order by o.orderDate desc
-        """)
-        List<Map<String,Object>> findUserOrderCardsGroupedByStatuses(
-                @Param("userId") Long userId,
-                @Param("statuses") List<String> statuses
-        );
+    	    select new map(
+    	        o.id as orderId,
+    	        o.orderDate as orderDate,
+    	        o.status.name as orderStatus,
+    	        o.totalPrice as totalPrice,
+    	        o.orderCode as orderCode,
+    	        o.orderSeq as orderSeq,
+    	        count(oi.id) as linesCount,
+    	        coalesce(sum(oi.quantity), 0) as itemsCount,
+    	        min(i.imageUrl) as previewImageUrl,
+    	        min(i.name) as previewItemName
+    	    )
+    	    from Order o
+    	    left join o.orderItems oi
+    	    left join oi.item i
+    	    where o.user.id = :userId
+    	    group by o.id, o.orderDate, o.status.name, o.totalPrice, o.orderCode, o.orderSeq
+    	    order by o.orderDate desc
+    	""")
+    	List<Map<String,Object>> findUserOrderCardsGrouped(@Param("userId") Long userId);
+    
+    @Query("""
+    	    select new map(
+    	        o.id as orderId,
+    	        o.orderDate as orderDate,
+    	        o.status.name as orderStatus,
+    	        o.totalPrice as totalPrice,
+    	        o.orderCode as orderCode,
+    	        o.orderSeq as orderSeq,
+    	        count(oi.id) as linesCount,
+    	        coalesce(sum(oi.quantity), 0) as itemsCount,
+    	        min(i.imageUrl) as previewImageUrl,
+    	        min(i.name) as previewItemName
+    	    )
+    	    from Order o
+    	    left join o.orderItems oi
+    	    left join oi.item i
+    	    where o.user.id = :userId
+    	      and upper(o.status.name) in :statuses
+    	    group by o.id, o.orderDate, o.status.name, o.totalPrice, o.orderCode, o.orderSeq
+    	    order by o.orderDate desc
+    	""")
+    	List<Map<String,Object>> findUserOrderCardsGroupedByStatuses(
+    	        @Param("userId") Long userId,
+    	        @Param("statuses") List<String> statuses
+    	);
 
     /**
      * Quick recent list (top 5) for a user.

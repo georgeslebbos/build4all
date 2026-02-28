@@ -494,6 +494,8 @@ this.ownerSubscriptionGuard = ownerSubscriptionGuard;
         header.put("shippingTaxTotal", order.getShippingTaxTotal());
         header.put("couponCode", order.getCouponCode());
         header.put("couponDiscount", order.getCouponDiscount());
+        header.put("orderCode", order.getOrderCode());
+        header.put("orderSeq", order.getOrderSeq());
 
         // ✅ NEW: payment summary (ledger-based)
         OrderPaymentReadService.PaymentSummary ps =
@@ -626,7 +628,9 @@ this.ownerSubscriptionGuard = ownerSubscriptionGuard;
         header.put("totalPrice", order.getTotalPrice());
         header.put("fullyPaid", ps.isFullyPaid());
         header.put("payment", paymentToMap(ps));
-
+        header.put("orderCode", order.getOrderCode());
+        header.put("orderSeq", order.getOrderSeq());
+        
         List<Map<String, Object>> items = new ArrayList<>();
         if (order.getOrderItems() != null) {
             for (OrderItem oi : order.getOrderItems()) {
@@ -743,11 +747,12 @@ this.ownerSubscriptionGuard = ownerSubscriptionGuard;
     public ResponseEntity<?> quote(@RequestHeader("Authorization") String auth,
                                    @Valid @RequestBody CheckoutRequest request) {
 
-      Long userId = jwt.extractId(strip(auth));
-      CheckoutSummaryResponse quote = orderService.quoteCheckoutFromCart(userId, request);
-      return ResponseEntity.ok(quote);
-    }
+        Long userId = jwt.extractId(strip(auth));
 
+        CheckoutSummaryResponse quote = orderService.quoteCheckoutFromCart(userId, request);
+
+        return ResponseEntity.ok(quote);
+    }
     /**
      * GET /api/orders/myorders/last-shipping
      *
@@ -933,6 +938,8 @@ this.ownerSubscriptionGuard = ownerSubscriptionGuard;
             OrderPaymentReadService.PaymentSummary ps = payByOrderId.get(o.getId());
             m.put("fullyPaid", ps != null && ps.isFullyPaid());
             m.put("payment", paymentToMap(ps));
+            m.put("orderCode", o.getOrderCode());
+            m.put("orderSeq", o.getOrderSeq());
 
             return m;
         }).toList();
@@ -1042,6 +1049,21 @@ this.ownerSubscriptionGuard = ownerSubscriptionGuard;
         assertOwnerCanAccessOrder(orderId, ownerProjectId);
 
         String statusCode = (body == null) ? null : String.valueOf(body.get("status"));
+        
+        
+       
+        String normalized = (statusCode == null) ? "" : statusCode.trim().toUpperCase(Locale.ROOT);
+
+        // ✅ Special behavior for REJECTED: rollback coupon + stock
+        if ("REJECTED".equals(normalized)) {
+            orderService.ownerRejectOrder(orderId, ownerProjectId, "OWNER_REJECTED");
+            return ResponseEntity.ok(Map.of(
+                    "orderId", orderId,
+                    "status", "REJECTED",
+                    "statusUi", titleCaseStatus("REJECTED")
+            ));
+        }
+
         OrderStatus newStatus = requireStatusByName(statusCode);
 
         // Load order with items (optional, but safe)
