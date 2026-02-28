@@ -35,6 +35,8 @@ public class CartLine {
 
     /** Item id to buy/book */
     private Long itemId;
+    
+    private String itemName;
 
     /** Quantity requested */
     private int quantity;
@@ -97,4 +99,7 @@ public class CartLine {
     public void setWeightKg(BigDecimal weightKg) {
         this.weightKg = weightKg;
     }
+    
+    public String getItemName() { return itemName; }
+    public void setItemName(String itemName) { this.itemName = itemName; }
 }

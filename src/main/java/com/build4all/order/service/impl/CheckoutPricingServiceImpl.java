@@ -183,13 +183,15 @@ public class CheckoutPricingServiceImpl implements CheckoutPricingService {
         // These line summaries are returned to the client/UI.
         // itemName is null here because this class focuses only on pricing.
         List<CheckoutLineSummary> lineSummaries = lines.stream()
-                .map(line -> new CheckoutLineSummary(
-                        line.getItemId(),
-                        null, // itemName can be filled on client or in another layer
-                        line.getQuantity(),
-                        line.getUnitPrice(),
-                        line.getLineSubtotal()
-                ))
+        		.map(line -> new CheckoutLineSummary(
+        		        line.getItemId(),
+        		        (line.getItemName() == null || line.getItemName().trim().isBlank())
+        		            ? null
+        		            : line.getItemName().trim(),
+        		        line.getQuantity(),
+        		        line.getUnitPrice(),
+        		        line.getLineSubtotal()
+        		))
                 .collect(Collectors.toList());
 
         // ---- Build response ----

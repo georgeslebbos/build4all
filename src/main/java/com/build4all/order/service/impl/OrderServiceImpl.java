@@ -680,6 +680,8 @@ public class OrderServiceImpl implements OrderService {
 
             Item item = itemRepo.findById(itemId)
                     .orElseThrow(() -> new IllegalArgumentException("Item not found: " + itemId));
+            
+            
 
             if (item.getOwnerProject() == null || item.getOwnerProject().getId() == null)
                 throw new IllegalStateException("Item " + item.getId() + " has no ownerProject");
@@ -704,6 +706,13 @@ public class OrderServiceImpl implements OrderService {
             BigDecimal unit = resolveUnitPrice(item);
 
             CartLine line = new CartLine();
+            String itemName = Optional.ofNullable(tryGet(item, "getName", "getItemName", "getTitle"))
+                    .map(Object::toString)
+                    .map(String::trim)
+                    .filter(x -> !x.isBlank())
+                    .orElse(null);
+
+            line.setItemName(itemName);
             line.setItemId(itemId);
             line.setQuantity(qty);
             line.setUnitPrice(unit);
@@ -760,6 +769,12 @@ public class OrderServiceImpl implements OrderService {
             Item item = itemRepo.findById(line.getItemId())
                     .orElseThrow(() -> new IllegalArgumentException("Item not found: " + line.getItemId()));
             itemCache.put(item.getId(), item);
+            
+            Object n = tryGet(item, "getName", "getItemName", "getTitle");
+            String itemName = (n == null) ? null : n.toString().trim();
+            if (itemName != null && !itemName.isBlank()) {
+                line.setItemName(itemName);
+            }
 
             if (item.getOwnerProject() == null || item.getOwnerProject().getId() == null)
                 throw new IllegalStateException("Item " + item.getId() + " has no ownerProject");
@@ -895,6 +910,8 @@ public class OrderServiceImpl implements OrderService {
 
         priced.setOrderId(order.getId());
         priced.setOrderDate(order.getOrderDate());
+        priced.setOrderCode(order.getOrderCode());
+        priced.setOrderSeq(order.getOrderSeq());
 
         Cart cart = cartRepo.findByUser_IdAndStatus(userId, CartStatus.ACTIVE)
                 .orElseThrow(() -> new IllegalStateException("No active cart"));
@@ -930,6 +947,8 @@ public class OrderServiceImpl implements OrderService {
 
             Long itemId = ci.getItem().getId();
             qtyByItemId.merge(itemId, qty, Integer::sum);
+            
+            
         }
 
         if (qtyByItemId.isEmpty())
@@ -938,6 +957,7 @@ public class OrderServiceImpl implements OrderService {
         List<CartLine> lines = new ArrayList<>();
         for (Map.Entry<Long, Integer> e : qtyByItemId.entrySet()) {
             CartLine line = new CartLine();
+           
             line.setItemId(e.getKey());
             line.setQuantity(e.getValue());
             lines.add(line);
@@ -961,6 +981,7 @@ public class OrderServiceImpl implements OrderService {
                 continue;
             }
 
+            
             Long opId = fresh.getOwnerProject().getId();
             if (ownerProjectId == null) ownerProjectId = opId;
             else if (!ownerProjectId.equals(opId)) {

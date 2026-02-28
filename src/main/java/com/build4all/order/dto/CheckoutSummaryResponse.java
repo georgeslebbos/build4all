@@ -96,6 +96,10 @@ public class CheckoutSummaryResponse {
      * Currency symbol (e.g., "$", "﷼").
      */
     private String currencySymbol;
+    
+    
+    private String orderCode;
+    private Long orderSeq;
 
     /* =========================================================
        LINE SUMMARIES (for UI)
@@ -242,6 +246,12 @@ public class CheckoutSummaryResponse {
 
     public BigDecimal getShippingTaxTotal() { return shippingTaxTotal; }
     public void setShippingTaxTotal(BigDecimal shippingTaxTotal) { this.shippingTaxTotal = shippingTaxTotal; }
+    
+    public String getOrderCode() { return orderCode; }
+    public void setOrderCode(String orderCode) { this.orderCode = orderCode; }
+
+    public Long getOrderSeq() { return orderSeq; }
+    public void setOrderSeq(Long orderSeq) { this.orderSeq = orderSeq; }
 
     public BigDecimal getGrandTotal() { return grandTotal; }
     public void setGrandTotal(BigDecimal grandTotal) { this.grandTotal = grandTotal; }

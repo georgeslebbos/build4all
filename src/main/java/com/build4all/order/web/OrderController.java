@@ -458,6 +458,9 @@ this.ownerSubscriptionGuard = ownerSubscriptionGuard;
         header.put("id", order.getId());
         header.put("orderDate", order.getOrderDate());
         header.put("totalPrice", order.getTotalPrice());
+        header.put("shippingFullName", order.getShippingFullName()); // ✅ add
+     // optional alias so frontend can pick it easily
+     header.put("customerName", order.getShippingFullName());
 
         // status (FK entity)
         String statusName = (order.getStatus() != null) ? order.getStatus().getName() : null;
@@ -934,6 +937,9 @@ this.ownerSubscriptionGuard = ownerSubscriptionGuard;
             m.put("status", st);
             m.put("statusUi", titleCaseStatus(st));
             m.put("itemsCount", (o.getOrderItems() == null) ? 0 : o.getOrderItems().size());
+            m.put("fullName", o.getShippingFullName()); // ✅ for list cards
+         
+         m.put("shippingFullName", o.getShippingFullName());
 
             OrderPaymentReadService.PaymentSummary ps = payByOrderId.get(o.getId());
             m.put("fullyPaid", ps != null && ps.isFullyPaid());
@@ -973,7 +979,9 @@ this.ownerSubscriptionGuard = ownerSubscriptionGuard;
             m.put("status", st);
             m.put("statusUi", titleCaseStatus(st));
             m.put("itemsCount", (o.getOrderItems() == null) ? 0 : o.getOrderItems().size());
-
+            m.put("fullName", o.getShippingFullName()); // ✅ for list cards
+         
+         m.put("shippingFullName", o.getShippingFullName());
             OrderPaymentReadService.PaymentSummary ps = payByOrderId.get(o.getId());
             m.put("fullyPaid", ps != null && ps.isFullyPaid());
             m.put("payment", paymentToMap(ps));
@@ -1012,6 +1020,9 @@ this.ownerSubscriptionGuard = ownerSubscriptionGuard;
             m.put("status", st);
             m.put("statusUi", titleCaseStatus(st));
             m.put("itemsCount", (o.getOrderItems() == null) ? 0 : o.getOrderItems().size());
+            m.put("fullName", o.getShippingFullName()); // ✅ for list cards
+         
+         m.put("shippingFullName", o.getShippingFullName());
 
             OrderPaymentReadService.PaymentSummary ps = payByOrderId.get(o.getId());
             m.put("fullyPaid", ps != null && ps.isFullyPaid());
