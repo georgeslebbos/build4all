@@ -20,7 +20,9 @@ public class ApiException extends RuntimeException {
         this.details = details;
     }
 
-    public HttpStatus getStatus() { return status; }
+   
+
+	public HttpStatus getStatus() { return status; }
     public String getCode() { return code; }
     public Map<String, Object> getDetails() { return details; }
 }

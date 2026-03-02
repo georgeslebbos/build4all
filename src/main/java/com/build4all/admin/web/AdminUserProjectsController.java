@@ -3,6 +3,9 @@ package com.build4all.admin.web;
 import com.build4all.admin.dto.AdminAppAssignmentRequest;
 import com.build4all.admin.dto.AdminAppAssignmentResponse;
 import com.build4all.admin.service.AdminUserProjectService;
+import com.build4all.security.JwtUtil;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -11,225 +14,356 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-@RestController
-@RequestMapping("/api/admin-users/{adminId}")
 /**
- * AdminUserProjectsController
+ * AdminUserProjectsController (SECURED)
  *
- * What this controller is about:
- * - It manages the relationship "Owner/Admin (adminId) -> Project (projectId) -> App (slug)".
- * - In your DB model, this is mainly represented by the AdminUserProject entity/table.
+ * Fix applied:
+ * ✅ We do NOT accept adminId from URL anymore (prevents IDOR/BOLA).
+ * ✅ We extract adminId from Authorization Bearer token.
  *
- * Why "App-aware"?
- * - One owner can have multiple apps under the SAME project.
- * - Each app is identified by a unique "slug" within (adminId, projectId).
- *   Example:
- *     (adminId=10, projectId=5, slug="shop")
- *     (adminId=10, projectId=5, slug="booking")
+ * Who can access:
+ * - OWNER / ADMIN / SUPER_ADMIN (whatever you treat as "admin-side roles")
  *
- * Return format:
- * - Most endpoints return AdminAppAssignmentResponse which is a DTO containing app metadata:
- *   project info, app name, slug, status, license, validity, theme, artifact URLs, logo, currency.
- *
- * Note:
- * - This controller does not include explicit JWT checks. Usually, authorization is enforced via
- *   Spring Security filters and method security elsewhere.
+ * Routes:
+ * - /api/admin-users/apps
+ * - /api/admin-users/projects/{projectId}/apps
+ * - /api/admin-users/projects/{projectId}/apps/{slug}
+ * - /api/admin-users/projects/{projectId}/apps/{slug}/logo
+ * - /api/admin-users/projects/{projectId}/apps/{slug}/artifact
  */
+@RestController
+@RequestMapping("/api/admin-users")
 public class AdminUserProjectsController {
 
-    // Service layer that contains the core business logic (create/update/delete/fetch)
     private final AdminUserProjectService service;
+    private final JwtUtil jwtUtil;
 
-    public AdminUserProjectsController(AdminUserProjectService service) {
+    public AdminUserProjectsController(AdminUserProjectService service, JwtUtil jwtUtil) {
         this.service = service;
+        this.jwtUtil = jwtUtil;
     }
 
-    // ---------------------------
-    // APP-AWARE ENDPOINTS (NEW)
-    // ---------------------------
+    /* =====================================================
+       Response helpers (consistent JSON errors)
+       ===================================================== */
 
-    /** List all apps (rows) for an owner (adminId). */
-    @GetMapping("/apps")
-    public ResponseEntity<List<AdminAppAssignmentResponse>> listApps(@PathVariable Long adminId) {
-        // Calls service.list(adminId) which reads all AdminUserProject rows for that owner
-        // and maps them into AdminAppAssignmentResponse DTOs.
-        return ResponseEntity.ok(service.list(adminId));
+    private ResponseEntity<Map<String, Object>> err(HttpStatus status, String msg) {
+        return ResponseEntity.status(status).body(Map.of("error", msg));
     }
 
-    /** Create or overwrite a single app under a project (owner+project+slug). */
-    @PostMapping("/projects/{projectId}/apps")
-    public ResponseEntity<Void> assignApp(@PathVariable Long adminId,
-                                          @PathVariable Long projectId,
-                                          @RequestBody AdminAppAssignmentRequest req) {
-
-        // Enforce projectId from the URL path to avoid client sending a different projectId in body.
-        req.setProjectId(projectId);
-
-        // service.assign(...) handles:
-        // - slug generation if missing
-        // - slug uniqueness enforcement per (adminId, projectId)
-        // - create new row if missing, otherwise update existing row
-        // - default licenseId / validity if missing
-        service.assign(adminId, req);
-
-        // 204 No Content indicates success with no response payload.
-        return ResponseEntity.noContent().build();
+    private ResponseEntity<Map<String, Object>> unauthorized(String msg) {
+        return err(HttpStatus.UNAUTHORIZED, msg);
     }
 
-    /** Update only license/validity for an existing app (owner+project+slug). */
-    @PutMapping("/projects/{projectId}/apps/{slug}")
-    public ResponseEntity<Void> updateAppLicense(@PathVariable Long adminId,
-                                                 @PathVariable Long projectId,
-                                                 @PathVariable String slug,
-                                                 @RequestBody AdminAppAssignmentRequest req) {
-
-        // This is intentionally narrower than assign():
-        // It updates only licenseId / validFrom / endTo for the app row identified by slug.
-        service.updateLicense(adminId, projectId, slug, req);
-
-        return ResponseEntity.noContent().build();
+    private ResponseEntity<Map<String, Object>> forbidden(String msg) {
+        return err(HttpStatus.FORBIDDEN, msg);
     }
 
-    /** Delete one app under owner+project by slug. */
-    @DeleteMapping("/projects/{projectId}/apps/{slug}")
-    public ResponseEntity<Void> removeApp(@PathVariable Long adminId,
-                                          @PathVariable Long projectId,
-                                          @PathVariable String slug) {
-
-        // Deletes the AdminUserProject row (owner+project+slug).
-        // It does not delete the project itself, and does not delete other app rows under same project.
-        service.remove(adminId, projectId, slug);
-
-        return ResponseEntity.noContent().build();
-    }
-
-    // -------- NEW: upload logo (multipart) --------
+    /* =====================================================
+       Auth helpers
+       ===================================================== */
 
     /**
-     * Upload a logo image for a specific app and store its URL in DB.
+     * Extract raw JWT from "Authorization: Bearer <token>"
+     */
+    private String requireBearer(String authHeader) {
+        if (authHeader == null || authHeader.isBlank() || !authHeader.startsWith("Bearer ")) {
+            throw new IllegalArgumentException("Missing Authorization header");
+        }
+        return authHeader.substring(7).trim();
+    }
+
+    /**
+     * Extract adminId from token and enforce admin-side access.
      *
-     * Endpoint:
-     * - POST /api/admin-users/{adminId}/projects/{projectId}/apps/{slug}/logo
-     * - Content-Type: multipart/form-data
-     *
-     * Request:
-     * - Part name: "file"
-     *
-     * Response:
-     * - logoUrl: the public URL of the uploaded logo
-     * - apkUrl: returned for convenience (frontend can refresh app card without another call)
+     * NOTE:
+     * - This assumes your JwtUtil puts "id" (admin id) in admin tokens.
+     * - If you use a different claim, update JwtUtil.extractAdminId(token).
+     */
+    private Long adminIdFromTokenOrThrow(String authHeader) {
+        String token = requireBearer(authHeader);
+
+        // optional but strongly recommended
+        try {
+            if (!jwtUtil.validateToken(token)) {
+                throw new IllegalArgumentException("Invalid or expired token");
+            }
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid or expired token");
+        }
+
+        // Only allow admin-side tokens (ADMIN/OWNER/SUPER_ADMIN)
+        if (!jwtUtil.isAdminOrOwner(token)) {
+            throw new SecurityException("Forbidden");
+        }
+
+        Long adminId = jwtUtil.extractAdminId(token);
+        if (adminId == null || adminId <= 0) {
+            throw new IllegalArgumentException("Token missing admin id claim");
+        }
+
+        return adminId;
+    }
+
+    /* =====================================================
+       APP-AWARE ENDPOINTS (NEW)
+       ===================================================== */
+
+    /** List all apps (rows) for the current admin (adminId from token). */
+    @GetMapping("/apps")
+    public ResponseEntity<?> listApps(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader
+    ) {
+        try {
+            Long adminId = adminIdFromTokenOrThrow(authHeader);
+            return ResponseEntity.ok(service.list(adminId));
+
+        } catch (SecurityException se) {
+            return forbidden("Forbidden");
+        } catch (IllegalArgumentException iae) {
+            return unauthorized(iae.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to load apps");
+        }
+    }
+
+    /** Create or overwrite a single app under a project (adminId from token). */
+    @PostMapping("/projects/{projectId}/apps")
+    public ResponseEntity<?> assignApp(
+            @PathVariable Long projectId,
+            @RequestBody AdminAppAssignmentRequest req,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader
+    ) {
+        try {
+            Long adminId = adminIdFromTokenOrThrow(authHeader);
+
+            // Enforce projectId from URL to avoid spoofing
+            req.setProjectId(projectId);
+
+            service.assign(adminId, req);
+            return ResponseEntity.noContent().build();
+
+        } catch (SecurityException se) {
+            return forbidden("Forbidden");
+        } catch (IllegalArgumentException iae) {
+            return unauthorized(iae.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to assign app");
+        }
+    }
+
+    /** Update only license/validity for an existing app (adminId from token). */
+    @PutMapping("/projects/{projectId}/apps/{slug}")
+    public ResponseEntity<?> updateAppLicense(
+            @PathVariable Long projectId,
+            @PathVariable String slug,
+            @RequestBody AdminAppAssignmentRequest req,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader
+    ) {
+        try {
+            Long adminId = adminIdFromTokenOrThrow(authHeader);
+
+            service.updateLicense(adminId, projectId, slug, req);
+            return ResponseEntity.noContent().build();
+
+        } catch (SecurityException se) {
+            return forbidden("Forbidden");
+        } catch (IllegalArgumentException iae) {
+            return unauthorized(iae.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update app license");
+        }
+    }
+
+    /** Delete one app under admin+project by slug (adminId from token). */
+    @DeleteMapping("/projects/{projectId}/apps/{slug}")
+    public ResponseEntity<?> removeApp(
+            @PathVariable Long projectId,
+            @PathVariable String slug,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader
+    ) {
+        try {
+            Long adminId = adminIdFromTokenOrThrow(authHeader);
+
+            service.remove(adminId, projectId, slug);
+            return ResponseEntity.noContent().build();
+
+        } catch (SecurityException se) {
+            return forbidden("Forbidden");
+        } catch (IllegalArgumentException iae) {
+            return unauthorized(iae.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to remove app");
+        }
+    }
+
+    /**
+     * Upload logo for an app (adminId from token).
+     * POST /api/admin-users/projects/{projectId}/apps/{slug}/logo
      */
     @PostMapping(value = "/projects/{projectId}/apps/{slug}/logo", consumes = "multipart/form-data")
-    public ResponseEntity<Map<String, Object>> uploadLogo(@PathVariable Long adminId,
-                                                          @PathVariable Long projectId,
-                                                          @PathVariable String slug,
-                                                          @RequestPart("file") MultipartFile file) throws Exception {
+    public ResponseEntity<?> uploadLogo(
+            @PathVariable Long projectId,
+            @PathVariable String slug,
+            @RequestPart("file") MultipartFile file,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader
+    ) {
+        try {
+            Long adminId = adminIdFromTokenOrThrow(authHeader);
 
-        // 1) Store file to disk and update AdminUserProject.logoUrl
-        String url = service.updateAppLogo(adminId, projectId, slug, file);
+            String url = service.updateAppLogo(adminId, projectId, slug, file);
+            var link = service.get(adminId, projectId, slug);
 
-        // 2) Re-load link to return related info (like current apkUrl)
-        var link = service.get(adminId, projectId, slug);
+            Map<String, Object> body = new HashMap<>();
+            body.put("logoUrl", url);
+            body.put("apkUrl", link.getApkUrl() == null ? "" : link.getApkUrl());
 
-        // 3) Build small response map
-        Map<String, Object> body = new HashMap<>();
-        body.put("logoUrl", url);
-        body.put("apkUrl", link.getApkUrl() == null ? "" : link.getApkUrl());
+            return ResponseEntity.ok(body);
 
-        return ResponseEntity.ok(body);
+        } catch (SecurityException se) {
+            return forbidden("Forbidden");
+        } catch (IllegalArgumentException iae) {
+            return unauthorized(iae.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to upload logo");
+        }
     }
 
-    // -------- NEW: one-shot artifact getter (logo + apk + meta) --------
-
-    /**
-     * Fetch "artifact + metadata" for one app (owner+project+slug) in a single response.
-     *
-     * This is useful for screens like:
-     * - App builder / CI output page
-     * - Owner dashboard "download" section
-     * - Mobile app "connect & download artifacts" wizard
-     */
+    /** One-shot artifact getter (adminId from token). */
     @GetMapping("/projects/{projectId}/apps/{slug}/artifact")
-    public ResponseEntity<AdminAppAssignmentResponse> artifact(@PathVariable Long adminId,
-                                                               @PathVariable Long projectId,
-                                                               @PathVariable String slug) {
+    public ResponseEntity<?> artifact(
+            @PathVariable Long projectId,
+            @PathVariable String slug,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader
+    ) {
+        try {
+            Long adminId = adminIdFromTokenOrThrow(authHeader);
 
-        // Fetch entity by (adminId, projectId, slug)
-        var l = service.get(adminId, projectId, slug);
+            var l = service.get(adminId, projectId, slug);
 
-        // Convert entity -> response DTO
-        // Strings are normalized (null -> "") for frontend simplicity.
-        return ResponseEntity.ok(new AdminAppAssignmentResponse(
-                l.getProject().getId(),
-                l.getProject().getProjectName(),
-                l.getAppName() == null ? "" : l.getAppName(),
-                l.getSlug(),
-                l.getStatus() == null ? "" : l.getStatus(),
-                l.getLicenseId() == null ? "" : l.getLicenseId(),
-                l.getValidFrom(),
-                l.getEndTo(),
-                l.getThemeId(),
-                l.getApkUrl() == null ? "" : l.getApkUrl(),
-                l.getIpaUrl() == null ? "" : l.getIpaUrl(),
-                l.getBundleUrl() == null ? "" : l.getBundleUrl(),
-                l.getLogoUrl() == null ? "" : l.getLogoUrl(),
-                l.getCurrency() != null ? l.getCurrency().getCode() : null,
-                l.getCurrency() != null ? l.getCurrency().getSymbol() : null
-        ));
+            return ResponseEntity.ok(new AdminAppAssignmentResponse(
+                    l.getProject().getId(),
+                    l.getProject().getProjectName(),
+                    l.getAppName() == null ? "" : l.getAppName(),
+                    l.getSlug(),
+                    l.getStatus() == null ? "" : l.getStatus(),
+                    l.getLicenseId() == null ? "" : l.getLicenseId(),
+                    l.getValidFrom(),
+                    l.getEndTo(),
+                    l.getThemeId(),
+                    l.getApkUrl() == null ? "" : l.getApkUrl(),
+                    l.getIpaUrl() == null ? "" : l.getIpaUrl(),
+                    l.getBundleUrl() == null ? "" : l.getBundleUrl(),
+                    l.getLogoUrl() == null ? "" : l.getLogoUrl(),
+                    l.getCurrency() != null ? l.getCurrency().getCode() : null,
+                    l.getCurrency() != null ? l.getCurrency().getSymbol() : null
+            ));
+
+        } catch (SecurityException se) {
+            return forbidden("Forbidden");
+        } catch (IllegalArgumentException iae) {
+            return unauthorized(iae.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to load artifact");
+        }
     }
 
-    // ---------------------------
-    // BACKWARD-COMPAT SHIMS (optional)
-    // ---------------------------
+    /* =====================================================
+       BACKWARD-COMPAT SHIMS (optional)
+       Important: legacy endpoints should also use token adminId.
+       ===================================================== */
 
-    /**
-     * Legacy endpoint: older clients used "/projects" for listing.
-     * Now it returns the same content as "/apps".
-     */
     @Deprecated
     @GetMapping("/projects")
-    public ResponseEntity<List<AdminAppAssignmentResponse>> legacyList(@PathVariable Long adminId) {
-        return ResponseEntity.ok(service.list(adminId));
+    public ResponseEntity<?> legacyList(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader
+    ) {
+        try {
+            Long adminId = adminIdFromTokenOrThrow(authHeader);
+            return ResponseEntity.ok(service.list(adminId));
+        } catch (SecurityException se) {
+            return forbidden("Forbidden");
+        } catch (IllegalArgumentException iae) {
+            return unauthorized(iae.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to load apps");
+        }
     }
 
-    /**
-     * Legacy endpoint: older clients posted a body containing projectId (and optionally slug/appName).
-     * This delegates to service.assign(...) which supports both old and new styles.
-     */
     @Deprecated
     @PostMapping("/projects")
-    public ResponseEntity<Void> legacyAssign(@PathVariable Long adminId,
-                                             @RequestBody AdminAppAssignmentRequest req) {
-        if (req.getProjectId() == null) return ResponseEntity.badRequest().build();
-        service.assign(adminId, req);
-        return ResponseEntity.noContent().build();
+    public ResponseEntity<?> legacyAssign(
+            @RequestBody AdminAppAssignmentRequest req,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader
+    ) {
+        try {
+            Long adminId = adminIdFromTokenOrThrow(authHeader);
+
+            if (req.getProjectId() == null) {
+                return err(HttpStatus.BAD_REQUEST, "projectId is required");
+            }
+
+            service.assign(adminId, req);
+            return ResponseEntity.noContent().build();
+
+        } catch (SecurityException se) {
+            return forbidden("Forbidden");
+        } catch (IllegalArgumentException iae) {
+            return unauthorized(iae.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to assign app");
+        }
     }
 
-    /**
-     * Legacy endpoint: update license for a project using slug from request body.
-     * New style puts slug in the path, but old clients can still call this.
-     */
     @Deprecated
     @PutMapping("/projects/{projectId}")
-    public ResponseEntity<Void> legacyUpdate(@PathVariable Long adminId,
-                                             @PathVariable Long projectId,
-                                             @RequestBody AdminAppAssignmentRequest req) {
-        if (req.getSlug() == null || req.getSlug().isBlank()) return ResponseEntity.badRequest().build();
-        service.updateLicense(adminId, projectId, req.getSlug(), req);
-        return ResponseEntity.noContent().build();
+    public ResponseEntity<?> legacyUpdate(
+            @PathVariable Long projectId,
+            @RequestBody AdminAppAssignmentRequest req,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader
+    ) {
+        try {
+            Long adminId = adminIdFromTokenOrThrow(authHeader);
+
+            if (req.getSlug() == null || req.getSlug().isBlank()) {
+                return err(HttpStatus.BAD_REQUEST, "slug is required");
+            }
+
+            service.updateLicense(adminId, projectId, req.getSlug(), req);
+            return ResponseEntity.noContent().build();
+
+        } catch (SecurityException se) {
+            return forbidden("Forbidden");
+        } catch (IllegalArgumentException iae) {
+            return unauthorized(iae.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update app license");
+        }
     }
 
-    /**
-     * Legacy endpoint: delete with slug passed as a query param (?slug=...).
-     * New style puts slug in the path.
-     */
     @Deprecated
     @DeleteMapping("/projects/{projectId}")
-    public ResponseEntity<Void> legacyRemove(@PathVariable Long adminId,
-                                             @PathVariable Long projectId,
-                                             @RequestParam(name = "slug", required = false) String slug) {
-        if (slug == null || slug.isBlank()) return ResponseEntity.badRequest().build();
-        service.remove(adminId, projectId, slug);
-        return ResponseEntity.noContent().build();
+    public ResponseEntity<?> legacyRemove(
+            @PathVariable Long projectId,
+            @RequestParam(name = "slug", required = false) String slug,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader
+    ) {
+        try {
+            Long adminId = adminIdFromTokenOrThrow(authHeader);
+
+            if (slug == null || slug.isBlank()) {
+                return err(HttpStatus.BAD_REQUEST, "slug is required");
+            }
+
+            service.remove(adminId, projectId, slug);
+            return ResponseEntity.noContent().build();
+
+        } catch (SecurityException se) {
+            return forbidden("Forbidden");
+        } catch (IllegalArgumentException iae) {
+            return unauthorized(iae.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to remove app");
+        }
     }
 }

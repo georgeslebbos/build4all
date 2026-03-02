@@ -23,7 +23,7 @@ public class PlatformTutorialController {
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("code", PlatformTutorialService.OWNER_APP_GUIDE);
-        data.put("videoUrl", (t == null) ? null : t.getVideoUrl()); // ✅ null ok
+        data.put("videoUrl", (t == null) ? null : t.getVideoUrl()); // null ok
 
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("message", "OK");

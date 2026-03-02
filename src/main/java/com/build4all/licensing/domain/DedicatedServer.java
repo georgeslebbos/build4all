@@ -22,9 +22,17 @@ public class DedicatedServer {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private ServerStatus status = ServerStatus.ACTIVE;
+    
+    
+    @OneToOne(mappedBy = "dedicatedServer", fetch = FetchType.LAZY)
+    private AppInfrastructure infrastructure;
+
+    
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
+    
+    
 
     public DedicatedServer() {}
 
@@ -34,6 +42,8 @@ public class DedicatedServer {
     }
 
     public Long getId() { return id; }
+    
+    public AppInfrastructure getInfrastructure() { return infrastructure; }
 
     public String getProvider() { return provider; }
     public void setProvider(String provider) { this.provider = provider; }

@@ -6,7 +6,6 @@ import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.admin.repository.AdminUsersRepository;
 import com.build4all.app.domain.AppBuildJob;
 import com.build4all.app.domain.AppRequest;
-import com.build4all.app.domain.BuildPlatform;
 import com.build4all.app.dto.CreateAppRequestDto;
 import com.build4all.app.repository.AppBuildJobRepository;
 import com.build4all.app.repository.AppRequestRepository;
@@ -17,19 +16,19 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api/owner")
+@PreAuthorize("hasRole('OWNER') or hasRole('SUPER_ADMIN')")
 public class OwnerAppRequestController {
 
     private final AppRequestService service;
@@ -57,7 +56,7 @@ public class OwnerAppRequestController {
         this.adminRepo = adminRepo;
         this.buildJobRepo = buildJobRepo;
     }
-    
+
     private String rootCauseMessage(Throwable ex) {
         Throwable root = ex;
         while (root.getCause() != null && root.getCause() != root) {
@@ -69,7 +68,27 @@ public class OwnerAppRequestController {
     }
 
     // ------------------------------------------------------------------
-    // Legacy JSON create (kept)
+    // ✅ ownerId always from token (NO request param)
+    // ------------------------------------------------------------------
+    private Long ownerIdFromToken(String authHeader) {
+        String token = extractToken(authHeader);
+
+        if (!jwtUtil.validateToken(token)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid token");
+        }
+
+        String role = jwtUtil.extractRole(token);
+        if (role == null || (!role.equalsIgnoreCase("OWNER") && !role.equalsIgnoreCase("SUPER_ADMIN"))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden");
+        }
+
+        // If you want SUPER_ADMIN to use the same endpoints, this returns SUPER_ADMIN adminId
+        // which is fine for logs. Ownership checks happen via link access methods below.
+        return jwtUtil.extractAdminId(token);
+    }
+
+    // ------------------------------------------------------------------
+    // Legacy JSON create (kept) ✅ removed ownerId param
     // ------------------------------------------------------------------
     @PostMapping(
             value = "/app-requests",
@@ -78,11 +97,10 @@ public class OwnerAppRequestController {
     )
     public ResponseEntity<?> create(
             @RequestHeader("Authorization") String authHeader,
-            @RequestParam Long ownerId,
             @RequestBody CreateAppRequestDto dto
     ) {
         try {
-            requireOwnerId(authHeader, ownerId);
+            Long ownerId = ownerIdFromToken(authHeader);
 
             AppRequest r = service.createRequest(
                     ownerId,
@@ -113,7 +131,7 @@ public class OwnerAppRequestController {
         }
     }
 
-    // ✅ AUTO flow (Android)
+    // ✅ AUTO flow (Android) ✅ removed ownerId param
     @PostMapping(
             value = "/app-requests/auto",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
@@ -121,7 +139,6 @@ public class OwnerAppRequestController {
     )
     public ResponseEntity<?> createAndAutoApprove(
             @RequestHeader("Authorization") String authHeader,
-            @RequestParam Long ownerId,
             @RequestParam Long projectId,
             @RequestParam String appName,
             @RequestParam(required = false) String slug,
@@ -142,11 +159,10 @@ public class OwnerAppRequestController {
             @RequestParam(required = false) String apiBaseUrlOverride
     ) {
         try {
-            requireOwnerId(authHeader, ownerId);
+            Long ownerId = ownerIdFromToken(authHeader);
 
             MultipartFile logoFile = (file != null) ? file : logo;
 
-            // ✅ Extract menuType from brandingJson so theme respects it
             String menuType = ThemeJsonBuilder.extractMenuTypeFromBranding(brandingJson);
 
             String themeJson = ThemeJsonBuilder.buildThemeJson(
@@ -155,7 +171,7 @@ public class OwnerAppRequestController {
                     backgroundColor,
                     onBackgroundColor,
                     errorColor,
-                    menuType   // ✅ pass menuType
+                    menuType
             );
 
             AdminUserProject link = service.createAndAutoApprove(
@@ -201,6 +217,7 @@ public class OwnerAppRequestController {
                     "https://raw.githubusercontent.com/fatimahh0/HobbySphereFlutter/main/builds/"
                             + ownerId + "/" + projectId + "/" + link.getSlug() + "/latest.json";
             body.put("manifestUrlHint", manifestUrlGuess);
+
             body.put("callbackBase", nz(callbackBase));
             body.put("runtimeConfigUrl",
                     "/api/public/runtime-config?ownerId=" + ownerId
@@ -221,7 +238,6 @@ public class OwnerAppRequestController {
         }
     }
 
-    
     @Transactional
     @DeleteMapping(value = "/apps/{linkId}", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> removeApp(
@@ -229,13 +245,11 @@ public class OwnerAppRequestController {
             @PathVariable Long linkId
     ) {
         try {
-            // owner check only (still needed)
-        	requireOwnerLinkAccess(authHeader, linkId);
+            requireOwnerLinkAccess(authHeader, linkId);
 
             AdminUserProject link = aupRepo.findById(linkId)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "App link not found"));
 
-            // ✅ idempotent behavior (nice UX): if already deleted, don't fail
             if (link.isDeleted()) {
                 Map<String, Object> body = new HashMap<>();
                 body.put("message", "App already deleted");
@@ -245,26 +259,16 @@ public class OwnerAppRequestController {
                 return ResponseEntity.ok(body);
             }
 
-            // save info for response
             Long ownerId = (link.getAdmin() != null) ? link.getAdmin().getAdminId() : null;
             Long projectId = (link.getProject() != null) ? link.getProject().getId() : null;
             String appName = nz(link.getAppName());
             String slug = nz(link.getSlug());
 
-            // ✅ SOFT DELETE
             link.setStatus("DELETED");
-
-            // optional but recommended: stop showing downloadable artifacts
             link.setApkUrl(null);
             link.setBundleUrl(null);
             link.setIpaUrl(null);
-
-            // optional: close validity immediately
             link.setEndTo(java.time.LocalDate.now());
-
-            // OPTIONAL (recommended): free slug so user can recreate same slug later
-            // If you want this, uncomment next line + add helper method below
-            // link.setSlug(makeDeletedSlug(link));
 
             aupRepo.saveAndFlush(link);
 
@@ -280,9 +284,7 @@ public class OwnerAppRequestController {
             return ResponseEntity.ok(body);
 
         } catch (ResponseStatusException ex) {
-            return ResponseEntity.status(ex.getStatusCode()).body(Map.of(
-                    "error", ex.getReason()
-            ));
+            return ResponseEntity.status(ex.getStatusCode()).body(Map.of("error", ex.getReason()));
         } catch (Exception ex) {
             return ResponseEntity.internalServerError().body(Map.of(
                     "error", "Failed to delete app",
@@ -291,7 +293,8 @@ public class OwnerAppRequestController {
             ));
         }
     }
-    // ✅ AUTO flow (iOS)
+
+    // ✅ AUTO flow (iOS) ✅ removed ownerId param
     @PostMapping(
             value = "/app-requests/auto/ios",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
@@ -299,7 +302,6 @@ public class OwnerAppRequestController {
     )
     public ResponseEntity<?> createAndAutoApproveIos(
             @RequestHeader("Authorization") String authHeader,
-            @RequestParam Long ownerId,
             @RequestParam Long projectId,
             @RequestParam String appName,
             @RequestParam(required = false) String slug,
@@ -320,7 +322,7 @@ public class OwnerAppRequestController {
             @RequestParam(required = false) String apiBaseUrlOverride
     ) {
         try {
-            requireOwnerId(authHeader, ownerId);
+            Long ownerId = ownerIdFromToken(authHeader);
 
             String token = extractToken(authHeader);
             String ownerEmail = jwtUtil.extractUsername(token);
@@ -328,7 +330,6 @@ public class OwnerAppRequestController {
 
             MultipartFile logoFile = (file != null) ? file : logo;
 
-            // ✅ Extract menuType from brandingJson
             String menuType = ThemeJsonBuilder.extractMenuTypeFromBranding(brandingJson);
 
             String themeJson = ThemeJsonBuilder.buildThemeJson(
@@ -337,7 +338,7 @@ public class OwnerAppRequestController {
                     backgroundColor,
                     onBackgroundColor,
                     errorColor,
-                    menuType   // ✅ pass menuType
+                    menuType
             );
 
             AdminUserProject link = service.createAndAutoApproveIos(
@@ -402,7 +403,7 @@ public class OwnerAppRequestController {
         }
     }
 
-    // ✅ AUTO flow (Android + iOS)
+    // ✅ AUTO flow (Android + iOS) ✅ removed ownerId param
     @PostMapping(
             value = "/app-requests/auto/both",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
@@ -410,7 +411,6 @@ public class OwnerAppRequestController {
     )
     public ResponseEntity<?> createAndAutoApproveBoth(
             @RequestHeader("Authorization") String authHeader,
-            @RequestParam Long ownerId,
             @RequestParam Long projectId,
             @RequestParam String appName,
             @RequestParam(required = false) String slug,
@@ -431,7 +431,7 @@ public class OwnerAppRequestController {
             @RequestParam(required = false) String apiBaseUrlOverride
     ) {
         try {
-            requireOwnerId(authHeader, ownerId);
+            Long ownerId = ownerIdFromToken(authHeader);
 
             String token = extractToken(authHeader);
             String ownerEmail = jwtUtil.extractUsername(token);
@@ -439,7 +439,6 @@ public class OwnerAppRequestController {
 
             MultipartFile logoFile = (file != null) ? file : logo;
 
-            // ✅ Extract menuType from brandingJson
             String menuType = ThemeJsonBuilder.extractMenuTypeFromBranding(brandingJson);
 
             String themeJson = ThemeJsonBuilder.buildThemeJson(
@@ -448,7 +447,7 @@ public class OwnerAppRequestController {
                     backgroundColor,
                     onBackgroundColor,
                     errorColor,
-                    menuType   // ✅ pass menuType
+                    menuType
             );
 
             AdminUserProject link = service.createAndAutoApproveBoth(
@@ -503,6 +502,7 @@ public class OwnerAppRequestController {
                     "https://raw.githubusercontent.com/fatimahh0/HobbySphereFlutter/main/builds/"
                             + ownerId + "/" + projectId + "/" + link.getSlug() + "/latest.json";
             body.put("manifestUrlHint", manifestUrlGuess);
+
             body.put("callbackBase", nz(callbackBase));
             body.put("runtimeConfigUrl",
                     "/api/public/runtime-config?ownerId=" + ownerId
@@ -741,52 +741,18 @@ public class OwnerAppRequestController {
     }
 
     @GetMapping(value = "/app-requests", produces = MediaType.APPLICATION_JSON_VALUE)
-    public List<AppRequest> myRequests(
-            @RequestHeader("Authorization") String authHeader,
-            @RequestParam Long ownerId
-    ) {
-        requireOwnerId(authHeader, ownerId);
+    public List<AppRequest> myRequests(@RequestHeader("Authorization") String authHeader) {
+        Long ownerId = ownerIdFromToken(authHeader);
         return appRequestRepo.findByOwnerIdOrderByCreatedAtDesc(ownerId);
     }
 
     @GetMapping(value = "/my-apps", produces = MediaType.APPLICATION_JSON_VALUE)
-    public List<OwnerProjectView> myApps(
-            @RequestHeader("Authorization") String authHeader,
-            @RequestParam Long ownerId
-    ) {
-        requireOwnerId(authHeader, ownerId);
+    public List<OwnerProjectView> myApps(@RequestHeader("Authorization") String authHeader) {
+        Long ownerId = ownerIdFromToken(authHeader);
         return aupRepo.findOwnerProjectsSlim(ownerId);
     }
 
-    // ---------------- helpers ----------------
-
-    private Map<String, Object> toJobMap(AppBuildJob j) {
-        Map<String, Object> m = new HashMap<>();
-        m.put("id", j.getId());
-        m.put("platform", j.getPlatform() == null ? "" : j.getPlatform().name());
-        m.put("status", j.getStatus() == null ? "" : j.getStatus().name());
-        m.put("ciBuildId", nz(j.getCiBuildId()));
-
-        m.put("androidVersionCode", j.getAndroidVersionCode());
-        m.put("androidVersionName", nz(j.getAndroidVersionName()));
-        m.put("androidPackageName", nz(j.getAndroidPackageName()));
-
-        m.put("iosBuildNumber", j.getIosBuildNumber());
-        m.put("iosVersionName", nz(j.getIosVersionName()));
-        m.put("iosBundleId", nz(j.getIosBundleId()));
-
-        m.put("apkUrl", nz(j.getApkUrl()));
-        m.put("bundleUrl", nz(j.getBundleUrl()));
-        m.put("ipaUrl", nz(j.getIpaUrl()));
-        m.put("error", nz(j.getError()));
-
-        m.put("createdAt", j.getCreatedAt());
-        m.put("startedAt", j.getStartedAt());
-        m.put("finishedAt", j.getFinishedAt());
-        m.put("updatedAt", j.getUpdatedAt());
-
-        return m;
-    }
+    // ---------------- small utils ----------------
 
     private static String nz(String s) {
         return (s == null) ? "" : s;
@@ -815,21 +781,21 @@ public class OwnerAppRequestController {
         return authHeader.replace("Bearer ", "").trim();
     }
 
-    private Long requireOwnerId(String authHeader, Long ownerIdParam) {
-        String token = extractToken(authHeader);
-        Long tokenAdminId = jwtUtil.extractAdminId(token);
-
-        if (ownerIdParam == null || !ownerIdParam.equals(tokenAdminId)) {
-            throw new ResponseStatusException(
-                    HttpStatus.FORBIDDEN,
-                    "Forbidden: ownerId does not match token"
-            );
+    private boolean isSuperAdmin(String token) {
+        try {
+            String role = jwtUtil.extractRole(token);
+            return role != null && role.equalsIgnoreCase("SUPER_ADMIN");
+        } catch (Exception e) {
+            return false;
         }
-        return tokenAdminId;
     }
 
     private void requireOwnerLinkAccess(String authHeader, Long linkId) {
         String token = extractToken(authHeader);
+
+        // ✅ SUPER_ADMIN bypass ownership
+        if (isSuperAdmin(token)) return;
+
         Long tokenAdminId = jwtUtil.extractAdminId(token);
 
         AdminUserProject link = aupRepo.findById(linkId)
@@ -840,9 +806,20 @@ public class OwnerAppRequestController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden: link does not belong to this owner");
         }
     }
-    
+
     private void requireOwnerActiveLinkAccess(String authHeader, Long linkId) {
         String token = extractToken(authHeader);
+
+        // ✅ SUPER_ADMIN bypass ownership checks, but still block deleted apps
+        if (isSuperAdmin(token)) {
+            AdminUserProject link = aupRepo.findById(linkId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Link not found"));
+            if (link.isDeleted()) {
+                throw new ResponseStatusException(HttpStatus.GONE, "This app has been deleted");
+            }
+            return;
+        }
+
         Long tokenAdminId = jwtUtil.extractAdminId(token);
 
         AdminUserProject link = aupRepo.findById(linkId)
@@ -853,7 +830,6 @@ public class OwnerAppRequestController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden: link does not belong to this owner");
         }
 
-        // ✅ block deleted apps from any action
         if (link.isDeleted()) {
             throw new ResponseStatusException(HttpStatus.GONE, "This app has been deleted");
         }

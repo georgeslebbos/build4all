@@ -1,9 +1,9 @@
 // src/main/java/com/build4all/catalog/web/CategoryController.java
 package com.build4all.catalog.web;
 
+import com.build4all.catalog.domain.Category;
 import com.build4all.catalog.dto.CategoryDTO;
 import com.build4all.catalog.dto.CategoryRequest;
-import com.build4all.catalog.domain.Category;
 import com.build4all.catalog.service.CategoryService;
 import com.build4all.catalog.service.DeleteBlockedException;
 import com.build4all.security.JwtUtil;
@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
@@ -20,6 +21,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/admin/categories")
+@PreAuthorize("hasAnyRole('OWNER','SUPER_ADMIN','USER')")
 public class CategoryController {
 
     private static final Logger log = LoggerFactory.getLogger(CategoryController.class);
@@ -61,14 +63,23 @@ public class CategoryController {
         return error(HttpStatus.FORBIDDEN, msg);
     }
 
-    private Long ownerProjectIdFromAuth(String authHeader) {
+    /**
+     * ✅ Tenant always from token (multi-tenant safe)
+     */
+    private Long tenantFromAuth(String authHeader) {
         return jwtUtil.requireOwnerProjectId(authHeader);
     }
 
+    /**
+     * ✅ Map JWT errors into 401/403 consistently.
+     */
     private ResponseEntity<Map<String, Object>> authFail(String msg) {
-        // if requireOwnerProjectId says "Forbidden" -> 403 else 401
-        if (msg != null && msg.equalsIgnoreCase("Forbidden")) return forbidden(msg);
-        return unauthorized(msg);
+        String m = (msg == null) ? "" : msg;
+
+        if (m.toLowerCase().contains("forbidden") || m.toLowerCase().contains("mismatch")) {
+            return forbidden("Forbidden");
+        }
+        return unauthorized(m.isBlank() ? "Unauthorized" : m);
     }
 
     // ---------- READ (tenant-safe) ----------
@@ -79,14 +90,14 @@ public class CategoryController {
         try {
             if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            Long ownerProjectId = ownerProjectIdFromAuth(auth);
+            Long ownerProjectId = tenantFromAuth(auth);
 
             List<CategoryDTO> out = categoryService.listAllForOwnerProject(ownerProjectId)
                     .stream().map(this::toDto).toList();
 
             return ResponseEntity.ok(out);
 
-        } catch (IllegalArgumentException e) {
+        } catch (RuntimeException e) {
             return authFail(e.getMessage());
         } catch (Exception e) {
             log.error("list categories failed", e);
@@ -102,13 +113,20 @@ public class CategoryController {
         try {
             if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            Long ownerProjectId = ownerProjectIdFromAuth(auth);
+            Long ownerProjectId = tenantFromAuth(auth);
 
             Category c = categoryService.getForTenant(id, ownerProjectId);
             return ResponseEntity.ok(toDto(c));
 
-        } catch (IllegalArgumentException e) {
-            // ✅ silent not found (no tenant leak)
+        } catch (RuntimeException e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage();
+            if (msg.toLowerCase().contains("token")
+                    || msg.toLowerCase().contains("unauthorized")
+                    || msg.toLowerCase().contains("ownerprojectid")
+                    || msg.toLowerCase().contains("mismatch")
+                    || msg.toLowerCase().contains("forbidden")) {
+                return authFail(msg);
+            }
             return error(HttpStatus.NOT_FOUND, "Category not found: " + id);
         } catch (Exception e) {
             log.error("get category failed", e);
@@ -125,17 +143,16 @@ public class CategoryController {
         try {
             if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            Long ownerProjectId = ownerProjectIdFromAuth(auth);
+            Long ownerProjectId = tenantFromAuth(auth);
 
             List<CategoryDTO> out = categoryService.listByProjectForTenant(projectId, ownerProjectId)
                     .stream().map(this::toDto).toList();
 
             return ResponseEntity.ok(out);
 
-        } catch (IllegalArgumentException e) {
-            // ✅ if project mismatch -> silent not found
+        } catch (RuntimeException e) {
             String msg = e.getMessage() == null ? "" : e.getMessage();
-            if (msg.equalsIgnoreCase("Category not found")) {
+            if (msg.toLowerCase().contains("project") || msg.toLowerCase().contains("not found")) {
                 return error(HttpStatus.NOT_FOUND, "Project not found: " + projectId);
             }
             return authFail(msg);
@@ -146,6 +163,7 @@ public class CategoryController {
     }
 
     // ---------- CREATE (tenant-safe) ----------
+    @PreAuthorize("hasAnyRole('OWNER','SUPER_ADMIN')")
     @PostMapping
     public ResponseEntity<?> createForTenant(
             @RequestBody CategoryRequest req,
@@ -155,7 +173,7 @@ public class CategoryController {
         try {
             if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            Long ownerProjectId = ownerProjectIdFromAuth(auth);
+            Long ownerProjectId = tenantFromAuth(auth);
 
             Category saved = categoryService.createForTenant(ownerProjectId, req, ensureIconExists);
 
@@ -163,16 +181,22 @@ public class CategoryController {
                     .created(URI.create("/api/admin/categories/" + saved.getId()))
                     .body(toDto(saved));
 
-        } catch (IllegalArgumentException e) {
+        } catch (RuntimeException e) {
             String msg = e.getMessage() == null ? "" : e.getMessage();
-            if (msg.equalsIgnoreCase("Forbidden") || msg.toLowerCase().contains("token")) {
+
+            if (msg.toLowerCase().contains("token")
+                    || msg.toLowerCase().contains("unauthorized")
+                    || msg.toLowerCase().contains("ownerprojectid")
+                    || msg.toLowerCase().contains("mismatch")
+                    || msg.toLowerCase().contains("forbidden")) {
                 return authFail(msg);
             }
-            // name conflict -> 409 (better UX)
+
             if (msg.toLowerCase().contains("already exists")) {
                 return error(HttpStatus.CONFLICT, msg);
             }
-            return badRequest(msg);
+
+            return badRequest(msg.isBlank() ? "Bad request" : msg);
 
         } catch (Exception e) {
             log.error("create category failed", e);
@@ -181,6 +205,8 @@ public class CategoryController {
     }
 
     // ---------- UPDATE (tenant-safe) ----------
+
+    @PreAuthorize("hasAnyRole('OWNER','SUPER_ADMIN')")
     @PutMapping("/{id}")
     public ResponseEntity<?> updateForTenant(
             @PathVariable Long id,
@@ -191,20 +217,26 @@ public class CategoryController {
         try {
             if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            Long ownerProjectId = ownerProjectIdFromAuth(auth);
+            Long ownerProjectId = tenantFromAuth(auth);
 
             Category saved = categoryService.updateForTenant(id, ownerProjectId, req, ensureIconExists);
             return ResponseEntity.ok(toDto(saved));
 
-        } catch (IllegalArgumentException e) {
+        } catch (RuntimeException e) {
             String msg = e.getMessage() == null ? "" : e.getMessage();
-            if (msg.equalsIgnoreCase("Forbidden") || msg.toLowerCase().contains("token")) {
+
+            if (msg.toLowerCase().contains("token")
+                    || msg.toLowerCase().contains("unauthorized")
+                    || msg.toLowerCase().contains("ownerprojectid")
+                    || msg.toLowerCase().contains("mismatch")
+                    || msg.toLowerCase().contains("forbidden")) {
                 return authFail(msg);
             }
+
             if (msg.toLowerCase().contains("already exists")) {
                 return error(HttpStatus.CONFLICT, msg);
             }
-            // ✅ silent not found
+
             return error(HttpStatus.NOT_FOUND, "Category not found: " + id);
 
         } catch (Exception e) {
@@ -214,6 +246,7 @@ public class CategoryController {
     }
 
     // ---------- DELETE (tenant-safe) ----------
+    @PreAuthorize("hasAnyRole('OWNER','SUPER_ADMIN')")
     @DeleteMapping("/{id}")
     public ResponseEntity<?> deleteForTenant(
             @PathVariable Long id,
@@ -222,7 +255,7 @@ public class CategoryController {
         try {
             if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            Long ownerProjectId = ownerProjectIdFromAuth(auth);
+            Long ownerProjectId = tenantFromAuth(auth);
 
             CategoryService.DeleteCascadeResult res = categoryService.deleteCategoryCascade(id, ownerProjectId);
 
@@ -238,8 +271,17 @@ public class CategoryController {
                     "count", e.getCount()
             ));
 
-        } catch (IllegalArgumentException e) {
-            // ✅ silent not found
+        } catch (RuntimeException e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage();
+
+            if (msg.toLowerCase().contains("token")
+                    || msg.toLowerCase().contains("unauthorized")
+                    || msg.toLowerCase().contains("ownerprojectid")
+                    || msg.toLowerCase().contains("mismatch")
+                    || msg.toLowerCase().contains("forbidden")) {
+                return authFail(msg);
+            }
+
             return error(HttpStatus.NOT_FOUND, "Category not found: " + id);
 
         } catch (Exception e) {
@@ -259,7 +301,8 @@ public class CategoryController {
         try {
             if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            Long tokenTenant = ownerProjectIdFromAuth(auth);
+            Long tokenTenant = tenantFromAuth(auth);
+
             if (!tokenTenant.equals(ownerProjectId)) {
                 return error(HttpStatus.NOT_FOUND, "Categories not found");
             }
@@ -269,7 +312,7 @@ public class CategoryController {
 
             return ResponseEntity.ok(out);
 
-        } catch (IllegalArgumentException e) {
+        } catch (RuntimeException e) {
             return authFail(e.getMessage());
         } catch (Exception e) {
             log.error("listByOwnerProject legacy failed", e);
@@ -287,7 +330,8 @@ public class CategoryController {
         try {
             if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            Long tokenTenant = ownerProjectIdFromAuth(auth);
+            Long tokenTenant = tenantFromAuth(auth);
+
             if (!tokenTenant.equals(ownerProjectId)) {
                 return error(HttpStatus.NOT_FOUND, "Categories not found");
             }
@@ -298,10 +342,21 @@ public class CategoryController {
                     .created(URI.create("/api/admin/categories/" + saved.getId()))
                     .body(toDto(saved));
 
-        } catch (IllegalArgumentException e) {
+        } catch (RuntimeException e) {
             String msg = e.getMessage() == null ? "" : e.getMessage();
+
             if (msg.toLowerCase().contains("already exists")) return error(HttpStatus.CONFLICT, msg);
-            return badRequest(msg);
+
+            if (msg.toLowerCase().contains("token")
+                    || msg.toLowerCase().contains("unauthorized")
+                    || msg.toLowerCase().contains("ownerprojectid")
+                    || msg.toLowerCase().contains("mismatch")
+                    || msg.toLowerCase().contains("forbidden")) {
+                return authFail(msg);
+            }
+
+            return badRequest(msg.isBlank() ? "Bad request" : msg);
+
         } catch (Exception e) {
             log.error("create legacy failed", e);
             return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to create category");

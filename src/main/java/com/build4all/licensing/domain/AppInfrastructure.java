@@ -16,8 +16,8 @@ public class AppInfrastructure {
     @Column(name = "infra_type", nullable = false, length = 20)
     private InfraType infraType = InfraType.SHARED;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "dedicated_server_id")
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "dedicated_server_id", unique = true)
     private DedicatedServer dedicatedServer;
 
     @Column(name = "created_at", updatable = false)

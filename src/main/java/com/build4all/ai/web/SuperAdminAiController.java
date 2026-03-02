@@ -21,7 +21,7 @@ public class SuperAdminAiController {
         this.adminUsersRepo = adminUsersRepo;
     }
 
-    // ✅ Get AI status for an owner
+    /** Get AI status for an owner (SUPER_ADMIN only). */
     @GetMapping("/owners/{ownerId}/ai")
     @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<?> getOwnerAi(@PathVariable Long ownerId) {
@@ -35,7 +35,7 @@ public class SuperAdminAiController {
         ));
     }
 
-    // ✅ Toggle AI for an owner
+    /** Toggle AI for an owner (SUPER_ADMIN only). */
     @PatchMapping("/owners/{ownerId}/ai")
     @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ResponseEntity<?> toggleOwnerAi(

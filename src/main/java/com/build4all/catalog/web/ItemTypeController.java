@@ -4,7 +4,6 @@ package com.build4all.catalog.web;
 import com.build4all.catalog.dto.ItemTypeDTO;
 import com.build4all.catalog.domain.Category;
 import com.build4all.catalog.domain.ItemType;
-import com.build4all.catalog.repository.ItemTypeRepository;
 import com.build4all.catalog.service.DeleteBlockedException;
 import com.build4all.catalog.service.ItemTypeService;
 import com.build4all.security.JwtUtil;
@@ -14,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
@@ -24,18 +24,15 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/item-types")
+@PreAuthorize("hasAnyRole('OWNER','SUPER_ADMIN','USER')")
 public class ItemTypeController {
 
     private static final Logger log = LoggerFactory.getLogger(ItemTypeController.class);
 
-    private final ItemTypeRepository itemTypeRepository;
     private final ItemTypeService itemTypeService;
     private final JwtUtil jwtUtil;
 
-    public ItemTypeController(ItemTypeRepository itemTypeRepository,
-                              ItemTypeService itemTypeService,
-                              JwtUtil jwtUtil) {
-        this.itemTypeRepository = itemTypeRepository;
+    public ItemTypeController(ItemTypeService itemTypeService, JwtUtil jwtUtil) {
         this.itemTypeService = itemTypeService;
         this.jwtUtil = jwtUtil;
     }
@@ -73,10 +70,29 @@ public class ItemTypeController {
         return error(HttpStatus.UNAUTHORIZED, msg);
     }
 
-    private Long ownerProjectIdFromAuth(String authHeader) {
-        // ✅ best practice: tenant comes from token, not from request
-        // you must implement jwtUtil.requireOwnerProjectId(authHeader) (snippet below)
+    private ResponseEntity<Map<String, Object>> forbidden(String msg) {
+        return error(HttpStatus.FORBIDDEN, msg);
+    }
+
+    /**
+     * ✅ Tenant always from token (multi-tenant safe)
+     * Uses your JwtUtil.requireOwnerProjectId(...) which throws RuntimeException on invalid token / missing claim.
+     */
+    private Long tenantFromAuth(String authHeader) {
         return jwtUtil.requireOwnerProjectId(authHeader);
+    }
+
+    /**
+     * ✅ Consistent mapping of auth failures.
+     * - missing/invalid token -> 401
+     * - explicit forbidden/mismatch -> 403
+     */
+    private ResponseEntity<Map<String, Object>> authFail(String msg) {
+        String m = (msg == null) ? "" : msg.toLowerCase();
+        if (m.contains("forbidden") || m.contains("mismatch")) {
+            return forbidden("Forbidden");
+        }
+        return unauthorized((msg == null || msg.isBlank()) ? "Unauthorized" : msg);
     }
 
     // ---------- GET (tenant-safe) ----------
@@ -89,7 +105,7 @@ public class ItemTypeController {
         try {
             if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            Long ownerProjectId = ownerProjectIdFromAuth(auth);
+            Long ownerProjectId = tenantFromAuth(auth);
 
             List<ItemTypeDTO> out = itemTypeService.listAllForOwnerProject(ownerProjectId)
                     .stream()
@@ -98,12 +114,108 @@ public class ItemTypeController {
 
             return ResponseEntity.ok(out);
 
-        } catch (IllegalArgumentException e) {
-            // missing claim, bad token, etc.
-            return unauthorized(e.getMessage());
+        } catch (RuntimeException e) {
+            return authFail(e.getMessage());
         } catch (Exception e) {
             log.error("getAllForTenant failed", e);
             return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to load item types");
+        }
+    }
+
+    // ---------- CREATE (tenant-safe) ----------
+    @Operation(summary = "Create an item type (tenant-safe)")
+    @ApiResponse(responseCode = "201", description = "Created")
+    @PostMapping
+    public ResponseEntity<?> create(
+            @RequestBody ItemTypePayload body,
+            @RequestHeader(value = "Authorization", required = false) String auth
+    ) {
+        try {
+            if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
+
+            if (body.getCategoryId() == null) return badRequest("categoryId is required");
+            if (body.getName() == null || body.getName().isBlank()) return badRequest("name is required");
+
+            Long ownerProjectId = tenantFromAuth(auth);
+
+            ItemType saved = itemTypeService.createItemType(
+                    body.getName(),
+                    body.getIcon(),
+                    body.getIconLibrary(),
+                    body.getCategoryId(),
+                    ownerProjectId
+            );
+
+            return ResponseEntity
+                    .created(URI.create("/api/item-types/" + saved.getId()))
+                    .body(toDto(saved));
+
+        } catch (RuntimeException e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+
+            // auth-ish problems
+            if (msg.contains("token") || msg.contains("unauthorized") || msg.contains("ownerprojectid")
+                    || msg.contains("mismatch") || msg.contains("forbidden")) {
+                return authFail(e.getMessage());
+            }
+
+            // category not found / cross tenant => hide existence
+            if (msg.contains("category") && msg.contains("not found")) {
+                return error(HttpStatus.NOT_FOUND, "Category not found: " + body.getCategoryId());
+            }
+
+            // duplicate name => 409
+            if (msg.contains("already exists") || msg.contains("duplicate")) {
+                return error(HttpStatus.CONFLICT, e.getMessage());
+            }
+
+            return badRequest(e.getMessage());
+
+        } catch (Exception e) {
+            log.error("create item type failed", e);
+            return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to create item type");
+        }
+    }
+
+    // ---------- UPDATE (tenant-safe) ----------
+    @Operation(summary = "Update an item type (tenant-safe)")
+    @ApiResponse(responseCode = "200", description = "Updated")
+    @PutMapping("/{id}")
+    public ResponseEntity<?> update(
+            @PathVariable Long id,
+            @RequestBody ItemTypePayload body,
+            @RequestHeader(value = "Authorization", required = false) String auth
+    ) {
+        try {
+            if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
+
+            Long ownerProjectId = tenantFromAuth(auth);
+
+            ItemType updated = itemTypeService.updateItemType(
+                    id,
+                    body.getName(),
+                    body.getIcon(),
+                    body.getIconLibrary(),
+                    body.getCategoryId(),
+                    ownerProjectId
+            );
+
+            return ResponseEntity.ok(toDto(updated));
+
+        } catch (RuntimeException e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+
+            if (msg.contains("token") || msg.contains("unauthorized") || msg.contains("ownerprojectid")
+                    || msg.contains("mismatch") || msg.contains("forbidden")) {
+                return authFail(e.getMessage());
+            }
+
+            // hide cross-tenant / not found
+            return error(HttpStatus.NOT_FOUND, "ItemType not found: " + id);
+
+        } catch (Exception e) {
+            log.error("update item type failed", e);
+            return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update item type");
         }
     }
 
@@ -111,12 +223,14 @@ public class ItemTypeController {
     @Operation(summary = "Delete an item type (tenant-safe)")
     @ApiResponse(responseCode = "200", description = "Deleted")
     @DeleteMapping("/{id}")
-    public ResponseEntity<?> delete(@PathVariable Long id,
-                                    @RequestHeader(value = "Authorization", required = false) String auth) {
+    public ResponseEntity<?> delete(
+            @PathVariable Long id,
+            @RequestHeader(value = "Authorization", required = false) String auth
+    ) {
         try {
             if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            Long ownerProjectId = ownerProjectIdFromAuth(auth);
+            Long ownerProjectId = tenantFromAuth(auth);
 
             itemTypeService.deleteItemType(id, ownerProjectId);
             return ResponseEntity.ok(Map.of("message", "Item type deleted"));
@@ -134,8 +248,15 @@ public class ItemTypeController {
                     "code", e.getMessage()
             ));
 
-        } catch (IllegalArgumentException e) {
-            // ✅ hide existence (cross-tenant or not found)
+        } catch (RuntimeException e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+
+            if (msg.contains("token") || msg.contains("unauthorized") || msg.contains("ownerprojectid")
+                    || msg.contains("mismatch") || msg.contains("forbidden")) {
+                return authFail(e.getMessage());
+            }
+
+            // hide cross-tenant / not found
             return error(HttpStatus.NOT_FOUND, "ItemType not found: " + id);
 
         } catch (Exception e) {
@@ -144,95 +265,25 @@ public class ItemTypeController {
         }
     }
 
-    // ---------- CREATE (tenant-safe) ----------
-    @Operation(summary = "Create an item type (tenant-safe)")
-    @ApiResponse(responseCode = "201", description = "Created")
-    @PostMapping
-    public ResponseEntity<?> create(@RequestBody ItemTypePayload body,
-                                    @RequestHeader(value = "Authorization", required = false) String auth) {
-        try {
-            if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
-
-            if (body.getCategoryId() == null) return badRequest("categoryId is required");
-            if (body.getName() == null || body.getName().isBlank()) return badRequest("name is required");
-
-            Long ownerProjectId = ownerProjectIdFromAuth(auth);
-
-            ItemType saved = itemTypeService.createItemType(
-                    body.getName(),
-                    body.getIcon(),
-                    body.getIconLibrary(),
-                    body.getCategoryId(),
-                    ownerProjectId
-            );
-
-            return ResponseEntity
-                    .created(URI.create("/api/item-types/" + saved.getId()))
-                    .body(toDto(saved));
-
-        } catch (IllegalArgumentException e) {
-            // category not found / not in tenant / missing claim
-            // hide existence if cross tenant
-            if (e.getMessage() != null && e.getMessage().toLowerCase().contains("authorization")) {
-                return unauthorized(e.getMessage());
-            }
-            return badRequest(e.getMessage());
-
-        } catch (Exception e) {
-            log.error("create item type failed", e);
-            return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to create item type");
-        }
-    }
-
-    // ---------- UPDATE (tenant-safe) ----------
-    @Operation(summary = "Update an item type (tenant-safe)")
-    @ApiResponse(responseCode = "200", description = "Updated")
-    @PutMapping("/{id}")
-    public ResponseEntity<?> update(@PathVariable Long id,
-                                    @RequestBody ItemTypePayload body,
-                                    @RequestHeader(value = "Authorization", required = false) String auth) {
-        try {
-            if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
-
-            Long ownerProjectId = ownerProjectIdFromAuth(auth);
-
-            ItemType updated = itemTypeService.updateItemType(
-                    id,
-                    body.getName(),
-                    body.getIcon(),
-                    body.getIconLibrary(),
-                    body.getCategoryId(),
-                    ownerProjectId
-            );
-
-            return ResponseEntity.ok(toDto(updated));
-
-        } catch (IllegalArgumentException e) {
-            // hide cross tenant / not found
-            return error(HttpStatus.NOT_FOUND, "ItemType not found: " + id);
-
-        } catch (Exception e) {
-            log.error("update item type failed", e);
-            return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update item type");
-        }
-    }
-
     // ---------- LIST BY PROJECT (tenant-safe) ----------
     @Operation(summary = "List item types for a project (tenant-safe)")
     @GetMapping("/by-project/{projectId}")
-    public ResponseEntity<?> getByProject(@PathVariable Long projectId,
-                                          @RequestHeader(value = "Authorization", required = false) String auth) {
+    public ResponseEntity<?> getByProject(
+            @PathVariable Long projectId,
+            @RequestHeader(value = "Authorization", required = false) String auth
+    ) {
         try {
             if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            Long ownerProjectId = ownerProjectIdFromAuth(auth);
+            Long ownerProjectId = tenantFromAuth(auth);
 
             List<ItemTypeDTO> out = itemTypeService.listByProject(projectId, ownerProjectId)
                     .stream().map(this::toDto).collect(Collectors.toList());
 
             return ResponseEntity.ok(out);
-        } catch (IllegalArgumentException e) {
-            return unauthorized(e.getMessage());
+
+        } catch (RuntimeException e) {
+            return authFail(e.getMessage());
         } catch (Exception e) {
             log.error("getByProject failed", e);
             return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to load item types by project");
@@ -242,19 +293,22 @@ public class ItemTypeController {
     // ---------- LIST BY CATEGORY (tenant-safe) ----------
     @Operation(summary = "List item types for a category (tenant-safe)")
     @GetMapping("/by-category/{categoryId}")
-    public ResponseEntity<?> getByCategory(@PathVariable Long categoryId,
-                                           @RequestHeader(value = "Authorization", required = false) String auth) {
+    public ResponseEntity<?> getByCategory(
+            @PathVariable Long categoryId,
+            @RequestHeader(value = "Authorization", required = false) String auth
+    ) {
         try {
             if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            Long ownerProjectId = ownerProjectIdFromAuth(auth);
+            Long ownerProjectId = tenantFromAuth(auth);
 
             List<ItemTypeDTO> out = itemTypeService.listByCategory(categoryId, ownerProjectId)
                     .stream().map(this::toDto).collect(Collectors.toList());
 
             return ResponseEntity.ok(out);
-        } catch (IllegalArgumentException e) {
-            return unauthorized(e.getMessage());
+
+        } catch (RuntimeException e) {
+            return authFail(e.getMessage());
         } catch (Exception e) {
             log.error("getByCategory failed", e);
             return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to load item types by category");
@@ -265,10 +319,11 @@ public class ItemTypeController {
     private ItemTypeDTO toDto(ItemType type) {
         Category cat = type.getCategory();
         Long categoryId = (cat != null) ? cat.getId() : null;
+
         return new ItemTypeDTO(
                 type.getId(),
                 type.getName(),
-                type.getName(),
+                type.getName(),     // if your DTO expects label/displayName, keep same
                 type.getIcon(),
                 type.getIconLibrary(),
                 categoryId

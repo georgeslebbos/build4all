@@ -118,7 +118,6 @@ public interface UsersRepository extends JpaRepository<Users, Long> {
      *       AND aup_id=:link.aup_id
      *   );
      */
-    boolean existsByUsernameIgnoreCaseAndOwnerProject(String username, AdminUserProject link);
 
     /**
      * Find by googleId inside a tenant link.
@@ -429,5 +428,7 @@ public interface UsersRepository extends JpaRepository<Users, Long> {
     
  // ✅ counts ACTIVE users inside ONE app (aup_id)
     long countByOwnerProject_IdAndStatus_NameIgnoreCase(Long ownerProjectLinkId, String statusName);
+
+	boolean existsByEmailIgnoreCaseAndIdNot(String newEmail, Long ownerId);
 
 }

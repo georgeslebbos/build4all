@@ -14,15 +14,16 @@ import com.build4all.tax.domain.TaxClass;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
-
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
@@ -33,13 +34,23 @@ public class ProductController {
     private final ProductService productService;
     private final JwtUtil jwtUtil;
     private final LicensingService licensingService;
-    
+
     public ProductController(ProductService productService, JwtUtil jwtUtil, LicensingService licensingService) {
         this.productService = productService;
         this.jwtUtil = jwtUtil;
         this.licensingService = licensingService;
     }
-    
+
+    /* =========================================================
+     * Helpers
+     * ========================================================= */
+
+    private Long tenantFromAuth(String authHeader) {
+        // ✅ tenant ALWAYS from token claim (ownerProjectId)
+        // JwtUtil already validates + enforces claim presence
+        return jwtUtil.requireOwnerProjectId(authHeader);
+    }
+
     private ResponseEntity<?> blockIfSubscriptionExceeded(Long ownerProjectId) {
         try {
             OwnerAppAccessResponse access = licensingService.getOwnerDashboardAccess(ownerProjectId);
@@ -67,56 +78,33 @@ public class ProductController {
         }
     }
 
-    private String strip(String auth) {
-        return auth == null ? "" : auth.replaceFirst("(?i)^Bearer\\s+", "").trim();
+    private List<AttributeValueDTO> parseAttributes(String attributesJson) throws Exception {
+        if (attributesJson == null || attributesJson.isBlank()) return null;
+        ObjectMapper om = new ObjectMapper();
+        return om.readValue(attributesJson, new TypeReference<List<AttributeValueDTO>>() {});
     }
 
-    private boolean hasRole(String token, String... roles) {
-        String role = jwtUtil.extractRole(token);
-        if (role == null) return false;
-        for (String r : roles) {
-            if (r.equalsIgnoreCase(role)) return true;
+    private ResponseEntity<?> handleSkuConflict(DataIntegrityViolationException e) {
+        String msg = String.valueOf(
+                e.getMostSpecificCause() != null ? e.getMostSpecificCause().getMessage() : e.getMessage()
+        ).toLowerCase();
+
+        if (msg.contains("uk_items_aup_sku_ci")) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of("error", "SKU already exists in this app"));
         }
-        return false;
+
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("error", "Data conflict"));
     }
 
-    private ResponseEntity<?> unauthorized() {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Map.of("error", "Invalid or missing token."));
-    }
-
-    private ResponseEntity<?> forbidden(String msg) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                .body(Map.of("error", msg));
-    }
-
-    /**
-     * Tenant resolution ONLY from token.
-     * OWNER token -> extractOwnerProjectId
-     * USER token  -> extractOwnerProjectIdForUser
-     */
-    private Long resolveOwnerProjectIdFromToken(String token) {
-        if (hasRole(token, "OWNER")) {
-            return jwtUtil.extractOwnerProjectId(token);
-        }
-        if (hasRole(token, "USER")) {
-            return jwtUtil.extractOwnerProjectIdForUser(token);
-        }
-        return null; // unsupported role
-    }
-
-    private ResponseEntity<?> tenantMissing() {
-        return forbidden("Tenant (ownerProjectId) is missing in token claims.");
-    }
-
-    private boolean invalidToken(String token) {
-        return token == null || token.isBlank() || !jwtUtil.validateToken(token);
-    }
-
-    /* ------------------------ create ------------------------ */
+    /* =========================================================
+     * CREATE (OWNER only)
+     * ========================================================= */
 
     @PostMapping(value = "/with-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Create product with optional image (flat form-data) - tenant from token")
+    @PreAuthorize("hasRole('OWNER')")
     public ResponseEntity<?> createWithImageFlat(
             @RequestHeader(value = "Authorization", required = false) String auth,
 
@@ -154,14 +142,13 @@ public class ProductController {
 
             @RequestParam(value = "image", required = false) MultipartFile image
     ) {
-        String token = strip(auth);
-        if (invalidToken(token)) return unauthorized();
-        if (!hasRole(token, "OWNER")) return forbidden("Owner role required.");
+        if (auth == null || auth.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Missing Authorization header"));
+        }
 
-        Long tokenOwnerProjectId = resolveOwnerProjectIdFromToken(token);
-        if (tokenOwnerProjectId == null) return tenantMissing();
-        
-        ResponseEntity<?> blocked = blockIfSubscriptionExceeded(tokenOwnerProjectId);
+        Long ownerProjectId = tenantFromAuth(auth);
+
+        ResponseEntity<?> blocked = blockIfSubscriptionExceeded(ownerProjectId);
         if (blocked != null) return blocked;
 
         if (itemTypeId == null && categoryId == null) {
@@ -172,8 +159,7 @@ public class ProductController {
         try {
             ProductRequest req = new ProductRequest();
 
-            // ✅ tenant ONLY from token
-            req.setOwnerProjectId(tokenOwnerProjectId);
+            req.setOwnerProjectId(ownerProjectId); // ✅ tenant from token
 
             req.setItemTypeId(itemTypeId);
             req.setCategoryId(categoryId);
@@ -206,43 +192,28 @@ public class ProductController {
             req.setHeightCm(heightCm);
             req.setLengthCm(lengthCm);
 
-            if (attributesJson != null && !attributesJson.isBlank()) {
-                ObjectMapper om = new ObjectMapper();
-                List<AttributeValueDTO> attrs =
-                        om.readValue(attributesJson, new TypeReference<List<AttributeValueDTO>>() {});
-                req.setAttributes(attrs);
-            }
+            List<AttributeValueDTO> attrs = parseAttributes(attributesJson);
+            if (attrs != null) req.setAttributes(attrs);
 
             ProductResponse saved = productService.createWithImage(req, image);
             return ResponseEntity.status(HttpStatus.CREATED).body(saved);
 
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
         } catch (DataIntegrityViolationException e) {
-            String msg = String.valueOf(
-                    e.getMostSpecificCause() != null ? e.getMostSpecificCause().getMessage() : e.getMessage()
-            ).toLowerCase();
-
-            if (msg.contains("uk_items_aup_sku_ci")) {
-                return ResponseEntity.status(HttpStatus.CONFLICT)
-                        .body(Map.of("error", "SKU already exists in this app"));
-            }
-
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body(Map.of("error", "Data conflict"));
-        
+            return handleSkuConflict(e);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
         }
-        
     }
 
-    /* ------------------------ update ------------------------ */
+    /* =========================================================
+     * UPDATE (OWNER only)
+     * ========================================================= */
 
     @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Update product with optional image (flat form-data) - tenant from token")
+    @PreAuthorize("hasRole('OWNER')")
     public ResponseEntity<?> updateWithImage(
             @RequestHeader(value = "Authorization", required = false) String auth,
             @PathVariable Long id,
@@ -280,14 +251,13 @@ public class ProductController {
 
             @RequestParam(value = "image", required = false) MultipartFile image
     ) {
-        String token = strip(auth);
-        if (invalidToken(token)) return unauthorized();
-        if (!hasRole(token, "OWNER")) return forbidden("Owner role required.");
+        if (auth == null || auth.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Missing Authorization header"));
+        }
 
-        Long tokenOwnerProjectId = resolveOwnerProjectIdFromToken(token);
-        if (tokenOwnerProjectId == null) return tenantMissing();
-        
-        ResponseEntity<?> blocked = blockIfSubscriptionExceeded(tokenOwnerProjectId);
+        Long ownerProjectId = tenantFromAuth(auth);
+
+        ResponseEntity<?> blocked = blockIfSubscriptionExceeded(ownerProjectId);
         if (blocked != null) return blocked;
 
         try {
@@ -324,126 +294,105 @@ public class ProductController {
             req.setHeightCm(heightCm);
             req.setLengthCm(lengthCm);
 
-            if (attributesJson != null && !attributesJson.isBlank()) {
-                ObjectMapper om = new ObjectMapper();
-                List<AttributeValueDTO> attrs =
-                        om.readValue(attributesJson, new TypeReference<List<AttributeValueDTO>>() {});
-                req.setAttributes(attrs);
-            }
+            List<AttributeValueDTO> attrs = parseAttributes(attributesJson);
+            if (attrs != null) req.setAttributes(attrs);
 
             ProductResponse updated =
-                    productService.updateWithImageTenant(id, tokenOwnerProjectId, req, image);
+                    productService.updateWithImageTenant(id, ownerProjectId, req, image);
 
             return ResponseEntity.ok(updated);
 
         } catch (IllegalArgumentException e) {
-            if (e.getMessage() != null && e.getMessage().toLowerCase().contains("not found")) {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body(Map.of("error", "Product not found"));
+            String m = (e.getMessage() == null) ? "" : e.getMessage().toLowerCase();
+            if (m.contains("not found")) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Product not found"));
             }
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+        } catch (DataIntegrityViolationException e) {
+            return handleSkuConflict(e);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /* =========================================================
+     * DELETE (OWNER only)
+     * ========================================================= */
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('OWNER')")
+    public ResponseEntity<?> delete(
+            @RequestHeader(value = "Authorization", required = false) String auth,
+            @PathVariable Long id
+    ) {
+        if (auth == null || auth.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Missing Authorization header"));
+        }
+
+        Long ownerProjectId = tenantFromAuth(auth);
+
+        try {
+            productService.deleteTenant(id, ownerProjectId);
+            return ResponseEntity.noContent().build();
+
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("code", "PRODUCT_NOT_FOUND"));
         } catch (DataIntegrityViolationException e) {
             String msg = String.valueOf(
                     e.getMostSpecificCause() != null ? e.getMostSpecificCause().getMessage() : e.getMessage()
             ).toLowerCase();
 
-            if (msg.contains("uk_items_aup_sku_ci")) {
-                return ResponseEntity.status(HttpStatus.CONFLICT)
-                        .body(Map.of("error", "SKU already exists in this app"));
-            }
-
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body(Map.of("error", "Data conflict"));
-        
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", e.getMessage()));
-        }
-    }
-
-    /* ------------------------ delete ------------------------ */
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<?> delete(
-            @RequestHeader(value = "Authorization", required = false) String auth,
-            @PathVariable Long id
-    ) {
-        String token = strip(auth);
-        if (invalidToken(token)) return unauthorized();
-        if (!hasRole(token, "OWNER")) return forbidden("Only Owner users can delete products.");
-
-        Long tokenOwnerProjectId = resolveOwnerProjectIdFromToken(token);
-        if (tokenOwnerProjectId == null) return tenantMissing();
-
-        try {
-            productService.deleteTenant(id, tokenOwnerProjectId);
-            return ResponseEntity.noContent().build();
-
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("code", "PRODUCT_NOT_FOUND"));
-        } catch (DataIntegrityViolationException e) {
-            // FK violation (cart/orders/etc)
-            String msg = String.valueOf(e.getMostSpecificCause() != null ? e.getMostSpecificCause().getMessage() : e.getMessage()).toLowerCase();
-
             if (msg.contains("cart_items")) {
-                return ResponseEntity.status(HttpStatus.CONFLICT)
-                        .body(Map.of("code", "PRODUCT_DELETE_BLOCKED_CART"));
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("code", "PRODUCT_DELETE_BLOCKED_CART"));
             }
             if (msg.contains("order_items")) {
-                return ResponseEntity.status(HttpStatus.CONFLICT)
-                        .body(Map.of("code", "PRODUCT_DELETE_BLOCKED_ORDERS"));
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("code", "PRODUCT_DELETE_BLOCKED_ORDERS"));
             }
 
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body(Map.of("code", "PRODUCT_DELETE_BLOCKED_IN_USE"));
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("code", "PRODUCT_DELETE_BLOCKED_IN_USE"));
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("code", "SERVER_ERROR"));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("code", "SERVER_ERROR"));
         }
     }
-    
 
-    /* ------------------------ get one ------------------------ */
+    /* =========================================================
+     * READ (USER or OWNER)
+     * ========================================================= */
 
     @GetMapping("/{id}")
     @Operation(summary = "Get product by id - tenant from token")
+    @PreAuthorize("hasAnyRole('USER','OWNER')")
     public ResponseEntity<?> getById(
             @RequestHeader(value = "Authorization", required = false) String auth,
             @PathVariable Long id
     ) {
-        String token = strip(auth);
-        if (invalidToken(token)) return unauthorized();
-        if (!hasRole(token, "USER", "OWNER")) return forbidden("Only USER/OWNER can access the product.");
+        if (auth == null || auth.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Missing Authorization header"));
+        }
 
-        Long tokenOwnerProjectId = resolveOwnerProjectIdFromToken(token);
-        if (tokenOwnerProjectId == null) return tenantMissing();
+        Long ownerProjectId = tenantFromAuth(auth);
 
         try {
-            ProductResponse p = productService.getTenant(id, tokenOwnerProjectId);
+            ProductResponse p = productService.getTenant(id, ownerProjectId);
             return ResponseEntity.ok(p);
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("error", "Product not found"));
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Product not found"));
         }
     }
 
-    /* ------------------------ lists ------------------------ */
-
     @GetMapping
     @Operation(summary = "List products - tenant from token")
+    @PreAuthorize("hasAnyRole('USER','OWNER')")
     public ResponseEntity<?> list(
             @RequestHeader(value = "Authorization", required = false) String auth,
             @RequestParam(required = false) Long itemTypeId,
             @RequestParam(required = false) Long categoryId
     ) {
-        String token = strip(auth);
-        if (invalidToken(token)) return unauthorized();
-        if (!hasRole(token, "USER", "OWNER")) return forbidden("Only USER/OWNER can access products.");
+        if (auth == null || auth.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Missing Authorization header"));
+        }
 
-        Long ownerProjectId = resolveOwnerProjectIdFromToken(token);
-        if (ownerProjectId == null) return tenantMissing();
+        Long ownerProjectId = tenantFromAuth(auth);
 
         try {
             List<ProductResponse> result;
@@ -459,104 +408,97 @@ public class ProductController {
             return ResponseEntity.ok(result);
 
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
         }
     }
 
     @GetMapping("/new-arrivals")
     @Operation(summary = "List new arrival products - tenant from token")
+    @PreAuthorize("hasAnyRole('USER','OWNER')")
     public ResponseEntity<?> listNewArrivals(
             @RequestHeader(value = "Authorization", required = false) String auth,
             @RequestParam(required = false) Integer days
     ) {
-        String token = strip(auth);
-        if (invalidToken(token)) return unauthorized();
-        if (!hasRole(token, "USER", "OWNER")) return forbidden("Only USER/OWNER can access new arrivals.");
+        if (auth == null || auth.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Missing Authorization header"));
+        }
 
-        Long ownerProjectId = resolveOwnerProjectIdFromToken(token);
-        if (ownerProjectId == null) return tenantMissing();
+        Long ownerProjectId = tenantFromAuth(auth);
 
         try {
             return ResponseEntity.ok(productService.listNewArrivals(ownerProjectId, days));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
         }
     }
 
     @GetMapping("/best-sellers")
     @Operation(summary = "List best-selling products - tenant from token")
+    @PreAuthorize("hasAnyRole('USER','OWNER')")
     public ResponseEntity<?> listBestSellers(
             @RequestHeader(value = "Authorization", required = false) String auth,
             @RequestParam(required = false) Integer limit
     ) {
-        String token = strip(auth);
-        if (invalidToken(token)) return unauthorized();
-        if (!hasRole(token, "USER", "OWNER")) return forbidden("Only USER/OWNER can access best sellers.");
+        if (auth == null || auth.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Missing Authorization header"));
+        }
 
-        Long ownerProjectId = resolveOwnerProjectIdFromToken(token);
-        if (ownerProjectId == null) return tenantMissing();
+        Long ownerProjectId = tenantFromAuth(auth);
 
         try {
             return ResponseEntity.ok(productService.listBestSellers(ownerProjectId, limit));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
         }
     }
 
     @GetMapping("/discounted")
     @Operation(summary = "List discounted products - tenant from token")
+    @PreAuthorize("hasAnyRole('USER','OWNER')")
     public ResponseEntity<?> listDiscounted(
             @RequestHeader(value = "Authorization", required = false) String auth
     ) {
-        String token = strip(auth);
-        if (invalidToken(token)) return unauthorized();
-        if (!hasRole(token, "USER", "OWNER")) {
-            return forbidden("Only USER/OWNER can access discounted products.");
+        if (auth == null || auth.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Missing Authorization header"));
         }
 
-        Long ownerProjectId = resolveOwnerProjectIdFromToken(token);
-        if (ownerProjectId == null) return tenantMissing();
+        Long ownerProjectId = tenantFromAuth(auth);
 
         try {
             return ResponseEntity.ok(productService.listDiscounted(ownerProjectId));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
         }
     }
 
+    /* =========================================================
+     * OWNER dashboard list (OWNER only)
+     * ========================================================= */
+
     @GetMapping("/owner/app-products")
     @Operation(summary = "List all products for one app (OWNER only) - tenant from token")
+    @PreAuthorize("hasRole('OWNER')")
     public ResponseEntity<?> listOwnerAppProducts(
             @RequestHeader(value = "Authorization", required = false) String auth
     ) {
-        String token = strip(auth);
-        if (invalidToken(token)) return unauthorized();
-        if (!hasRole(token, "OWNER")) return forbidden("Owner role required.");
+        if (auth == null || auth.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Missing Authorization header"));
+        }
 
-        Long ownerProjectId = resolveOwnerProjectIdFromToken(token);
-        if (ownerProjectId == null) return tenantMissing();
+        Long ownerProjectId = tenantFromAuth(auth);
 
         try {
             return ResponseEntity.ok(productService.listByOwnerProject(ownerProjectId));
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
         }
     }
 }

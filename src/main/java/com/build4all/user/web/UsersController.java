@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -20,15 +21,19 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * UsersController
+ * UsersController (secured)
  *
- * Goal of comments:
- * ✅ Show which calls hit DB + the equivalent SQL idea.
+ * What this controller enforces:
+ * 1) Authentication: must provide Bearer JWT for protected endpoints.
+ * 2) Authorization (roles): @PreAuthorize gates which roles can enter.
+ * 3) Object-level authorization (IDOR/BOLA protection):
+ *    - USER can only act on their own userId (self-check).
+ *    - OWNER/MANAGER can act within the same tenant (tenant-check).
+ *    - SUPER_ADMIN can bypass tenant-check (global).
  *
- * Notes:
- * - Controller itself doesn’t generate SQL; repositories do.
- * - When you call userService.*, the SQL happens inside service/repository.
- *   I still annotate the *effective SQL* of the called repository methods.
+ * Response style:
+ * - success => { "message": "...", ...optional }
+ * - error   => { "error": "...", ...optional }
  */
 @RestController
 @RequestMapping("/api/users")
@@ -40,301 +45,327 @@ public class UsersController {
 
     private final UserService userService;
     public UsersController(UserService userService) { this.userService = userService; }
-    
-    
-    private ResponseEntity<?> asResponse(ApiException e) {
-        HttpStatus status = HttpStatus.BAD_REQUEST;
 
-        // Avoid compile risk if ApiException methods differ
+    /* =====================================================
+       Helpers (JWT / roles / tenant / self checks)
+       ===================================================== */
+
+  
+    
+
+    private String roleOf(String jwt) {
+        return Optional.ofNullable(jwtUtil.extractRole(jwt)).orElse("").trim().toUpperCase();
+    }
+
+    private boolean isSuperAdmin(String role) {
+        return "SUPER_ADMIN".equalsIgnoreCase(role);
+    }
+
+    /**
+     * Tenant check:
+     * - For most roles, require ownerProjectLinkId in token == request param ownerProjectLinkId.
+     * - SUPER_ADMIN can bypass (global).
+     */
+    private String requireBearer(String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "AUTH", "Missing or invalid token");
+        }
+        return authHeader.substring(7).trim();
+    }
+
+    private void requireValidJwt(String jwt) {
+        if (!jwtUtil.validateToken(jwt)) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "AUTH", "Invalid or expired token");
+        }
+    }
+
+    private void requireTenantUnlessSuperAdmin(String jwt, String role, Long ownerProjectLinkId) {
+        if ("SUPER_ADMIN".equalsIgnoreCase(role)) return;
         try {
-            var m = e.getClass().getMethod("getStatus");
-            Object s = m.invoke(e);
-            if (s instanceof HttpStatus hs) status = hs;
-        } catch (Exception ignore) {}
+            jwtUtil.requireTenantMatch(jwt, ownerProjectLinkId);
+        } catch (RuntimeException e) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "TENANT_MISMATCH", "Tenant mismatch");
+        }
+    }
 
-        Object code = null;
-        Object details = null;
+    private void requireSelfIfUser(String jwt, String role, Long pathUserId) {
+        if (!"USER".equalsIgnoreCase(role)) return;
 
-        try { code = e.getClass().getMethod("getErrorCode").invoke(e); } catch (Exception ignore) {}
-        try { details = e.getClass().getMethod("getDetails").invoke(e); } catch (Exception ignore) {}
+        Long tokenUserId = jwtUtil.extractId(jwt);
+        if (tokenUserId == null || tokenUserId <= 0) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "AUTH", "Invalid token: missing user id");
+        }
+        if (!Objects.equals(tokenUserId, pathUserId)) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "ACCESS_DENIED", "Access denied");
+        }
+    }
+  
 
+    private ResponseEntity<?> ok(String message) {
+        return ResponseEntity.ok(new LinkedHashMap<>(Map.of("message", message)));
+    }
+
+    private ResponseEntity<?> ok(Map<String, Object> body) {
+        return ResponseEntity.ok(body);
+    }
+
+    private ResponseEntity<?> err(HttpStatus status, String error) {
+        return ResponseEntity.status(status).body(new LinkedHashMap<>(Map.of("error", error)));
+    }
+    
+    private ResponseEntity<Map<String, Object>> error(HttpStatus status, String msg) {
+        return ResponseEntity.status(status).body(Map.of("error", msg));
+    }
+
+    private ResponseEntity<Map<String, Object>> unauthorized(String msg) {
+        return error(HttpStatus.UNAUTHORIZED, msg);
+    }
+
+    private ResponseEntity<Map<String, Object>> forbidden(String msg) {
+        return error(HttpStatus.FORBIDDEN, msg);
+    }
+
+    private ResponseEntity<Map<String, Object>> authFail(String msg) {
+        // same logic as CategoryController
+        if (msg != null && msg.equalsIgnoreCase("Forbidden")) return forbidden(msg);
+        return unauthorized(msg);
+    }
+
+    private Long tenantFromAuth(String authHeader) {
+        return jwtUtil.requireOwnerProjectId(authHeader);
+    }
+
+    private ResponseEntity<?> asResponse(ApiException e) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("error", e.getMessage());
-        if (code != null) body.put("code", code);
-        if (details != null) body.put("details", details);
-
-        return ResponseEntity.status(status).body(body);
+        if (e.getCode() != null) body.put("code", e.getCode());
+        if (e.getDetails() != null) body.put("details", e.getDetails());
+        return ResponseEntity.status(e.getStatus()).body(body);
     }
 
     /* =====================================================
-       LIST ALL (tenant-scoped)
+       1) LIST ALL USERS (tenant-scoped)
+       Roles: OWNER, MANAGER, SUPER_ADMIN
        ===================================================== */
-    @ApiResponses({
-            @ApiResponse(responseCode="200"),
-            @ApiResponse(responseCode="401"),
-            @ApiResponse(responseCode="403")
-    })
     @GetMapping("/all")
     public ResponseEntity<?> getAllUsers(
-            @RequestHeader(HttpHeaders.AUTHORIZATION) String token,
-            @RequestParam Long ownerProjectLinkId
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String auth
     ) {
         try {
-            if (token == null || !token.startsWith("Bearer ")) {
-                return ResponseEntity.status(401).body(Map.of("message","Missing or invalid token"));
-            }
-            token = token.substring(7).trim();
+            if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            // No SQL here: extracting claims from JWT is pure computation.
-            String role = jwtUtil.extractRole(token);
+            Long ownerProjectLinkId = tenantFromAuth(auth);
 
-            // No SQL here either: jwtUtil.isBusinessToken(token) depends on your implementation (usually claims check).
-            if (jwtUtil.isBusinessToken(token)
-                    || "SUPER_ADMIN".equalsIgnoreCase(role)
-                    || role == null
-                    || "USER".equalsIgnoreCase(role)) {
+            String jwt = auth.substring(7).trim();
+            String role = Optional.ofNullable(jwtUtil.extractRole(jwt)).orElse("").toUpperCase();
 
-                /**
-                 * SQL executed by userService.getAllUserDtos(ownerProjectLinkId)
-                 *
-                 * In your current UserService, getAllUserDtos() does:
-                 *   1) linkById(ownerProjectLinkId) -> aupRepo.findById(...)
-                 *      SQL: SELECT * FROM admin_user_project WHERE id = :ownerProjectLinkId LIMIT 1;
-                 *
-                 *   2) userRepository.findAll()
-                 *      SQL: SELECT * FROM users;
-                 *
-                 *   3) Java filters for:
-                 *      - tenant match (aup_id)
-                 *      - status ACTIVE
-                 *      - is_public_profile = true
-                 *
-                 * ⚠️ Optimization suggestion (not required): replace findAll()+filter with a repository method:
-                 *    SELECT * FROM users
-                 *    WHERE aup_id=:ownerProjectLinkId
-                 *      AND status = (SELECT id FROM user_status WHERE name='ACTIVE')
-                 *      AND is_public_profile = true;
-                 */
-                return ResponseEntity.ok(userService.getAllUserDtos(ownerProjectLinkId));
+            // Decide who can list users (you had BUSINESS+SUPER_ADMIN+USER)
+            if (!role.equals("SUPER_ADMIN") && !role.equals("USER") && !role.equals("BUSINESS")
+                    && !role.equals("OWNER") && !role.equals("MANAGER")) {
+                return forbidden("Access denied");
             }
 
-            return ResponseEntity.status(403).body(Map.of("message","Access denied"));
+            return ResponseEntity.ok(userService.getAllUserDtos(ownerProjectLinkId));
+
+        } catch (IllegalArgumentException e) {
+            return authFail(e.getMessage());
         } catch (Exception e) {
-            return ResponseEntity.status(401).body(Map.of("message","Invalid or expired token"));
+            return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to load users");
         }
     }
 
     /* =====================================================
-       GET ONE (tenant-scoped)
+       2) GET ONE USER (tenant-scoped)
+       Roles: USER (self), OWNER, MANAGER, SUPER_ADMIN
        ===================================================== */
     @GetMapping("/{id}")
     public ResponseEntity<?> getUserById(
             @PathVariable Long id,
-            @RequestParam Long ownerProjectLinkId,
-            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String auth
     ) {
         try {
-            // 1) Require Bearer token
-            if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", "Missing or invalid token"));
-            }
+            if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
 
-            String jwt = authHeader.substring(7).trim();
+            Long ownerProjectLinkId = tenantFromAuth(auth);
 
-            // 2) Validate token
-            if (!jwtUtil.validateToken(jwt)) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", "Invalid or expired token"));
-            }
+            String jwt = auth.substring(7).trim();
+            String role = Optional.ofNullable(jwtUtil.extractRole(jwt)).orElse("").toUpperCase();
 
-            String role = Optional.ofNullable(jwtUtil.extractRole(jwt))
-                    .orElse("")
-                    .toUpperCase();
-
-            // 3) Enforce tenant match for tenant-scoped roles
-            // SUPER_ADMIN may be global and may not have ownerProjectId claim
-            if (!"SUPER_ADMIN".equals(role)) {
-                try {
-                    jwtUtil.requireTenantMatch(jwt, ownerProjectLinkId);
-                } catch (RuntimeException e) {
-                    return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                            .body(Map.of("error", "Tenant mismatch"));
-                }
-            }
-
-            // 4) Object-level authorization (IDOR/BOLA fix)
+            // Object-level rules (IDOR fix)
             switch (role) {
                 case "SUPER_ADMIN":
                 case "OWNER":
                 case "MANAGER":
-                    // allowed (already tenant-checked except SUPER_ADMIN)
+                    // allowed
                     break;
 
                 case "USER":
                     Long tokenUserId = jwtUtil.extractId(jwt);
-                    if (!Objects.equals(tokenUserId, id)) {
-                        return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                                .body(Map.of("error", "Access denied"));
-                    }
+                    if (!Objects.equals(tokenUserId, id)) return forbidden("Access denied");
                     break;
 
-                // If you do NOT want businesses to access user details, deny explicitly
-                case "BUSINESS":
                 default:
-                    return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                            .body(Map.of("error", "Access denied"));
+                    return forbidden("Access denied");
             }
 
-            // 5) Fetch only after authz passes
             UserDto dto = userService.getUserDtoByIdAndOwnerProject(id, ownerProjectLinkId);
             return ResponseEntity.ok(dto);
 
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-        } catch (RuntimeException e) {
-            // Avoid leaking whether user exists in another tenant (optional hardening)
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("error", "User not found"));
+            // avoid tenant leaks -> return 404 optionally
+            return error(HttpStatus.NOT_FOUND, "User not found");
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Server error"));
+            return error(HttpStatus.INTERNAL_SERVER_ERROR, "Server error");
         }
     }
+
     /* =====================================================
-       DELETE USER (self or SUPER_ADMIN)
+       3) DELETE USER
+       Roles: USER (self) or SUPER_ADMIN
        ===================================================== */
+    @PreAuthorize("hasAnyRole('USER','SUPER_ADMIN')")
     @DeleteMapping("/{id}")
-    public ResponseEntity<String> deleteUser(
+    public ResponseEntity<?> deleteUser(
             @PathVariable Long id,
             @RequestBody Map<String, String> body,
-            @RequestHeader("Authorization") String token
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
     ) {
         try {
-            if (token == null || !token.startsWith("Bearer ")) {
-                return ResponseEntity.status(401).body("Missing or invalid token");
-            }
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
 
-            String jwt = token.substring(7).trim();
-            String role = jwtUtil.extractRole(jwt);
+            String role = roleOf(jwt);
 
-            // ✅ SUPER_ADMIN can delete any user
-            if ("SUPER_ADMIN".equalsIgnoreCase(role)) {
+            if (isSuperAdmin(role)) {
                 boolean deleted = userService.deleteUserById(id);
-                return deleted
-                        ? ResponseEntity.ok("User deleted by SUPER_ADMIN successfully")
-                        : ResponseEntity.status(404).body("User not found");
+                return deleted ? ok("User deleted by SUPER_ADMIN successfully")
+                               : err(HttpStatus.NOT_FOUND, "User not found");
             }
 
-            // ✅ SELF delete: use userId from token (NOT email/phone)
-            Long tokenUserId = jwtUtil.extractId(jwt);
-            if (tokenUserId == null || tokenUserId <= 0) {
-                return ResponseEntity.status(401).body("Invalid token: missing user id");
-            }
-
-            if (!Objects.equals(tokenUserId, id)) {
-                return ResponseEntity.status(403).body("Access denied");
-            }
+            // USER self delete
+            requireSelfIfUser(jwt, role, id);
 
             String password = body.get("password");
             if (password == null || password.isBlank()) {
-                return ResponseEntity.badRequest().body("Password is required");
+                return err(HttpStatus.BAD_REQUEST, "Password is required");
             }
 
             boolean deleted = userService.deleteUserByIdWithPassword(id, password);
 
-            return deleted
-                    ? ResponseEntity.ok("User deleted successfully")
-                    : ResponseEntity.status(403).body("Invalid password or user not found");
+            return deleted ? ok("User deleted successfully")
+                           : err(HttpStatus.FORBIDDEN, "Invalid password or user not found");
 
+        } catch (ApiException e) {
+            return asResponse(e);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body("Unexpected error: " + e.getMessage());
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected error");
         }
     }
 
     /* =====================================================
-       PASSWORD RESET FLOW (tenant-scoped)
+       4) PASSWORD RESET FLOW (public)
+       No JWT required by design.
        ===================================================== */
 
     @PostMapping("/reset-password")
-    public ResponseEntity<Map<String, String>> sendResetCode(
+    public ResponseEntity<?> sendResetCode(
             @RequestBody Map<String, String> body,
             @RequestParam Long ownerProjectLinkId
     ) {
         try {
             String email = body.get("email");
-
-            /**
-             * SQL inside userService.resetPassword(email, ownerProjectLinkId):
-             *   SELECT * FROM users
-             *   WHERE email=:email AND aup_id=:ownerProjectLinkId
-             *   LIMIT 1;
-             *
-             * Reset code is stored in-memory (Map) -> no SQL.
-             * Sending email -> no SQL.
-             */
             boolean ok = userService.resetPassword(email, ownerProjectLinkId);
 
-            return ok
-                    ? ResponseEntity.ok(Map.of("message", "Reset code sent"))
-                    : ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "User not found"));
-
+            return ok ? ok("Reset code sent")
+                      : err(HttpStatus.NOT_FOUND, "User not found");
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("message", "Unexpected error"));
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected error");
         }
     }
-    
-    
- // src/main/java/com/build4all/user/web/UsersController.java
 
+    @PostMapping("/verify-reset-code")
+    public ResponseEntity<?> verifyResetCode(
+            @RequestBody Map<String, String> body,
+            @RequestParam Long ownerProjectLinkId
+    ) {
+        try {
+            String email = body.get("email");
+            String code  = body.get("code");
+
+            boolean ok = userService.verifyResetCode(email, code, ownerProjectLinkId);
+
+            return ok ? ok("Code verified successfully")
+                      : err(HttpStatus.BAD_REQUEST, "Invalid code");
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected error");
+        }
+    }
+
+    @PostMapping("/update-password")
+    public ResponseEntity<?> updatePassword(
+            @RequestBody Map<String, String> body,
+            @RequestParam Long ownerProjectLinkId
+    ) {
+        try {
+            String email = body.get("email");
+            String code  = body.get("code");
+            String newPassword = body.get("newPassword");
+
+            if (newPassword == null || newPassword.isBlank()) {
+                return err(HttpStatus.BAD_REQUEST, "New password is required");
+            }
+
+            boolean ok = userService.updatePassword(email, code, newPassword, ownerProjectLinkId);
+
+            return ok ? ok("Password updated successfully")
+                      : err(HttpStatus.BAD_REQUEST, "Invalid code or user");
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected error");
+        }
+    }
+
+    /* =====================================================
+       5) UPDATE USER PROFILE
+       Roles: USER (self), SUPER_ADMIN
+       Tenant scoped for USER; SUPER_ADMIN bypasses tenant match if desired.
+       ===================================================== */
     @PutMapping(value = "/{id}/profile", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> updateUserProfile(
             @PathVariable Long id,
-            @RequestParam Long ownerProjectLinkId,
             @RequestParam String firstName,
             @RequestParam String lastName,
             @RequestParam(required = false) String username,
-
-            // ✅ NEW: email change must be verified
             @RequestParam(required = false) String email,
-
             @RequestParam(required = false) Boolean isPublicProfile,
             @RequestParam(required = false) Boolean imageRemoved,
             @RequestPart(required = false) MultipartFile profileImage,
-            @RequestHeader(HttpHeaders.AUTHORIZATION) String token
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String auth
     ) {
         try {
-            if (token == null || !token.startsWith("Bearer ")) {
-                return ResponseEntity.status(401).body(Map.of("error","Missing or invalid token"));
+            if (auth == null || auth.isBlank()) return unauthorized("Missing Authorization header");
+
+            Long ownerProjectLinkId = tenantFromAuth(auth);
+
+            String jwt = auth.substring(7).trim();
+            String role = Optional.ofNullable(jwtUtil.extractRole(jwt)).orElse("").toUpperCase();
+
+            // only self user OR admin roles
+            if ("USER".equals(role)) {
+                Long tokenUserId = jwtUtil.extractId(jwt);
+                if (!Objects.equals(tokenUserId, id)) return forbidden("Access denied");
+            } else if (!role.equals("SUPER_ADMIN") && !role.equals("OWNER") && !role.equals("MANAGER")) {
+                return forbidden("Access denied");
             }
 
-            String jwt = token.substring(7).trim();
+            Long tokenUserId = jwtUtil.extractId(jwt);
 
-            // ✅ good practice: validate token
-            if (!jwtUtil.validateToken(jwt)) {
-                return ResponseEntity.status(401).body(Map.of("error","Invalid or expired token"));
-            }
-
-            // ✅ tenant mismatch protection (same style as your GET /{id})
-            try {
-                jwtUtil.requireTenantMatch(jwt, ownerProjectLinkId);
-            } catch (RuntimeException e) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Tenant mismatch"));
-            }
-
-            Long tokenUserId = jwtUtil.extractId(jwt); // ✅ userId from claim
-
-            // ✅ Update normal profile fields (NOT email)
             Users updated = userService.updateUserProfile(
                     id, ownerProjectLinkId, tokenUserId,
                     username, firstName, lastName,
-                    isPublicProfile, profileImage,
-                    imageRemoved
+                    isPublicProfile, profileImage, imageRemoved
             );
 
             boolean emailVerificationRequired = false;
-
-            // ✅ If email is sent -> request verification, but DO NOT update email now
             if (email != null && !email.isBlank()) {
                 userService.requestEmailChange(id, ownerProjectLinkId, tokenUserId, email);
                 emailVerificationRequired = true;
@@ -345,579 +376,497 @@ public class UsersController {
                     ? "Profile updated. Verification code sent to new email."
                     : "Profile updated successfully");
             resp.put("emailVerificationRequired", emailVerificationRequired);
-            resp.put("user", new UserDto(updated)); // email will still be the OLD one until verify
+            resp.put("user", new UserDto(updated));
             if (emailVerificationRequired) resp.put("pendingEmail", email.trim());
 
             return ResponseEntity.ok(resp);
 
+        } catch (IllegalArgumentException e) {
+            return authFail(e.getMessage());
         } catch (ApiException e) {
             return asResponse(e);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-        } catch (RuntimeException e) {
-            String msg = e.getMessage() == null ? "Unexpected error" : e.getMessage();
-
-            if ("Access denied".equalsIgnoreCase(msg)) {
-                return ResponseEntity.status(403).body(Map.of("error", msg));
-            }
-
-            if (msg.toLowerCase().contains("username already")) {
-                return ResponseEntity.status(409).body(Map.of("error", msg));
-            }
-
-            return ResponseEntity.status(404).body(Map.of("error", msg));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", "Server error: " + e.getMessage()));
+            return error(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update profile");
         }
     }
-    
+    /* =====================================================
+       6) EMAIL CHANGE VERIFY/RESEND (self)
+       Role: USER only
+       ===================================================== */
+    @PreAuthorize("hasRole('USER')")
     @PostMapping("/{id}/email-change/verify")
     public ResponseEntity<?> verifyEmailChange(
             @PathVariable Long id,
-            @RequestParam Long ownerProjectLinkId,
             @RequestBody Map<String, String> body,
-            @RequestHeader(HttpHeaders.AUTHORIZATION) String token
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
     ) {
         try {
-            if (token == null || !token.startsWith("Bearer ")) {
-                return ResponseEntity.status(401).body(Map.of("error","Missing or invalid token"));
-            }
-            String jwt = token.substring(7).trim();
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
 
-            if (!jwtUtil.validateToken(jwt)) {
-                return ResponseEntity.status(401).body(Map.of("error","Invalid or expired token"));
-            }
+            Long ownerProjectLinkId = jwtUtil.requireOwnerProjectId(authHeader); // ✅ extract from token/header
 
-            try {
-                jwtUtil.requireTenantMatch(jwt, ownerProjectLinkId);
-            } catch (RuntimeException e) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Tenant mismatch"));
-            }
-
-            Long tokenUserId = jwtUtil.extractId(jwt);
-            if (!Objects.equals(tokenUserId, id)) {
-                return ResponseEntity.status(403).body(Map.of("error", "Access denied"));
-            }
+            String role = roleOf(jwt);
+            requireSelfIfUser(jwt, role, id);
 
             String code = body.get("code");
-            userService.verifyEmailChange(id, ownerProjectLinkId, tokenUserId, code);
+            userService.verifyEmailChange(id, ownerProjectLinkId, jwtUtil.extractId(jwt), code);
 
-            return ResponseEntity.ok(Map.of("message", "Email updated successfully"));
+            return ok("Email updated successfully");
+
         } catch (ApiException e) {
             return asResponse(e);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", "Server error: " + e.getMessage()));
-        }
-    }
-
-    @PostMapping("/{id}/email-change/resend")
-    public ResponseEntity<?> resendEmailChange(
-            @PathVariable Long id,
-            @RequestParam Long ownerProjectLinkId,
-            @RequestHeader(HttpHeaders.AUTHORIZATION) String token
-    ) {
-        try {
-            if (token == null || !token.startsWith("Bearer ")) {
-                return ResponseEntity.status(401).body(Map.of("error","Missing or invalid token"));
-            }
-            String jwt = token.substring(7).trim();
-
-            if (!jwtUtil.validateToken(jwt)) {
-                return ResponseEntity.status(401).body(Map.of("error","Invalid or expired token"));
-            }
-
-            try {
-                jwtUtil.requireTenantMatch(jwt, ownerProjectLinkId);
-            } catch (RuntimeException e) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Tenant mismatch"));
-            }
-
-            Long tokenUserId = jwtUtil.extractId(jwt);
-            if (!Objects.equals(tokenUserId, id)) {
-                return ResponseEntity.status(403).body(Map.of("error", "Access denied"));
-            }
-
-            userService.resendEmailChangeCode(id, ownerProjectLinkId, tokenUserId);
-
-            return ResponseEntity.ok(Map.of("message", "Verification code resent"));
-        } catch (ApiException e) {
-            return asResponse(e);
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", "Server error: " + e.getMessage()));
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Server error");
         }
     }
     
-    @PostMapping("/verify-reset-code")
-    public ResponseEntity<Map<String, String>> verifyCode(
-            @RequestBody Map<String, String> body,
-            @RequestParam Long ownerProjectLinkId
+    @PreAuthorize("hasRole('USER')")
+    @PostMapping("/{id}/email-change/resend")
+    public ResponseEntity<?> resendEmailChange(
+            @PathVariable Long id,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
     ) {
         try {
-            String email = body.get("email");
-            String code  = body.get("code");
+            // 1) Auth
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
 
-            /**
-             * userService.verifyResetCode(...) uses in-memory Map only.
-             * ✅ No SQL.
-             */
-            return userService.verifyResetCode(email, code, ownerProjectLinkId)
-                    ? ResponseEntity.ok(Map.of("message", "Code verified successfully"))
-                    : ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", "Invalid code"));
+            // 2) Tenant from token (NO client param)
+            Long ownerProjectLinkId = jwtUtil.requireOwnerProjectId(authHeader);
 
+            // 3) Object-level auth (self only)
+            String role = roleOf(jwt);
+            requireSelfIfUser(jwt, role, id);
+
+            // 4) Action
+            Long tokenUserId = jwtUtil.extractId(jwt);
+            userService.resendEmailChangeCode(id, ownerProjectLinkId, tokenUserId);
+
+            return ok("Verification code resent");
+
+        } catch (ApiException e) {
+            return asResponse(e);
+        } catch (IllegalArgumentException e) {
+            // if requireOwnerProjectId throws IllegalArgumentException
+            return err(HttpStatus.UNAUTHORIZED, e.getMessage() == null ? "Unauthorized" : e.getMessage());
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("message", "Unexpected error"));
-        }
-    }
-
-    @PostMapping("/update-password")
-    public ResponseEntity<Map<String, String>> updatePassword(
-            @RequestBody Map<String, String> body,
-            @RequestParam Long ownerProjectLinkId
-    ) {
-        try {
-            String email = body.get("email");
-            String code  = body.get("code");
-            String newPassword = body.get("newPassword");
-
-            if (newPassword == null || newPassword.isBlank()) {
-                return ResponseEntity.badRequest().body(Map.of("message", "New password is required"));
-            }
-
-            /**
-             * SQL inside userService.updatePassword(...):
-             * 1) verifyResetCode -> no SQL (in-memory)
-             * 2) find user by tenant:
-             *    SELECT * FROM users WHERE email=:email AND aup_id=:ownerProjectLinkId LIMIT 1;
-             * 3) UPDATE password hash:
-             *    UPDATE users SET password_hash=:hash WHERE user_id=:id;
-             */
-            boolean ok = userService.updatePassword(email, code, newPassword, ownerProjectLinkId);
-
-            return ok
-                    ? ResponseEntity.ok(Map.of("message", "Password updated successfully"))
-                    : ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", "Invalid code or user"));
-
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("message", "Unexpected error"));
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Server error");
         }
     }
 
     /* =====================================================
-       SELF STATUS UPDATE (requires password only for INACTIVE)
+       7) SELF STATUS UPDATE (self)
+       Role: USER only
        ===================================================== */
+    @PreAuthorize("hasRole('USER')")
     @PutMapping("/{id}/status")
-    public ResponseEntity<String> updateStatus(
+    public ResponseEntity<?> updateStatus(
             @PathVariable Long id,
             @RequestBody Map<String, String> body,
-            @RequestHeader(HttpHeaders.AUTHORIZATION) String token
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
     ) {
         try {
-            if (token == null || !token.startsWith("Bearer ")) {
-                return ResponseEntity.status(401).body("Missing or invalid token");
-            }
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
 
-            String jwt = token.substring(7).trim();
+            String role = roleOf(jwt);
+            requireSelfIfUser(jwt, role, id);
 
-            // ✅ Use userId from token
-            Long tokenUserId = jwtUtil.extractId(jwt);
-            if (tokenUserId == null || tokenUserId <= 0) {
-                return ResponseEntity.status(401).body("Invalid token: missing user id");
-            }
-
-            if (!Objects.equals(tokenUserId, id)) {
-                return ResponseEntity.status(403).body("Access denied");
-            }
-
-            // ✅ Fetch user by id (no email/phone guessing)
             Users user = usersRepository.findById(id).orElse(null);
-            if (user == null) {
-                return ResponseEntity.status(404).body("User not found");
-            }
+            if (user == null) return err(HttpStatus.NOT_FOUND, "User not found");
 
             String statusStr = body.getOrDefault("status", "").trim();
-            String password = body.get("password");
+            String password  = body.get("password");
 
-            if (statusStr.isBlank()) {
-                return ResponseEntity.badRequest().body("Status is required");
-            }
+            if (statusStr.isBlank()) return err(HttpStatus.BAD_REQUEST, "Status is required");
 
             if ("INACTIVE".equalsIgnoreCase(statusStr)) {
                 if (password == null || password.isBlank()) {
-                    return ResponseEntity.badRequest().body("Password is required to deactivate account.");
+                    return err(HttpStatus.BAD_REQUEST, "Password is required to deactivate account.");
                 }
-
                 if (!userService.checkPassword(user, password)) {
-                    return ResponseEntity.status(401).body("Incorrect password. Status not changed.");
+                    return err(HttpStatus.UNAUTHORIZED, "Incorrect password. Status not changed.");
                 }
             }
 
             Optional<UserStatus> newStatusOpt = userStatusRepository.findByNameIgnoreCase(statusStr);
-            if (newStatusOpt.isEmpty()) {
-                return ResponseEntity.badRequest().body("Invalid status value");
-            }
+            if (newStatusOpt.isEmpty()) return err(HttpStatus.BAD_REQUEST, "Invalid status value");
 
             user.setStatus(newStatusOpt.get());
             user.setUpdatedAt(LocalDateTime.now());
             usersRepository.save(user);
 
-            return ResponseEntity.ok("User status updated to " + newStatusOpt.get().getName());
+            return ok("User status updated to " + newStatusOpt.get().getName());
 
+        } catch (ApiException e) {
+            return asResponse(e);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body("Unexpected error: " + e.getMessage());
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected error");
         }
     }
 
     /* =====================================================
-       ADMIN/GENERAL: UPDATE USER STATUS (duplicate legacy route)
+       8) ADMIN: UPDATE USER STATUS (legacy route)
+       Role: SUPER_ADMIN only
        ===================================================== */
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @PutMapping("/users/{id}/status")
-    public ResponseEntity<?> updateUserStatus(
+    public ResponseEntity<?> updateUserStatusAdmin(
             @PathVariable Long id,
-            @RequestHeader("Authorization") String authHeader,
             @RequestBody Map<String, String> requestBody
     ) {
-        String newStatus = requestBody.get("status");
-        String password = requestBody.get("password");
-        if (newStatus == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Missing status"));
-        }
-
         try {
-            /**
-             * SQL inside userService.getUserById(id) (legacy/global):
-             *   SELECT * FROM users WHERE user_id=:id LIMIT 1;
-             */
+            String newStatus = requestBody.get("status");
+            String password  = requestBody.get("password");
+
+            if (newStatus == null || newStatus.isBlank()) {
+                return err(HttpStatus.BAD_REQUEST, "Missing status");
+            }
+
             Users user = userService.getUserById(id);
 
             if ("INACTIVE".equalsIgnoreCase(newStatus)) {
                 if (password == null || password.isBlank()) {
-                    return ResponseEntity.badRequest().body(Map.of("error", "Password is required to deactivate account."));
+                    return err(HttpStatus.BAD_REQUEST, "Password is required to deactivate account.");
                 }
-
-                // No SQL: password hash compare
-                boolean isValid = userService.checkPassword(user, password);
-                if (!isValid) {
-                    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                            .body(Map.of("error", "Incorrect password. Status not changed."));
+                if (!userService.checkPassword(user, password)) {
+                    return err(HttpStatus.UNAUTHORIZED, "Incorrect password. Status not changed.");
                 }
             }
 
-            /**
-             * SQL inside userService.getStatus(newStatus):
-             *   SELECT * FROM user_status WHERE name=:NEWSTATUS_UPPER LIMIT 1;
-             */
             UserStatus statusEntity = userService.getStatus(newStatus);
 
-            // UPDATE users status
             user.setStatus(statusEntity);
             user.setUpdatedAt(LocalDateTime.now());
-
-            /**
-             * SQL inside userService.save(user):
-             *   UPDATE users SET status=:statusId, updated_at=:now WHERE user_id=:id;
-             */
             userService.save(user);
 
-            return ResponseEntity.ok(Map.of("message", "User status updated successfully", "newStatus", newStatus));
+            Map<String, Object> resp = new LinkedHashMap<>();
+            resp.put("message", "User status updated successfully");
+            resp.put("newStatus", newStatus.toUpperCase());
+            return ok(resp);
+
         } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+            return err(HttpStatus.BAD_REQUEST, e.getMessage() == null ? "Bad request" : e.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Server error");
         }
     }
 
     /* =====================================================
-       GOOGLE USERS: UPDATE STATUS (legacy)
+       9) GOOGLE USER STATUS (self)
+       Role: USER only
        ===================================================== */
+    @PreAuthorize("hasRole('USER')")
     @PutMapping("/auth/google/status")
     public ResponseEntity<?> updateGoogleUserStatus(
-            @RequestHeader("Authorization") String token,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader,
             @RequestBody Map<String, String> requestBody
     ) {
         try {
-            if (token == null || !token.startsWith("Bearer ")) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Missing or invalid token"));
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
+
+            // Prefer userId claim (stronger than email)
+            Long userId = jwtUtil.extractId(jwt);
+            if (userId == null || userId <= 0) {
+                return err(HttpStatus.UNAUTHORIZED, "Invalid token: missing user id");
             }
 
-            String jwt = token.replace("Bearer ", "").trim();
+            Users user = usersRepository.findById(userId).orElse(null);
+            if (user == null) return err(HttpStatus.NOT_FOUND, "User not found");
 
-            // No SQL: parse JWT
-            String email = jwtUtil.extractUsername(jwt);
-
-            /**
-             * SQL inside userService.getUserByEmaill(email) (legacy/global):
-             *   SELECT * FROM users WHERE email=:email LIMIT 1;
-             *   OR if not email -> phone path
-             */
-            Users user = userService.getUserByEmaill(email);
-
-            // No SQL: just checks in memory
-            if (user == null || user.getGoogleId() == null) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("error", "Only Google users can use this endpoint"));
+            if (user.getGoogleId() == null) {
+                return err(HttpStatus.FORBIDDEN, "Only Google users can use this endpoint");
             }
 
             String newStatus = requestBody.get("status");
             if (newStatus == null || newStatus.isBlank()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Missing status"));
+                return err(HttpStatus.BAD_REQUEST, "Missing status");
             }
 
-            /**
-             * SQL inside userService.getStatus(newStatus):
-             *   SELECT * FROM user_status WHERE name=:NEWSTATUS_UPPER LIMIT 1;
-             */
             UserStatus status = userService.getStatus(newStatus);
-
             user.setStatus(status);
             user.setUpdatedAt(LocalDateTime.now());
-
-            /**
-             * SQL:
-             *   UPDATE users SET status=:statusId, updated_at=:now WHERE user_id=:id;
-             */
             userService.save(user);
 
-            return ResponseEntity.ok(Map.of(
-                    "message", "Google account status updated",
-                    "status", status.getName(),
-                    "googleId", user.getGoogleId()
-            ));
+            Map<String, Object> resp = new LinkedHashMap<>();
+            resp.put("message", "Google account status updated");
+            resp.put("status", status.getName());
+            resp.put("googleId", user.getGoogleId());
+            return ok(resp);
+
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Failed to update Google user status", "details", e.getMessage()));
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update Google user status");
         }
     }
 
     /* =====================================================
-       PROFILE VISIBILITY (self) – accepts PUT and PATCH
-       tenant-scoped by ownerProjectLinkId
+       10) PROFILE VISIBILITY (self)
+       Role: USER only
        ===================================================== */
+    @PreAuthorize("hasRole('USER')")
     @PutMapping("/profile-visibility")
     @PatchMapping("/profile-visibility")
-    public ResponseEntity<String> updateProfileVisibility(
+    public ResponseEntity<?> updateProfileVisibility(
             @RequestParam boolean isPublic,
-            @RequestParam Long ownerProjectLinkId,
-            @RequestHeader(HttpHeaders.AUTHORIZATION) String token
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
     ) {
         try {
-            if (token == null || !token.startsWith("Bearer ")) {
-                return ResponseEntity.status(401).body("Missing or invalid token");
-            }
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
 
-            String jwt = token.substring(7).trim();
+            Long ownerProjectLinkId = jwtUtil.requireOwnerProjectId(authHeader); // ✅
 
-           
             Long userId = jwtUtil.extractId(jwt);
             if (userId == null || userId <= 0) {
-                return ResponseEntity.status(401).body("Invalid token: missing user id");
+                return err(HttpStatus.UNAUTHORIZED, "Invalid token: missing user id");
             }
 
-            // ✅ tenant scoped by id + ownerProjectLinkId
-            Users user = usersRepository.findByIdAndOwnerProject_Id(userId, ownerProjectLinkId)
-                    .orElse(null);
-
-            if (user == null) {
-                return ResponseEntity.status(404).body("User not found in this app");
-            }
+            Users user = usersRepository.findByIdAndOwnerProject_Id(userId, ownerProjectLinkId).orElse(null);
+            if (user == null) return err(HttpStatus.NOT_FOUND, "User not found in this app");
 
             user.setIsPublicProfile(isPublic);
             usersRepository.save(user);
 
-            return ResponseEntity.ok("Profile visibility updated to " + (isPublic ? "PUBLIC" : "PRIVATE"));
+            return ok("Profile visibility updated to " + (isPublic ? "PUBLIC" : "PRIVATE"));
 
+        } catch (ApiException e) {
+            return asResponse(e);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body("Unexpected error: " + e.getMessage());
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected error");
         }
     }
 
     /* =====================================================
-       FRIEND SUGGESTIONS (legacy/global)
+       11) FRIEND SUGGESTIONS (self)
+       Role: USER only
        ===================================================== */
+    @PreAuthorize("hasRole('USER')")
     @GetMapping("/{userId}/suggestions")
     public ResponseEntity<?> getFriendSuggestions(
             @PathVariable Long userId,
-            @RequestHeader("Authorization") String token
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
     ) {
         try {
-            /**
-             * SQL inside userService.suggestFriendsByCategory(userId) (current implementation):
-             * 1) SELECT * FROM users WHERE user_id=:userId LIMIT 1;
-             * 2) SELECT * FROM UserCategories WHERE user_id=:userId;
-             * 3) SELECT * FROM UserCategories WHERE category_id IN (:ids);
-             * Then Java filters distinct users.
-             */
-            var suggestions = userService.suggestFriendsByCategory(userId);
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
 
-            // DTO mapping in memory
+            String role = roleOf(jwt);
+            requireSelfIfUser(jwt, role, userId);
+
+            var suggestions = userService.suggestFriendsByCategory(userId);
             var result = suggestions.stream().map(UserDto::new).collect(Collectors.toList());
             return ResponseEntity.ok(result);
+
+        } catch (ApiException e) {
+            return asResponse(e);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body("Error fetching suggestions: " + e.getMessage());
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Error fetching suggestions");
         }
     }
 
     /* =====================================================
-       USER CATEGORIES (legacy/global)
+       12) USER CATEGORIES (self)
+       Role: USER only
        ===================================================== */
-
+    @PreAuthorize("hasRole('USER')")
     @PostMapping("/{userId}/categories")
     public ResponseEntity<?> addUserCategories(
             @PathVariable Long userId,
-            @RequestBody List<Long> categoryIds
+            @RequestBody List<Long> categoryIds,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
     ) {
-        /**
-         * SQL inside userService.addUserCategories(userId, categoryIds):
-         * 1) SELECT * FROM users WHERE user_id=:userId LIMIT 1;
-         * 2) SELECT * FROM categories WHERE category_id IN (:categoryIds);
-         * 3) For each category:
-         *    - SELECT EXISTS(SELECT 1 FROM UserCategories WHERE user_id=? AND category_id=?)
-         *    - INSERT INTO UserCategories (user_id, category_id, ...) VALUES (...)
-         */
-        userService.addUserCategories(userId, categoryIds);
-        return ResponseEntity.ok(Map.of("message", "User categories added successfully"));
-    }
-
-    @GetMapping("/{userId}/categories")
-    public ResponseEntity<?> getUserCategories(@PathVariable Long userId) {
         try {
-            /**
-             * SQL inside userService.getUserCategories(userId):
-             * 1) SELECT * FROM users WHERE user_id=:userId LIMIT 1;
-             * 2) SELECT * FROM UserCategories WHERE user_id=:userId;
-             * (plus potential extra SELECTs if Category is lazy and not already loaded)
-             */
-            List<String> categories = userService.getUserCategories(userId);
-            return ResponseEntity.ok(categories);
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
+
+            requireSelfIfUser(jwt, roleOf(jwt), userId);
+
+            userService.addUserCategories(userId, categoryIds);
+            return ok("User categories added successfully");
+        } catch (ApiException e) {
+            return asResponse(e);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Failed to fetch categories");
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to add categories");
         }
     }
 
+    @PreAuthorize("hasRole('USER')")
+    @GetMapping("/{userId}/categories")
+    public ResponseEntity<?> getUserCategories(
+            @PathVariable Long userId,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
+    ) {
+        try {
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
+
+            requireSelfIfUser(jwt, roleOf(jwt), userId);
+
+            List<String> categories = userService.getUserCategories(userId);
+            return ResponseEntity.ok(categories);
+        } catch (ApiException e) {
+            return asResponse(e);
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to fetch categories");
+        }
+    }
+
+    @PreAuthorize("hasRole('USER')")
     @PutMapping("/{userId}/categories/{categoryId}")
     public ResponseEntity<?> updateUserCategory(
             @PathVariable Long userId,
             @PathVariable Long categoryId,
-            @RequestBody Map<String, String> body
+            @RequestBody Map<String, String> body,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
     ) {
         try {
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
+
+            requireSelfIfUser(jwt, roleOf(jwt), userId);
+
             String newCategoryName = body.get("name");
             if (newCategoryName == null || newCategoryName.isBlank()) {
-                return ResponseEntity.badRequest().body("Category name is required");
+                return err(HttpStatus.BAD_REQUEST, "Category name is required");
             }
 
-            /**
-             * SQL inside userService.updateUserCategory(userId, categoryId, newCategoryName):
-             * - SELECT user
-             * - SELECT old category by id
-             * - SELECT new category by name (ignore case)
-             * - EXISTS old mapping
-             * - DELETE old mapping
-             * - EXISTS new mapping
-             * - INSERT new mapping (if missing)
-             */
             boolean updated = userService.updateUserCategory(userId, categoryId, newCategoryName);
 
-            return updated
-                    ? ResponseEntity.ok("Category updated successfully")
-                    : ResponseEntity.status(HttpStatus.NOT_FOUND).body("Category not found for this user");
+            return updated ? ok("Category updated successfully")
+                           : err(HttpStatus.NOT_FOUND, "Category not found for this user");
+        } catch (ApiException e) {
+            return asResponse(e);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error updating category");
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Error updating category");
         }
     }
 
+    @PreAuthorize("hasRole('USER')")
     @DeleteMapping("/{userId}/categories/{categoryId}")
     public ResponseEntity<?> deleteUserCategory(
             @PathVariable Long userId,
-            @PathVariable Long categoryId
+            @PathVariable Long categoryId,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
     ) {
         try {
-            /**
-             * SQL inside userService.deleteUserCategory(userId, categoryId):
-             * - SELECT user
-             * - SELECT category
-             * - EXISTS mapping
-             * - DELETE mapping
-             */
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
+
+            requireSelfIfUser(jwt, roleOf(jwt), userId);
+
             boolean deleted = userService.deleteUserCategory(userId, categoryId);
 
-            return deleted
-                    ? ResponseEntity.ok("Category removed successfully")
-                    : ResponseEntity.status(HttpStatus.NOT_FOUND).body("Category not found for this user");
+            return deleted ? ok("Category removed successfully")
+                           : err(HttpStatus.NOT_FOUND, "Category not found for this user");
+        } catch (ApiException e) {
+            return asResponse(e);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Failed to delete category");
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete category");
         }
     }
 
+    @PreAuthorize("hasRole('USER')")
     @PostMapping("/{userId}/update-category")
     public ResponseEntity<?> replaceUserCategories(
             @PathVariable Long userId,
-            @RequestBody List<Long> categoryIds
+            @RequestBody List<Long> categoryIds,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
     ) {
-        /**
-         * SQL inside userService.replaceUserCategories(userId, categoryIds):
-         * - SELECT user
-         * - SELECT existing mappings
-         * - DELETE ALL existing mappings for user
-         * - For each new category id:
-         *    SELECT category
-         *    EXISTS mapping
-         *    INSERT mapping (if missing)
-         */
-        userService.replaceUserCategories(userId, categoryIds);
-        return ResponseEntity.ok(Map.of("message", "User categories replaced successfully"));
+        try {
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
+
+            requireSelfIfUser(jwt, roleOf(jwt), userId);
+
+            userService.replaceUserCategories(userId, categoryIds);
+            return ok("User categories replaced successfully");
+        } catch (ApiException e) {
+            return asResponse(e);
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to replace categories");
+        }
     }
 
     /* =====================================================
-       DELETE PROFILE IMAGE (legacy/global)
+       13) DELETE PROFILE IMAGE
+       Roles: USER (self) or SUPER_ADMIN
        ===================================================== */
+    @PreAuthorize("hasAnyRole('USER','SUPER_ADMIN')")
     @DeleteMapping("/delete-profile-image/{id}")
-    public ResponseEntity<?> deleteProfileImage(@PathVariable Long id) {
-        /**
-         * SQL inside userService.deleteUserProfileImage(id):
-         * 1) SELECT * FROM users WHERE user_id=:id LIMIT 1;
-         * 2) UPDATE users SET profile_picture_url=NULL, updated_at=:now WHERE user_id=:id;
-         * (plus file delete in filesystem - not SQL)
-         */
-        boolean success = userService.deleteUserProfileImage(id);
+    public ResponseEntity<?> deleteProfileImage(
+            @PathVariable Long id,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
+    ) {
+        try {
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
 
-        return success
-                ? ResponseEntity.ok("Profile image deleted successfully")
-                : ResponseEntity.status(HttpStatus.NOT_FOUND).body("No profile image found or already deleted");
+            String role = roleOf(jwt);
+            if (!isSuperAdmin(role)) {
+                requireSelfIfUser(jwt, role, id);
+            }
+
+            boolean success = userService.deleteUserProfileImage(id);
+
+            return success ? ok("Profile image deleted successfully")
+                           : err(HttpStatus.NOT_FOUND, "No profile image found or already deleted");
+        } catch (ApiException e) {
+            return asResponse(e);
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected error");
+        }
     }
 
     /* =====================================================
-       VISIBILITY + STATUS IN ONE CALL (legacy/global)
+       14) VISIBILITY + STATUS (legacy/global)
+       Role: SUPER_ADMIN only (too risky otherwise)
        ===================================================== */
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @PutMapping("/{id}/visibility-status")
-    public ResponseEntity<String> updateVisibilityAndStatus(
+    public ResponseEntity<?> updateVisibilityAndStatus(
             @PathVariable Long id,
             @RequestParam boolean isPublicProfile,
             @RequestParam UserStatus status
     ) {
-        /**
-         * SQL inside userService.updateVisibilityAndStatus(id, isPublicProfile, status):
-         * 1) SELECT * FROM users WHERE user_id=:id LIMIT 1;
-         * 2) UPDATE users SET is_public_profile=?, status=?, updated_at=? WHERE user_id=?;
-         */
-        boolean updated = userService.updateVisibilityAndStatus(id, isPublicProfile, status);
+        try {
+            boolean updated = userService.updateVisibilityAndStatus(id, isPublicProfile, status);
 
-        return updated
-                ? ResponseEntity.ok("Visibility and status updated successfully.")
-                : ResponseEntity.status(404).body("User not found.");
+            return updated ? ok("Visibility and status updated successfully.")
+                           : err(HttpStatus.NOT_FOUND, "User not found.");
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected error");
+        }
     }
 
     /* =====================================================
-       COMPAT ROUTE: replaceUserCategories with many legacy paths
+       15) COMPAT ROUTE (legacy aliases) - self only
+       Role: USER only
        ===================================================== */
-
+    @PreAuthorize("hasRole('USER')")
     @PostMapping({
-        "/{userId}/categoriess",       // legacy typo only
-        "/{userId}/UpdateCategory",    // legacy
-        "/{userId}/UpdateInterest"     // legacy
+            "/{userId}/categoriess",
+            "/{userId}/UpdateCategory",
+            "/{userId}/UpdateInterest"
     })
     public ResponseEntity<?> replaceUserCategoriesCompat(
             @PathVariable Long userId,
-            @RequestBody List<Long> categoryIds
+            @RequestBody List<Long> categoryIds,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
     ) {
-        userService.replaceUserCategories(userId, categoryIds);
-        return ResponseEntity.ok(Map.of("message", "User categories replaced successfully"));
+        try {
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
+
+            requireSelfIfUser(jwt, roleOf(jwt), userId);
+
+            userService.replaceUserCategories(userId, categoryIds);
+            return ok("User categories replaced successfully");
+        } catch (ApiException e) {
+            return asResponse(e);
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to replace categories");
+        }
     }
 }

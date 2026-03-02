@@ -9,6 +9,7 @@ import com.build4all.security.JwtUtil;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -18,6 +19,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/owner/apps")
+@PreAuthorize("hasAnyRole('OWNER','SUPER_ADMIN')")
 public class OwnerBuildJobsController {
 
     private final AdminUserProjectRepository aupRepo;
@@ -91,8 +93,7 @@ public class OwnerBuildJobsController {
 
         return ResponseEntity.ok(body);
     }
-    
-    
+
     @GetMapping(value = "/{linkId}/build-jobs/latest", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> latest(
             @RequestHeader("Authorization") String authHeader,
@@ -134,7 +135,6 @@ public class OwnerBuildJobsController {
         ));
     }
 
-
     // ---------- auth helpers ----------
     private String extractToken(String authHeader) {
         if (authHeader == null || authHeader.isBlank() || !authHeader.startsWith("Bearer ")) {
@@ -143,8 +143,21 @@ public class OwnerBuildJobsController {
         return authHeader.replace("Bearer ", "").trim();
     }
 
+    private boolean isSuperAdmin(String token) {
+        try {
+            String role = jwtUtil.extractRole(token);
+            return role != null && role.equalsIgnoreCase("SUPER_ADMIN");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private void requireOwnerLinkAccess(String authHeader, Long linkId) {
         String token = extractToken(authHeader);
+
+        // ✅ SUPER_ADMIN bypass ownership
+        if (isSuperAdmin(token)) return;
+
         Long tokenAdminId = jwtUtil.extractAdminId(token);
 
         AdminUserProject link = aupRepo.findById(linkId)

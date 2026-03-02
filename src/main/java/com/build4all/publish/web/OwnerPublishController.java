@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -25,20 +26,40 @@ public class OwnerPublishController {
         this.jwtUtil = jwtUtil;
     }
 
+    private String token(HttpServletRequest request) {
+        // You already have this helper, keep it
+        return jwtUtil.extractTokenFromRequest(request);
+    }
+
+    /**
+     * Optional security hardening:
+     * If your JWT contains tenant/aup claim, enforce it here
+     * so owner cannot draft publish for someone else’s aupId.
+     *
+     * Uncomment + adapt based on your JwtUtil API.
+     */
+    // private void requireAupScope(HttpServletRequest request, Long aupId) {
+    //     String t = token(request);
+    //     jwtUtil.requireTenantMatch(t, aupId); // example (adapt)
+    // }
+
     @PostMapping("/draft")
+    @PreAuthorize("hasRole('OWNER')")
     public ResponseEntity<?> getOrCreateDraft(
             HttpServletRequest request,
             @Valid @RequestBody CreatePublishDraftDto dto
     ) {
-        String token = jwtUtil.extractTokenFromRequest(request);
+        String t = token(request);
+        Long ownerAdminId = jwtUtil.extractId(t);
 
-        if (!jwtUtil.isOwnerToken(token)) {
-            return ResponseEntity.status(403).body(Map.of("error", "Only OWNER can request publish"));
-        }
+        // requireAupScope(request, dto.getAupId()); // optional strict tenant lock
 
-        Long ownerAdminId = jwtUtil.extractId(token);
-
-        var draft = publishService.getOrCreateDraft(dto.getAupId(), dto.getPlatform(), dto.getStore(), ownerAdminId);
+        var draft = publishService.getOrCreateDraft(
+                dto.getAupId(),
+                dto.getPlatform(),
+                dto.getStore(),
+                ownerAdminId
+        );
 
         return ResponseEntity.ok(Map.of(
                 "message", "Draft ready",
@@ -47,18 +68,14 @@ public class OwnerPublishController {
     }
 
     @PatchMapping("/{requestId}")
+    @PreAuthorize("hasRole('OWNER')")
     public ResponseEntity<?> patchDraft(
             HttpServletRequest request,
             @PathVariable Long requestId,
             @RequestBody PublishDraftUpdateDto dto
     ) {
-        String token = jwtUtil.extractTokenFromRequest(request);
-
-        if (!jwtUtil.isOwnerToken(token)) {
-            return ResponseEntity.status(403).body(Map.of("error", "Only OWNER can update publish draft"));
-        }
-
-        Long ownerAdminId = jwtUtil.extractId(token);
+        String t = token(request);
+        Long ownerAdminId = jwtUtil.extractId(t);
 
         var updated = publishService.patchDraft(requestId, dto, ownerAdminId);
 
@@ -68,21 +85,18 @@ public class OwnerPublishController {
         ));
     }
 
-    // ✅ NEW: Upload icon + screenshots as FILES (multipart)
     @PostMapping(value = "/{requestId}/assets", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasRole('OWNER')")
     public ResponseEntity<?> uploadAssets(
             HttpServletRequest request,
             @PathVariable Long requestId,
             @RequestPart(value = "appIcon", required = false) MultipartFile appIcon,
             @RequestPart(value = "screenshots", required = false) MultipartFile[] screenshots
     ) {
-        String token = jwtUtil.extractTokenFromRequest(request);
+        String t = token(request);
+        Long ownerAdminId = jwtUtil.extractId(t);
 
-        if (!jwtUtil.isOwnerToken(token)) {
-            return ResponseEntity.status(403).body(Map.of("error", "Only OWNER can upload publish assets"));
-        }
-
-        Long ownerAdminId = jwtUtil.extractId(token);
+        if (screenshots == null) screenshots = new MultipartFile[0];
 
         var updated = publishService.uploadAssets(requestId, appIcon, screenshots, ownerAdminId);
 
@@ -93,17 +107,13 @@ public class OwnerPublishController {
     }
 
     @PostMapping("/{requestId}/submit")
+    @PreAuthorize("hasRole('OWNER')")
     public ResponseEntity<?> submit(
             HttpServletRequest request,
             @PathVariable Long requestId
     ) {
-        String token = jwtUtil.extractTokenFromRequest(request);
-
-        if (!jwtUtil.isOwnerToken(token)) {
-            return ResponseEntity.status(403).body(Map.of("error", "Only OWNER can submit publish request"));
-        }
-
-        Long ownerAdminId = jwtUtil.extractId(token);
+        String t = token(request);
+        Long ownerAdminId = jwtUtil.extractId(t);
 
         var submitted = publishService.submitForReview(requestId, ownerAdminId);
 

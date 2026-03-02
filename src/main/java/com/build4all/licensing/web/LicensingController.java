@@ -11,7 +11,6 @@ import com.build4all.licensing.repository.PlanCatalogRepository;
 import com.build4all.licensing.repository.PlanUpgradeRequestRepository;
 import com.build4all.licensing.service.LicensingService;
 import com.build4all.security.JwtUtil;
-
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -42,76 +41,79 @@ public class LicensingController {
         this.jwtUtil = jwtUtil;
     }
 
-    /**
-     * ✅ SECURITY GUARD:
-     * - If caller is OWNER => must only access their own aupId (token.ownerProjectId == aupId)
-     * - If caller is SUPER_ADMIN => allow any aupId
-     *
-     * Uses JwtUtil tenant claim instead of relying on DB owner linkage (clean + fast).
-     */
-    private void enforceOwnerScopeIfNeeded(Long aupId, String authHeader) {
-        String role = jwtUtil.extractRole(authHeader);
+    /* ========================= OWNER (tenant from token only) ========================= */
 
-        if (role == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "INVALID_TOKEN");
-        }
-
-        // OWNER is tenant-scoped: lock them to their own AUP only
-        if ("OWNER".equalsIgnoreCase(role)) {
-            try {
-                jwtUtil.requireTenantMatch(authHeader, aupId);
-            } catch (RuntimeException ex) {
-                // Use 404 to avoid leaking that other AUP ids exist (anti-enumeration)
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "AUP_NOT_FOUND");
-            }
-        }
-    }
-
-    // ========================= OWNER / SUPER_ADMIN =========================
-
-    @PreAuthorize("hasRole('OWNER') or hasRole('SUPER_ADMIN')")
-    @GetMapping("/apps/{aupId}/access")
-    public ResponseEntity<OwnerAppAccessResponse> getOwnerAccess(
-            @PathVariable Long aupId,
+    @PreAuthorize("hasRole('OWNER')")
+    @GetMapping("/apps/me/access")
+    public ResponseEntity<OwnerAppAccessResponse> getOwnerAccessMe(
             @RequestHeader("Authorization") String auth
     ) {
-        enforceOwnerScopeIfNeeded(aupId, auth);
+        Long aupId = jwtUtil.requireOwnerProjectId(auth);
 
         var app = aupRepo.findById(aupId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AUP_NOT_FOUND"));
 
-        // ensures FREE subscription exists if missing
         licensingService.ensureSubscriptionExists(app);
 
         OwnerAppAccessResponse res = licensingService.getOwnerDashboardAccess(aupId);
         return ResponseEntity.ok(res);
     }
 
-    @PreAuthorize("hasRole('OWNER') or hasRole('SUPER_ADMIN')")
+    @PreAuthorize("hasRole('OWNER')")
+    @PostMapping("/apps/me/upgrade-request")
+    public ResponseEntity<?> requestUpgradeMe(
+            @RequestBody UpgradePlanRequest req,
+            @RequestHeader("Authorization") String auth
+    ) {
+        Long aupId = jwtUtil.requireOwnerProjectId(auth);
+        Long ownerId = jwtUtil.extractId(auth);
+
+        var created = licensingService.createUpgradeRequest(aupId, req, ownerId);
+        return ResponseEntity.ok(created);
+    }
+
+    @PreAuthorize("hasRole('OWNER')")
+    @GetMapping("/apps/me/upgrade-requests")
+    public ResponseEntity<?> listUpgradeRequestsForMe(
+            @RequestHeader("Authorization") String auth
+    ) {
+        Long aupId = jwtUtil.requireOwnerProjectId(auth);
+        return ResponseEntity.ok(upgradeReqRepo.findByAupIdOrderByRequestedAtDesc(aupId));
+    }
+
+    /* ========================= SUPER_ADMIN (act-as via aupId path) ========================= */
+
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    @GetMapping("/apps/{aupId}/access")
+    public ResponseEntity<OwnerAppAccessResponse> getOwnerAccess(
+            @PathVariable Long aupId
+    ) {
+        var app = aupRepo.findById(aupId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AUP_NOT_FOUND"));
+
+        licensingService.ensureSubscriptionExists(app);
+
+        OwnerAppAccessResponse res = licensingService.getOwnerDashboardAccess(aupId);
+        return ResponseEntity.ok(res);
+    }
+
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @PostMapping("/apps/{aupId}/upgrade-request")
     public ResponseEntity<?> requestUpgrade(
             @PathVariable Long aupId,
             @RequestBody UpgradePlanRequest req,
             @RequestHeader("Authorization") String auth
     ) {
-        enforceOwnerScopeIfNeeded(aupId, auth);
-
-        Long userId = jwtUtil.extractId(auth);
-        var created = licensingService.createUpgradeRequest(aupId, req, userId);
+        Long superAdminId = jwtUtil.extractId(auth);
+        var created = licensingService.createUpgradeRequest(aupId, req, superAdminId);
         return ResponseEntity.ok(created);
     }
 
-    @PreAuthorize("hasRole('OWNER') or hasRole('SUPER_ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @GetMapping("/apps/{aupId}/upgrade-requests")
-    public ResponseEntity<?> listUpgradeRequestsForApp(
-            @PathVariable Long aupId,
-            @RequestHeader("Authorization") String auth
-    ) {
-        enforceOwnerScopeIfNeeded(aupId, auth);
+    public ResponseEntity<?> listUpgradeRequestsForApp(@PathVariable Long aupId) {
         return ResponseEntity.ok(upgradeReqRepo.findByAupIdOrderByRequestedAtDesc(aupId));
     }
-
-    // ========================= SUPER_ADMIN ONLY =========================
 
     @PreAuthorize("hasRole('SUPER_ADMIN')")
     @PostMapping("/apps/{aupId}/upgrade")

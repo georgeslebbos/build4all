@@ -1,10 +1,11 @@
 package com.build4all.tutorial.web;
 
-import com.build4all.security.JwtUtil;
 import com.build4all.tutorial.dto.SavePlatformTutorialRequest;
 import com.build4all.tutorial.service.PlatformTutorialService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -17,38 +18,21 @@ import java.util.Map;
 public class SuperAdminTutorialController {
 
     private final PlatformTutorialService service;
-    private final JwtUtil jwtUtil;
 
-    public SuperAdminTutorialController(PlatformTutorialService service, JwtUtil jwtUtil) {
+    public SuperAdminTutorialController(PlatformTutorialService service) {
         this.service = service;
-        this.jwtUtil = jwtUtil;
-    }
-
-    private String strip(String auth) {
-        return auth == null ? "" : auth.replace("Bearer ", "").trim();
-    }
-
-    private boolean isSuperAdmin(String token) {
-        String role = jwtUtil.extractRole(token);
-        return role != null && "SUPER_ADMIN".equalsIgnoreCase(role);
     }
 
     @PutMapping("/owner-guide")
-    public ResponseEntity<?> saveOwnerGuide(
-            @RequestHeader("Authorization") String auth,
-            @RequestBody SavePlatformTutorialRequest body
-    ) {
-        String token = strip(auth);
-        if (!isSuperAdmin(token)) {
-            return ResponseEntity.status(403).body(Map.of("error", "SUPER_ADMIN required"));
-        }
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<?> saveOwnerGuide(@RequestBody SavePlatformTutorialRequest body) {
 
         var saved = service.upsertOwnerGuide(body == null ? null : body.videoUrl);
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("code", saved.getCode());
-        data.put("videoUrl", saved.getVideoUrl()); // ✅ can be null
-        data.put("updatedAt", saved.getUpdatedAt().toString());
+        data.put("videoUrl", saved.getVideoUrl()); // can be null
+        data.put("updatedAt", saved.getUpdatedAt() == null ? null : saved.getUpdatedAt().toString());
 
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("message", "OK");
@@ -58,16 +42,10 @@ public class SuperAdminTutorialController {
     }
 
     @PostMapping(value = "/owner-guide/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<?> uploadOwnerGuide(
-            @RequestHeader("Authorization") String auth,
-            @RequestPart("file") MultipartFile file
-    ) {
-        try {
-            String token = strip(auth);
-            if (!isSuperAdmin(token)) {
-                return ResponseEntity.status(403).body(Map.of("error", "SUPER_ADMIN required"));
-            }
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<?> uploadOwnerGuide(@RequestPart("file") MultipartFile file) {
 
+        try {
             if (file == null || file.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "file is required"));
             }
@@ -90,16 +68,15 @@ public class SuperAdminTutorialController {
 
             service.upsertOwnerGuide(publicPath);
 
-            Map<String, Object> data = new LinkedHashMap<>();
-            data.put("videoUrl", publicPath);
-
             Map<String, Object> res = new LinkedHashMap<>();
             res.put("message", "OK");
-            res.put("data", data);
+            res.put("data", Map.of("videoUrl", publicPath));
 
             return ResponseEntity.ok(res);
+
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Upload failed", "details", e.getMessage()));
         }
     }
 }

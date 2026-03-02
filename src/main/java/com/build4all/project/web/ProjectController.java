@@ -7,8 +7,10 @@ import com.build4all.security.JwtUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Locale;
 import java.util.Map;
 
 @RestController
@@ -23,69 +25,86 @@ public class ProjectController {
         this.jwt = jwt;
     }
 
-    // --- helpers -------------------------------------------------------------
+    /* ========================= helpers ========================= */
 
-    private String tokenFromAuth(String auth) {
-        if (auth == null) return null;
-        return auth.startsWith("Bearer ") ? auth.substring(7).trim() : auth.trim();
+    private String strip(String auth) {
+        return auth == null ? "" : auth.replaceFirst("(?i)^Bearer\\s+", "").trim();
     }
 
-    private boolean allowCreateOrUpdate(String auth) {
-        String token = tokenFromAuth(auth);
-        return token != null && (jwt.isAdminToken(token) || jwt.isBusinessToken(token) || jwt.isOwnerToken(token));
+    private String roleOf(String auth) {
+        return jwt.extractRole(strip(auth));
     }
 
-    private boolean allowDelete(String auth) {
-        String token = tokenFromAuth(auth);
-        return token != null && jwt.isAdminToken(token); // admin-only delete
+    private Long callerId(String auth) {
+        return jwt.extractId(strip(auth));
     }
 
-    private boolean isOwner(String auth) {
-        String token = tokenFromAuth(auth);
-        return token != null && jwt.isOwnerToken(token);
+    private static String asString(Map<String, Object> body, String key) {
+        Object v = (body == null) ? null : body.get(key);
+        if (v == null) return null;
+        String s = String.valueOf(v).trim();
+        return s.isBlank() ? null : s;
     }
 
-    private Long callerAdminId(String auth) {
-        String token = tokenFromAuth(auth);
-        if (token == null) return null;
+    private static Boolean asBool(Map<String, Object> body, String key) {
+        Object v = (body == null) ? null : body.get(key);
+        if (v == null) return null;
+        if (v instanceof Boolean b) return b;
+        String s = String.valueOf(v).trim();
+        if (s.isBlank()) return null;
+        return Boolean.parseBoolean(s);
+    }
+
+    private ProjectType parseProjectType(Object raw) {
+        if (raw == null) return null;
+        String v = raw.toString().trim().toUpperCase(Locale.ROOT);
+        if (v.isBlank()) return null;
         try {
-            // your JwtUtil exposes extractId(); admin tokens store "id" = admin_id
-            return jwt.extractId(token);
+            return ProjectType.valueOf(v);
         } catch (Exception e) {
-            return null;
+            throw new IllegalArgumentException("Invalid projectType. Allowed: ECOMMERCE, SERVICES, ACTIVITIES");
         }
     }
 
-    // --- endpoints -----------------------------------------------------------
+    private boolean isOwner(String auth) {
+        String r = roleOf(auth);
+        return r != null && r.equalsIgnoreCase("OWNER");
+    }
+
+    /* ========================= endpoints ========================= */
 
     @Operation(summary = "Create a project")
+    @PreAuthorize("hasRole('SUPER_ADMIN') ")
     @PostMapping
-    public ResponseEntity<?> create(@RequestHeader("Authorization") String auth,
-                                    @RequestBody Map<String, Object> body) {
-        if (!allowCreateOrUpdate(auth)) return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+    public ResponseEntity<?> create(
+            @RequestHeader("Authorization") String auth,
+            @RequestBody Map<String, Object> body
+    ) {
         try {
-            String name = (String) body.get("projectName");
-            String description = (String) body.get("description");
-            Boolean active = body.get("active") == null ? null : Boolean.valueOf(body.get("active").toString());
-            ProjectType projectType = parseProjectType(body.get("projectType"));
+            String name = asString(body, "projectName");
+            String description = asString(body, "description");
+            Boolean active = asBool(body, "active");
+            ProjectType projectType = parseProjectType(body == null ? null : body.get("projectType"));
 
-            Project p = service.create(name, description, active,projectType);
+            Project p = service.create(name, description, active, projectType);
 
-            // If Owner: link to self and force pending (inactive)
+            // ✅ Owner behavior: link to self, cannot self-activate
             if (isOwner(auth)) {
-                Long adminId = callerAdminId(auth);
-                if (adminId != null) {
-                    service.linkProjectToOwner(adminId, p.getId());
-                }
+                Long ownerAdminId = callerId(auth);
+                service.linkProjectToOwner(ownerAdminId, p.getId());
+
                 if (Boolean.TRUE.equals(p.getActive())) {
-                    p.setActive(false); // owners can't self-activate
+                    p.setActive(false);
                     p = service.save(p);
                 }
             }
 
             return ResponseEntity.status(HttpStatus.CREATED).body(p);
+
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", "Server error"));
         }
     }
 
@@ -96,107 +115,99 @@ public class ProjectController {
     }
 
     @Operation(summary = "List projects linked to the caller (Owner/Admin)")
+    @PreAuthorize("hasRole('SUPER_ADMIN') or hasRole('OWNER')")
     @GetMapping("/mine")
     public ResponseEntity<?> mine(@RequestHeader("Authorization") String auth) {
-        String token = tokenFromAuth(auth);
-        if (token == null) return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
-
-        if (jwt.isOwnerToken(token) || jwt.isAdminToken(token)) {
-            Long adminId = jwt.extractId(token);
+        try {
+            Long adminId = callerId(auth);
             return ResponseEntity.ok(service.findByOwnerAdminId(adminId));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", "Server error"));
         }
-        return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
     }
 
     @Operation(summary = "Get project by id")
     @GetMapping("/{id}")
     public ResponseEntity<?> get(@PathVariable Long id) {
         Project p = service.findById(id);
-        return p == null ? ResponseEntity.status(404).build() : ResponseEntity.ok(p);
+        return (p == null)
+                ? ResponseEntity.status(404).body(Map.of("error", "Project not found"))
+                : ResponseEntity.ok(p);
     }
 
     @Operation(summary = "Update a project")
+    @PreAuthorize("hasRole('SUPER_ADMIN') ")
     @PutMapping("/{id}")
-    public ResponseEntity<?> update(@RequestHeader("Authorization") String auth,
-                                    @PathVariable Long id,
-                                    @RequestBody Map<String, Object> body) {
-        if (!allowCreateOrUpdate(auth)) return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+    public ResponseEntity<?> update(
+            @RequestHeader("Authorization") String auth,
+            @PathVariable Long id,
+            @RequestBody Map<String, Object> body
+    ) {
         try {
-            String name = (String) body.get("projectName");
-            String description = (String) body.get("description");
-            Boolean active = body.get("active") == null ? null : Boolean.valueOf(body.get("active").toString());
-            ProjectType projectType = parseProjectType(body.get("projectType"));
+            String name = asString(body, "projectName");
+            String description = asString(body, "description");
+            Boolean active = asBool(body, "active");
+            ProjectType projectType = parseProjectType(body == null ? null : body.get("projectType"));
 
-            // Optional safety: owners may edit only their projects and can't activate
+            // ✅ Owner safety: only edit own linked projects + cannot activate
             if (isOwner(auth)) {
-                Long adminId = callerAdminId(auth);
-                if (adminId == null || !service.isOwnerLinkedToProject(adminId, id)) {
+                Long ownerAdminId = callerId(auth);
+                if (!service.isOwnerLinkedToProject(ownerAdminId, id)) {
                     return ResponseEntity.status(403).body(Map.of("error", "Not your project"));
                 }
-                if (Boolean.TRUE.equals(active)) {
-                    active = false; // prevent self-activation
-                }
+                if (Boolean.TRUE.equals(active)) active = false;
             }
 
-            return ResponseEntity.ok(service.update(id, name, description, active,projectType));
+            return ResponseEntity.ok(service.update(id, name, description, active, projectType));
+
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", "Server error"));
         }
     }
 
     @Operation(summary = "Delete a project (admin only)")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @DeleteMapping("/{id}")
-    public ResponseEntity<?> delete(@RequestHeader("Authorization") String auth, @PathVariable Long id) {
-        if (!allowDelete(auth)) return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
-        service.delete(id);
-        return ResponseEntity.noContent().build();
-    }
-    
-    private ProjectType parseProjectType(Object raw) {
-        if (raw == null) return null;
-        String v = raw.toString().trim().toUpperCase();
-        if (v.isBlank()) return null;
+    public ResponseEntity<?> delete(
+            @RequestHeader("Authorization") String auth,
+            @PathVariable Long id
+    ) {
         try {
-            return ProjectType.valueOf(v);
+            service.delete(id);
+            return ResponseEntity.noContent().build();
         } catch (Exception e) {
-            throw new IllegalArgumentException("Invalid projectType. Allowed: ECOMMERCE, SERVICES, ACTIVITIES");
+            return ResponseEntity.status(500).body(Map.of("error", "Server error"));
         }
     }
 
     @Operation(summary = "List owners for a project (with appsCount)")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @GetMapping("/{id}/owners")
-    public ResponseEntity<?> ownersByProject(@RequestHeader("Authorization") String auth,
-                                            @PathVariable("id") Long projectId) {
-
-        String token = tokenFromAuth(auth);
-        if (token == null) return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
-
-        // This is your total-project admin area → admin token only (recommended)
-        if (!jwt.isAdminToken(token)) {
-            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+    public ResponseEntity<?> ownersByProject(
+            @RequestHeader("Authorization") String auth,
+            @PathVariable("id") Long projectId
+    ) {
+        try {
+            return ResponseEntity.ok(service.ownersByProject(projectId));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", "Server error"));
         }
-
-        return ResponseEntity.ok(service.ownersByProject(projectId));
     }
-    
- 
 
     @Operation(summary = "List apps for an owner inside a project")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @GetMapping("/{projectId}/owners/{adminId}/apps")
     public ResponseEntity<?> appsByProjectAndOwner(
             @RequestHeader("Authorization") String auth,
             @PathVariable Long projectId,
             @PathVariable Long adminId
     ) {
-        String token = tokenFromAuth(auth);
-        if (token == null) return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
-
-        // Admin token only (recommended)
-        if (!jwt.isAdminToken(token)) {
-            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        try {
+            return ResponseEntity.ok(service.appsByProjectAndOwner(projectId, adminId));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", "Server error"));
         }
-
-        return ResponseEntity.ok(service.appsByProjectAndOwner(projectId, adminId));
     }
-
 }

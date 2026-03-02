@@ -10,6 +10,7 @@ import com.build4all.security.JwtUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -29,8 +30,22 @@ public class CouponController {
         this.jwtUtil = jwtUtil;
         this.licensingService = licensingService;
     }
-    
-    
+
+    /* ========================= helpers ========================= */
+
+    private String strip(String auth) {
+        return auth == null ? "" : auth.replaceFirst("(?i)^Bearer\\s+", "").trim();
+    }
+
+    private Long tenantFromToken(String authHeader) {
+        // ✅ requireOwnerProjectId should validate token + return tenant claim
+        return jwtUtil.requireOwnerProjectId(authHeader);
+    }
+
+    /**
+     * Subscription block for write operations.
+     * Returns null if allowed; otherwise returns a ResponseEntity to return immediately.
+     */
     private ResponseEntity<?> blockIfSubscriptionExceeded(Long ownerProjectId) {
         try {
             OwnerAppAccessResponse access = licensingService.getOwnerDashboardAccess(ownerProjectId);
@@ -57,43 +72,18 @@ public class CouponController {
         }
     }
 
-    private boolean hasRole(String tokenOrBearer, String... roles) {
-        String role = jwtUtil.extractRole(tokenOrBearer);
-        if (role == null) return false;
-
-        String normalized = role.toUpperCase();
-        for (String r : roles) {
-            String expected = r.toUpperCase();
-            if (normalized.equals(expected) || normalized.equals("ROLE_" + expected)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private Long tenantFromToken(String authHeader) {
-        // ✅ your JwtUtil already normalizes/validates in requireOwnerProjectId
-        return jwtUtil.requireOwnerProjectId(authHeader);
-    }
-
-    /* ==========================
-       CREATE (OWNER)
-       ========================== */
+    /* ========================= CREATE (OWNER) ========================= */
 
     @PostMapping
-    @Operation(summary = "Create coupon (OWNER only)")
+    @PreAuthorize("hasRole('OWNER') or hasRole('SUPER_ADMIN')")
+    @Operation(summary = "Create coupon (OWNER)")
     public ResponseEntity<?> create(
             @RequestHeader("Authorization") String auth,
             @RequestBody CouponRequest req
     ) {
-        if (!hasRole(auth, "OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Owner role required"));
-        }
-
         try {
             Long ownerProjectId = tenantFromToken(auth);
-            
+
             ResponseEntity<?> blocked = blockIfSubscriptionExceeded(ownerProjectId);
             if (blocked != null) return blocked;
 
@@ -102,6 +92,7 @@ public class CouponController {
 
             CouponResponse created = couponService.create(req);
             return ResponseEntity.status(HttpStatus.CREATED).body(created);
+
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
@@ -109,55 +100,45 @@ public class CouponController {
         }
     }
 
-    /* ==========================
-       UPDATE (OWNER)
-       ========================== */
+    /* ========================= UPDATE (OWNER) ========================= */
 
     @PutMapping("/{id}")
-    @Operation(summary = "Update coupon (OWNER only)")
+    @PreAuthorize("hasRole('OWNER') or hasRole('SUPER_ADMIN')")
+    @Operation(summary = "Update coupon (OWNER)")
     public ResponseEntity<?> update(
             @RequestHeader("Authorization") String auth,
             @PathVariable Long id,
             @RequestBody CouponRequest req
     ) {
-        if (!hasRole(auth, "OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Owner role required"));
-        }
-
         try {
             Long ownerProjectId = tenantFromToken(auth);
 
-            // ✅ ignore req.ownerProjectId completely
+            // ✅ ignore req.ownerProjectId completely (tenant comes from token)
             Coupon updated = couponService.update(ownerProjectId, id, req);
             return ResponseEntity.ok(couponService.toResponse(updated));
+
         } catch (IllegalArgumentException e) {
-            // use 404-ish message to avoid leaking tenant/coupon existence details
+            // For tenant isolation, treat as not found
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "Server error"));
         }
     }
 
-    /* ==========================
-       DELETE (OWNER)
-       ========================== */
+    /* ========================= DELETE (OWNER) ========================= */
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "Delete coupon (OWNER only)")
+    @PreAuthorize("hasRole('OWNER') or hasRole('SUPER_ADMIN')")
+    @Operation(summary = "Delete coupon (OWNER)")
     public ResponseEntity<?> delete(
             @RequestHeader("Authorization") String auth,
             @PathVariable Long id
     ) {
-        if (!hasRole(auth, "OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Owner role required"));
-        }
-
         try {
             Long ownerProjectId = tenantFromToken(auth);
             couponService.delete(ownerProjectId, id);
             return ResponseEntity.noContent().build();
+
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
@@ -165,73 +146,69 @@ public class CouponController {
         }
     }
 
-    /* ==========================
-       GET / LIST (OWNER)
-       ========================== */
+    /* ========================= GET / LIST (OWNER) ========================= */
 
     @GetMapping("/{id}")
-    @Operation(summary = "Get coupon by id (OWNER only)")
+    @PreAuthorize("hasRole('OWNER') or hasRole('SUPER_ADMIN')")
+    @Operation(summary = "Get coupon by id (OWNER)")
     public ResponseEntity<?> get(
             @RequestHeader("Authorization") String auth,
             @PathVariable Long id
     ) {
-        if (!hasRole(auth, "OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Owner role required"));
-        }
-
         try {
             Long ownerProjectId = tenantFromToken(auth);
             Coupon c = couponService.get(ownerProjectId, id);
             return ResponseEntity.ok(couponService.toResponse(c));
+
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "Server error"));
         }
     }
 
     @GetMapping
-    @Operation(summary = "List coupons for my app (OWNER only)")
+    @PreAuthorize("hasRole('OWNER') or hasRole('SUPER_ADMIN')")
+    @Operation(summary = "List coupons for my app (OWNER) ")
     public ResponseEntity<?> list(@RequestHeader("Authorization") String auth) {
-        if (!hasRole(auth, "OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Owner role required"));
+        try {
+            Long ownerProjectId = tenantFromToken(auth);
+
+            List<CouponResponse> list = couponService.listByOwnerProject(ownerProjectId)
+                    .stream()
+                    .map(couponService::toResponse)
+                    .toList();
+
+            return ResponseEntity.ok(list);
+
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "Server error"));
         }
-
-        Long ownerProjectId = tenantFromToken(auth);
-
-        List<CouponResponse> list = couponService.listByOwnerProject(ownerProjectId)
-                .stream()
-                .map(couponService::toResponse)
-                .toList();
-
-        return ResponseEntity.ok(list);
     }
 
-    /* ==========================
-       VALIDATE (Checkout)
-       ========================== */
+    /* ========================= VALIDATE (Checkout) ========================= */
 
+    /**
+     * ✅ Token required. No ownerProjectId param. No optional fallback.
+     *
+     * Why:
+     * - avoids tenant spoofing
+     * - consistent with “extract tenant from token” everywhere
+     *
+     * If you truly need guest checkout coupons, create a separate endpoint:
+     *   GET /api/coupons/validate/guest?ownerProjectId=...&code=...&itemsSubtotal=...
+     * with strict public rules (and rate-limit it).
+     */
     @GetMapping("/validate")
-    @Operation(summary = "Validate coupon code (token tenant preferred)")
+    @PreAuthorize("hasRole('USER') or hasRole('OWNER') or hasRole('SUPER_ADMIN')") // USER checkout + OWNER testing
+    @Operation(summary = "Validate coupon code (tenant from JWT)")
     public ResponseEntity<?> validate(
-            @RequestHeader(value = "Authorization", required = false) String auth,
-            @RequestParam(required = false) Long ownerProjectId,
+            @RequestHeader("Authorization") String auth,
             @RequestParam String code,
             @RequestParam BigDecimal itemsSubtotal
     ) {
         try {
-            // ✅ If authenticated, tenant always from token
-            if (auth != null && !auth.isBlank()) {
-                ownerProjectId = jwtUtil.requireOwnerProjectId(auth);
-            }
-
-            // ✅ Guest fallback (only if you really allow guests)
-            if (ownerProjectId == null) {
-                return ResponseEntity.badRequest().body(Map.of(
-                        "valid", false,
-                        "error", "ownerProjectId is required (or provide Authorization)"
-                ));
-            }
+            Long ownerProjectId = tenantFromToken(auth);
 
             Coupon coupon = couponService.validateForOrder(ownerProjectId, code, itemsSubtotal);
             if (coupon == null) {
@@ -241,16 +218,23 @@ public class CouponController {
                 ));
             }
 
-            var discount = couponService.computeDiscount(coupon, itemsSubtotal);
+            BigDecimal discount = couponService.computeDiscount(coupon, itemsSubtotal);
+
             return ResponseEntity.ok(Map.of(
                     "valid", true,
                     "code", coupon.getCode(),
                     "discount", discount
             ));
+
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of(
                     "valid", false,
                     "error", e.getMessage()
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "valid", false,
+                    "error", "Server error"
             ));
         }
     }
