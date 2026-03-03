@@ -26,6 +26,7 @@ public interface PaymentTransactionRepository extends JpaRepository<PaymentTrans
             String providerPaymentId
     );
 
+    List<PaymentTransaction> findByOrderIdAndProviderCodeIgnoreCase(Long orderId, String providerCode);
     /**
      * Find the most recent transaction for a given order (latest attempt).
      *

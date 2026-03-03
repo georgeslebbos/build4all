@@ -14,4 +14,6 @@ public interface PlanUpgradeRequestRepository extends JpaRepository<PlanUpgradeR
     List<PlanUpgradeRequest> findByStatusOrderByRequestedAtAsc(PlanUpgradeRequestStatus status);
 
     List<PlanUpgradeRequest> findByAupIdOrderByRequestedAtDesc(Long aupId);
+    
+    Optional<PlanUpgradeRequest> findTopByAupIdOrderByRequestedAtDesc(Long aupId);
 }

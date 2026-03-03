@@ -852,6 +852,7 @@ public class OrderController {
         return ResponseEntity.ok(r);
     }
 
+   
     @PreAuthorize("hasRole('OWNER')")
     @PutMapping("/owner/orders/{orderId}/cash/mark-paid")
     public ResponseEntity<?> ownerMarkCashPaid(
@@ -864,17 +865,45 @@ public class OrderController {
         Order order = orderRepo.findById(orderId)
                 .orElseThrow(() -> new NoSuchElementException("Order not found"));
 
+        // 1) Mark cash tx as PAID (ledger)
         var tx = paymentWrite.markCashAsPaid(orderId, order.getTotalPrice());
 
+        // 2) Recompute payment summary (should be fully paid now)
+        OrderPaymentReadService.PaymentSummary ps =
+                paymentRead.summaryForOrder(order.getId(), order.getTotalPrice());
+
+        // 3) If fully paid => auto COMPLETE
+        if (ps != null && ps.isFullyPaid()) {
+
+            // optional: don't complete if already canceled/rejected/refunded
+            String current = (order.getStatus() != null) ? order.getStatus().getName() : "";
+            String cur = (current == null) ? "" : current.trim().toUpperCase(Locale.ROOT);
+
+            if (!List.of("CANCELED", "REJECTED", "REFUNDED").contains(cur)) {
+                OrderStatus completed = requireStatusByName("COMPLETED");
+                order.setStatus(completed);
+                order.setOrderDate(LocalDateTime.now());
+                orderRepo.save(order);
+            }
+        }
+
+        // 4) Return richer response so frontend updates instantly
         Map<String, Object> r = new HashMap<>();
         r.put("orderId", orderId);
         r.put("provider", tx.getProviderCode());
-        r.put("status", tx.getStatus());
+        r.put("txStatus", tx.getStatus());
         r.put("amount", tx.getAmount());
         r.put("currency", tx.getCurrency());
+
+        String st = (order.getStatus() != null) ? order.getStatus().getName() : null;
+        r.put("status", st);
+        r.put("statusUi", titleCaseStatus(st));
+
+        r.put("fullyPaid", ps != null && ps.isFullyPaid());
+        r.put("payment", paymentToMap(ps));
+
         return ResponseEntity.ok(r);
     }
-
     /* =========================================================================================
        SUPER_ADMIN APIs
        ========================================================================================= */
@@ -955,7 +984,87 @@ public class OrderController {
 
         return ResponseEntity.ok(out);
     }
+    
+    
+    
+    @PreAuthorize("hasRole('OWNER')")
+    @PutMapping("/owner/orders/{orderId}/cash/reset-to-unpaid")
+    public ResponseEntity<?> ownerResetCashToUnpaid(
+            @RequestHeader("Authorization") String auth,
+            @PathVariable Long orderId
+    ) {
+        Long ownerProjectId = jwt.requireOwnerProjectId(auth);
+        assertOwnerCanAccessOrder(orderId, ownerProjectId);
 
+        // This will flip CASH txs from PAID -> OFFLINE_PENDING (or whatever you choose)
+        int changed = paymentWrite.resetCashToUnpaid(orderId);
+
+        // Return fresh payment summary so frontend updates instantly
+        Order order = orderRepo.findById(orderId)
+                .orElseThrow(() -> new NoSuchElementException("Order not found"));
+
+        var ps = paymentRead.summaryForOrder(order.getId(), order.getTotalPrice());
+
+        Map<String, Object> r = new HashMap<>();
+        r.put("orderId", orderId);
+        r.put("changedTransactions", changed);
+        r.put("fullyPaid", ps.isFullyPaid());
+        r.put("payment", paymentToMap(ps));
+        return ResponseEntity.ok(r);
+    }
+
+    @PreAuthorize("hasRole('OWNER')")
+    @PutMapping("/owner/orders/{orderId}/reopen")
+    public ResponseEntity<?> ownerReopenOrder(
+            @RequestHeader("Authorization") String auth,
+            @PathVariable Long orderId
+    ) {
+        Long ownerProjectId = jwt.requireOwnerProjectId(auth);
+        assertOwnerCanAccessOrder(orderId, ownerProjectId);
+
+        Order order = orderRepo.findById(orderId)
+                .orElseThrow(() -> new NoSuchElementException("Order not found"));
+
+        // Determine payment method code (you store method as entity; we extract code or name)
+        String method = "";
+        if (order.getPaymentMethod() != null) {
+            Object codeOrName = tryGet(order.getPaymentMethod(), "getCode", "getName");
+            method = (codeOrName == null) ? "" : String.valueOf(codeOrName).trim().toUpperCase(Locale.ROOT);
+        }
+
+        // Stripe best practice: if already fully paid -> no reopen unless refund flow exists
+        var ps = paymentRead.summaryForOrder(order.getId(), order.getTotalPrice());
+        if ("STRIPE".equals(method) && ps.isFullyPaid()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                    "error", "Cannot reopen a paid STRIPE order without refund/void."
+            ));
+        }
+
+        // If CASH: undo cash paid markers
+        if ("CASH".equals(method)) {
+            paymentWrite.resetCashToUnpaid(orderId);
+        }
+
+        // Set status to PENDING (use your existing status table)
+        OrderStatus pending = requireStatusByName("PENDING");
+        order.setStatus(pending);
+        order.setOrderDate(LocalDateTime.now());
+        orderRepo.save(order);
+
+        // Return updated summary
+        var ps2 = paymentRead.summaryForOrder(order.getId(), order.getTotalPrice());
+
+        Map<String, Object> r = new HashMap<>();
+        r.put("orderId", order.getId());
+        r.put("status", pending.getName());
+        r.put("statusUi", titleCaseStatus(pending.getName()));
+        r.put("fullyPaid", ps2.isFullyPaid());
+        r.put("payment", paymentToMap(ps2));
+        return ResponseEntity.ok(r);
+    }
+
+    
+    
     /* =========================================================================================
        ERROR HANDLERS
        ========================================================================================= */
@@ -986,4 +1095,7 @@ public class OrderController {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("error", ex.getMessage()));
     }
+    
+    
+    
 }

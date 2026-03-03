@@ -4,11 +4,12 @@ import com.build4all.licensing.domain.PlanCode;
 import com.build4all.licensing.domain.SubscriptionStatus;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 public class OwnerAppAccessResponse {
 
     private boolean canAccessDashboard;
-    private String blockingReason; // null if allowed
+    private String blockingReason;
 
     private PlanCode planCode;
     private String planName;
@@ -17,16 +18,21 @@ public class OwnerAppAccessResponse {
     private LocalDate periodEnd;
     private long daysLeft;
 
-    private Integer usersAllowed; // null = unlimited
+    private Integer usersAllowed;
     private long activeUsers;
-    private Long usersRemaining;  // null = unlimited
+    private Long usersRemaining;
 
     private boolean requiresDedicatedServer;
     private boolean dedicatedInfraReady;
 
+    // ✅ NEW: upgrade request state (latest request)
+    private String upgradeRequestStatus;   // PENDING / APPROVED / REJECTED / null
+    private PlanCode upgradeRequestedPlan; // requestedPlanCode
+    private LocalDateTime upgradeRequestedAt;
+    private String upgradeDecisionNote;
+
     public OwnerAppAccessResponse() {}
 
-    // getters/setters
     public boolean isCanAccessDashboard() { return canAccessDashboard; }
     public void setCanAccessDashboard(boolean canAccessDashboard) { this.canAccessDashboard = canAccessDashboard; }
 
@@ -62,4 +68,17 @@ public class OwnerAppAccessResponse {
 
     public boolean isDedicatedInfraReady() { return dedicatedInfraReady; }
     public void setDedicatedInfraReady(boolean dedicatedInfraReady) { this.dedicatedInfraReady = dedicatedInfraReady; }
+
+    // ✅ upgrade request getters/setters
+    public String getUpgradeRequestStatus() { return upgradeRequestStatus; }
+    public void setUpgradeRequestStatus(String upgradeRequestStatus) { this.upgradeRequestStatus = upgradeRequestStatus; }
+
+    public PlanCode getUpgradeRequestedPlan() { return upgradeRequestedPlan; }
+    public void setUpgradeRequestedPlan(PlanCode upgradeRequestedPlan) { this.upgradeRequestedPlan = upgradeRequestedPlan; }
+
+    public LocalDateTime getUpgradeRequestedAt() { return upgradeRequestedAt; }
+    public void setUpgradeRequestedAt(LocalDateTime upgradeRequestedAt) { this.upgradeRequestedAt = upgradeRequestedAt; }
+
+    public String getUpgradeDecisionNote() { return upgradeDecisionNote; }
+    public void setUpgradeDecisionNote(String upgradeDecisionNote) { this.upgradeDecisionNote = upgradeDecisionNote; }
 }

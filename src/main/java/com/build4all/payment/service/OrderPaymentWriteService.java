@@ -9,6 +9,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Locale;
 import java.util.NoSuchElementException;
+import java.util.List;
 
 @Service
 public class OrderPaymentWriteService {
@@ -73,6 +74,8 @@ public class OrderPaymentWriteService {
     }
     
     
+    
+    
     @Transactional
     public PaymentTransaction recordPaymentFailedOrCanceled(Long orderId,
                                                             String providerCode,
@@ -109,6 +112,50 @@ public class OrderPaymentWriteService {
         tx.setRawProviderPayload(payload);
 
         return txRepo.save(tx);
+    }
+    
+    
+ // in com.build4all.payment.service.OrderPaymentWriteService
+
+    public int resetCashToUnpaid(Long orderId) {
+        // TODO: use your repository method to fetch tx by order + provider=CASH
+        // I’m writing it generically because I don’t see your repo here
+
+        var txs = txRepo.findByOrderIdAndProviderCodeIgnoreCase(orderId, "CASH");
+
+        int changed = 0;
+        for (var tx : txs) {
+            if ("PAID".equalsIgnoreCase(tx.getStatus())) {
+                tx.setStatus("OFFLINE_PENDING"); // or "PENDING"
+                changed++;
+            }
+        }
+        txRepo.saveAll(txs);
+        return changed;
+    }
+
+    
+
+    public int resetCashToUnpaid(Long orderId, Long ownerProjectId) {
+        // Fetch all CASH transactions for this order
+        List<PaymentTransaction> txs =
+                txRepo.findByOrderIdAndProviderCodeIgnoreCase(orderId, "CASH");
+
+        int changed = 0;
+
+        for (PaymentTransaction tx : txs) {
+            // tenant safety (super important)
+            if (!tx.getOwnerProjectId().equals(ownerProjectId)) continue;
+
+            // only flip PAID -> OFFLINE_PENDING
+            if ("PAID".equalsIgnoreCase(tx.getStatus())) {
+                tx.setStatus("OFFLINE_PENDING");
+                changed++;
+            }
+        }
+
+        txRepo.saveAll(txs);
+        return changed;
     }
 
 }

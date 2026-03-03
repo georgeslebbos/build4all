@@ -496,7 +496,8 @@ public class AuthController {
         Long ownerProjectLinkId = toLongOrNull(body.get("ownerProjectLinkId"));
 
         if (phone == null || rawPassword == null || ownerProjectLinkId == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "phoneNumber, password and ownerProjectLinkId are required"));
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "phoneNumber, password and ownerProjectLinkId are required"));
         }
 
         Users existingUser = userService.findByPhoneNumber(phone, ownerProjectLinkId);
@@ -506,11 +507,14 @@ public class AuthController {
         }
 
         if (!passwordEncoder.matches(rawPassword, existingUser.getPasswordHash())) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Incorrect password"));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Incorrect password"));
         }
 
-        String currentStatus = existingUser.getStatus().getName();
-        if ("DELETED".equalsIgnoreCase(currentStatus)) {
+        String status = existingUser.getStatus() != null ? existingUser.getStatus().getName() : "";
+
+        // ✅ DELETED flow (same as you had)
+        if ("DELETED".equalsIgnoreCase(status)) {
             String tempToken = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
 
             Map<String, Object> deletedUserData = new HashMap<>();
@@ -524,7 +528,7 @@ public class AuthController {
 
             return ResponseEntity.ok(Map.of(
                     "wasDeleted", true,
-                    "canRestoreDeleted", true, // always true now
+                    "canRestoreDeleted", true,
                     "message", "This account was deleted. Confirm reactivation.",
                     "token", tempToken,
                     "user", deletedUserData,
@@ -532,11 +536,36 @@ public class AuthController {
                     "ownerProjectLinkId", ownerProjectLinkId
             ));
         }
+
+        // ✅ INACTIVE flow (THIS WAS MISSING)
+        if ("INACTIVE".equalsIgnoreCase(status)) {
+            String tempToken = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
+
+            Map<String, Object> inactiveUserData = new HashMap<>();
+            inactiveUserData.put("id", existingUser.getId());
+            inactiveUserData.put("username", existingUser.getUsername());
+            inactiveUserData.put("phoneNumber", existingUser.getPhoneNumber());
+            inactiveUserData.put("firstName", existingUser.getFirstName());
+            inactiveUserData.put("lastName", existingUser.getLastName());
+            inactiveUserData.put("profilePictureUrl", existingUser.getProfilePictureUrl());
+            inactiveUserData.put("ownerProjectLinkId", ownerProjectLinkId);
+
+            return ResponseEntity.ok(Map.of(
+                    "wasInactive", true,
+                    "message", "Your account is inactive. Confirm reactivation.",
+                    "token", tempToken,
+                    "user", inactiveUserData,
+                    "userType", "user",
+                    "ownerProjectLinkId", ownerProjectLinkId
+            ));
+        }
+
+        // ✅ ACTIVE normal login
         existingUser.setLastLogin(LocalDateTime.now());
         userService.save(existingUser);
 
-        // ✅ IMPORTANT: with strict JwtUtil, USER token MUST include tenant
         String token = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
+        String refreshToken = refreshTokenService.issue("USER", existingUser.getId(), ownerProjectLinkId);
 
         Map<String, Object> userData = new HashMap<>();
         userData.put("id", existingUser.getId());
@@ -550,6 +579,7 @@ public class AuthController {
         return ResponseEntity.ok(Map.of(
                 "message", "User login with phone successful",
                 "token", token,
+                "refreshToken", refreshToken,
                 "user", userData,
                 "wasInactive", false
         ));
@@ -559,70 +589,77 @@ public class AuthController {
      *  USER REACTIVATION
      * ===================================================================================== */
     @PostMapping("/reactivate")
-    public ResponseEntity<?> reactivateAccount(@RequestBody Map<String, Object> request) {
+    public ResponseEntity<?> reactivateAccount(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader
+    ) {
+        try {
+            if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Missing Authorization token"));
+            }
 
-        // ✅ With strict JwtUtil, we must mint a tenant-scoped token.
-        // So ownerProjectLinkId is REQUIRED here.
-        Long userId = toLongOrNull(request.get("id"));
-        Long ownerProjectLinkId = toLongOrNull(request.get("ownerProjectLinkId"));
+            String jwt = authHeader.substring(7).trim();
+            if (!jwtUtil.validateToken(jwt)) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Invalid or expired token"));
+            }
 
-        if (userId == null || ownerProjectLinkId == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "id and ownerProjectLinkId are required"));
+            // ✅ MUST be a USER token
+            String role = Optional.ofNullable(jwtUtil.extractRole(jwt)).orElse("").toUpperCase();
+            if (!"USER".equals(role)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Access denied"));
+            }
+
+            // ✅ Extract user id from token (ownership proof)
+            Long userId = jwtUtil.extractId(jwt);
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Invalid token: missing user id"));
+            }
+
+            // ✅ Extract tenant from token (strict multi-tenant)
+            Long ownerProjectLinkId = jwtUtil.requireOwnerProjectId(authHeader);
+
+            Users user = userService.findById(userId)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            // ✅ tenant safety: token tenant must match DB tenant
+            Long dbTenantId = (user.getOwnerProject() != null) ? user.getOwnerProject().getId() : null;
+            if (dbTenantId == null || !dbTenantId.equals(ownerProjectLinkId)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Invalid tenancy"));
+            }
+
+            String status = user.getStatus() != null ? user.getStatus().getName() : "";
+            if (!"INACTIVE".equalsIgnoreCase(status) && !"DELETED".equalsIgnoreCase(status)) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "User is neither inactive nor recoverable deleted"));
+            }
+
+            licensingService.requireUserSlotAvailable(ownerProjectLinkId);
+
+            UserStatus active = userStatusRepository.findByNameIgnoreCase("ACTIVE")
+                    .orElseThrow(() -> new RuntimeException("Status 'ACTIVE' not found"));
+
+            user.setStatus(active);
+            user.setLastLogin(LocalDateTime.now());
+            userService.save(user);
+
+            // ✅ Now issue REAL access token + refresh
+            String token = jwtUtil.generateToken(user, ownerProjectLinkId);
+            String refreshToken = refreshTokenService.issue("USER", user.getId(), ownerProjectLinkId);
+
+            return ResponseEntity.ok(Map.of(
+                    "message", "Account reactivated successfully",
+                    "token", token,
+                    "refreshToken", refreshToken
+            ));
+
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Server error"));
         }
-
-        Optional<Users> userOpt = userService.findById(userId);
-        if (userOpt.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "User not found"));
-        }
-
-        Users user = userOpt.get();
-
-        // ✅ Extra safety: prevent reactivating across tenants
-        if (user.getOwnerProject() == null || user.getOwnerProject().getId() == null
-                || !ownerProjectLinkId.equals(user.getOwnerProject().getId())) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Invalid tenancy"));
-        }
-
-        String currentStatus = user.getStatus().getName();
-        boolean isInactive = "INACTIVE".equalsIgnoreCase(currentStatus);
-        boolean isDeleted = "DELETED".equalsIgnoreCase(currentStatus);
-
-        if (!isInactive && !isDeleted) {
-            return ResponseEntity.badRequest().body(Map.of("error", "User is neither inactive nor recoverable deleted"));
-        }
-
-       
-        licensingService.requireUserSlotAvailable(ownerProjectLinkId);
-        
-        UserStatus activeStatus = userStatusRepository.findByNameIgnoreCase("ACTIVE")
-                .orElseThrow(() -> new RuntimeException("Status 'ACTIVE' not found"));
-
-        user.setStatus(activeStatus);
-        user.setLastLogin(LocalDateTime.now());
-        userService.save(user);
-
-        // ✅ IMPORTANT: with strict JwtUtil, USER token MUST include tenant
-        String token = jwtUtil.generateToken(user, ownerProjectLinkId);
-        String refreshToken = refreshTokenService.issue("USER", user.getId(), ownerProjectLinkId);
-
-        
-
-        Map<String, Object> userData = new HashMap<>();
-        userData.put("id", user.getId());
-        userData.put("username", user.getUsername());
-        userData.put("firstName", user.getFirstName());
-        userData.put("lastName", user.getLastName());
-        userData.put("email", user.getEmail());
-        userData.put("profilePictureUrl", user.getProfilePictureUrl());
-        userData.put("ownerProjectLinkId", ownerProjectLinkId);
-
-      
-        		return ResponseEntity.ok(Map.of(
-                        "message", "Account reactivated successfully",
-                        "token", token,
-                        "refreshToken", refreshToken,
-                        "user", userData
-                ));
     }
 
     /* =====================================================================================
@@ -1129,6 +1166,7 @@ public class AuthController {
 
         // ✅ SUPER_ADMIN is global -> ownerProjectId stays null
         String token = jwtUtil.generateToken(admin, ownerProjectId);
+        String refreshToken = refreshTokenService.issue("ADMIN", admin.getAdminId(), ownerProjectId);
 
         Map<String, Object> adminData = new HashMap<>();
         adminData.put("id", admin.getAdminId());
@@ -1141,6 +1179,7 @@ public class AuthController {
         return ResponseEntity.ok(Map.of(
                 "message", "Login successful",
                 "token", token,
+                "refreshToken", refreshToken,
                 "role", role,
                 "ownerProjectId", ownerProjectId,
                 "admin", adminData

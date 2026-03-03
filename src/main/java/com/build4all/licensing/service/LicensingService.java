@@ -227,6 +227,22 @@ public class LicensingService {
             }
         }
 
+        
+     // ✅ attach latest upgrade request state for UI
+        var lastReqOpt = upgradeReqRepo.findTopByAupIdOrderByRequestedAtDesc(aupId);
+
+        if (lastReqOpt.isPresent()) {
+            var r = lastReqOpt.get();
+            res.setUpgradeRequestStatus(r.getStatus().name());
+            res.setUpgradeRequestedPlan(r.getRequestedPlanCode());
+            res.setUpgradeRequestedAt(r.getRequestedAt());
+            res.setUpgradeDecisionNote(r.getDecisionNote());
+        } else {
+            res.setUpgradeRequestStatus(null);
+            res.setUpgradeRequestedPlan(null);
+            res.setUpgradeRequestedAt(null);
+            res.setUpgradeDecisionNote(null);
+        }
         return res;
     }
     
