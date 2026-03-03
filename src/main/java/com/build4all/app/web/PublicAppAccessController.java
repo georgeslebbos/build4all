@@ -54,13 +54,10 @@ public class PublicAppAccessController {
 
         Map<String, Object> body = new HashMap<>();
         body.put("allowed", true);
-        body.put("reason", "");
-        body.put("message", "OK");
+       
 
-        body.put("ownerProjectLinkId", link.getId());
-        body.put("ownerId", link.getAdmin() != null ? link.getAdmin().getAdminId() : null);
-        body.put("projectId", link.getProject() != null ? link.getProject().getId() : null);
-        body.put("slug", link.getSlug());
+        ;
+
         body.put("appName", link.getAppName());
         body.put("status", link.getStatus());
         body.put("validFrom", link.getValidFrom());

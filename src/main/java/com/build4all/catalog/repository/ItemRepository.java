@@ -54,6 +54,8 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
                                         @Param("itemId") Long itemId);
     
     
+    
+    
 
     /* existing */
     @Query("SELECT i FROM Item i WHERE i.business.id = :businessId")
@@ -144,7 +146,8 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
     @Query("select i from Item i where i.id = :id")
     Optional<Item> findByIdForStockCheck(@Param("id") Long id);
     
-
+    
+ 
 
     @Modifying
     @Query("""
@@ -153,6 +156,17 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
         where i.id = :id and i.stock >= :qty
     """)
     int decrementStockIfEnough(@Param("id") Long id, @Param("qty") int qty);
+    
+    
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+        select i
+        from Item i
+        where i.id = :itemId
+          and i.ownerProject.id = :aupId
+    """)
+    Optional<Item> findByIdForStockCheckScoped(@Param("aupId") Long aupId,
+                                              @Param("itemId") Long itemId);
 
     // ✅ for restore (cancel/refund)
     @Modifying

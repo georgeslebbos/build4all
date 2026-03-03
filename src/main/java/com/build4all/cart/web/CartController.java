@@ -6,12 +6,12 @@ import com.build4all.cart.dto.UpdateCartItemRequest;
 import com.build4all.cart.service.CartService;
 import com.build4all.security.JwtUtil;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -20,8 +20,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/cart")
 @Tag(name = "Cart")
-@PreAuthorize("hasRole('USER') or hasRole('SUPER_ADMIN')")
 @SecurityRequirement(name = "bearerAuth")
+@PreAuthorize("hasRole('USER')") // ✅ cart is USER-only (your requireUserId already enforces this)
 public class CartController {
 
     private final CartService cartService;
@@ -45,7 +45,7 @@ public class CartController {
 
     /**
      * ✅ Cart endpoints are USER-only.
-     * - rejects BUSINESS/OWNER/SUPER_ADMIN tokens
+     * Rejects BUSINESS/OWNER/SUPER_ADMIN tokens.
      */
     private Long requireUserId(String authHeader) {
         String token = requireRawToken(authHeader);
@@ -63,11 +63,9 @@ public class CartController {
 
     /**
      * ✅ Enforce tenant presence in USER token (ownerProjectId claim).
-     * This is your linkId / aup_id scope.
+     * This is your aup_id scope.
      */
     private Long requireTenantId(String authHeader) {
-        // This method already validates and enforces tenant claim presence
-        // (in your JwtUtil.requireOwnerProjectId).
         return jwt.requireOwnerProjectId(authHeader);
     }
 
@@ -76,23 +74,24 @@ public class CartController {
      * ============================ */
 
     @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "Get my active cart", description = "Returns the active cart for the authenticated user")
+    @Operation(summary = "Get my active cart", description = "Returns the active cart for the authenticated user (tenant-scoped)")
     public ResponseEntity<CartResponse> getMyCart(
             @RequestHeader("Authorization") String authHeader
     ) {
-        Long tenantId = requireTenantId(authHeader); // ✅ tenant scope enforced
-        Long userId = requireUserId(authHeader);     // ✅ user-only
+        Long tenantId = requireTenantId(authHeader);
+        Long userId = requireUserId(authHeader);
 
-        // (Optional) if you later update service signature: cartService.getMyCart(tenantId, userId)
-        return ResponseEntity.ok(cartService.getMyCart(userId));
+        return ResponseEntity.ok(cartService.getMyCart(tenantId, userId));
     }
 
     /* ============================
      * ADD ITEM
      * ============================ */
 
-    @PostMapping(value = "/items", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "Add item to cart", description = "Adds an item to the authenticated user's active cart")
+    @PostMapping(value = "/items",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Add item to cart", description = "Adds an item to the authenticated user's active cart (tenant-scoped)")
     public ResponseEntity<CartResponse> addToCart(
             @RequestHeader("Authorization") String authHeader,
             @RequestBody AddToCartRequest req
@@ -100,15 +99,17 @@ public class CartController {
         Long tenantId = requireTenantId(authHeader);
         Long userId = requireUserId(authHeader);
 
-        return ResponseEntity.ok(cartService.addToCart(userId, req));
+        return ResponseEntity.ok(cartService.addToCart(tenantId, userId, req));
     }
 
     /* ============================
      * UPDATE ITEM
      * ============================ */
 
-    @PutMapping(value = "/items/{cartItemId}", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "Update quantity of cart item", description = "Updates the quantity of a given cart item for the authenticated user")
+    @PutMapping(value = "/items/{cartItemId}",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Update quantity of cart item", description = "Updates the quantity of a given cart item for the authenticated user (tenant-scoped)")
     public ResponseEntity<CartResponse> updateCartItem(
             @RequestHeader("Authorization") String authHeader,
             @PathVariable Long cartItemId,
@@ -117,7 +118,7 @@ public class CartController {
         Long tenantId = requireTenantId(authHeader);
         Long userId = requireUserId(authHeader);
 
-        return ResponseEntity.ok(cartService.updateCartItem(userId, cartItemId, req));
+        return ResponseEntity.ok(cartService.updateCartItem(tenantId, userId, cartItemId, req));
     }
 
     /* ============================
@@ -125,7 +126,7 @@ public class CartController {
      * ============================ */
 
     @DeleteMapping(value = "/items/{cartItemId}", produces = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "Remove item from cart", description = "Removes a specific item from the authenticated user's cart")
+    @Operation(summary = "Remove item from cart", description = "Removes a specific item from the authenticated user's cart (tenant-scoped)")
     public ResponseEntity<CartResponse> removeCartItem(
             @RequestHeader("Authorization") String authHeader,
             @PathVariable Long cartItemId
@@ -133,7 +134,7 @@ public class CartController {
         Long tenantId = requireTenantId(authHeader);
         Long userId = requireUserId(authHeader);
 
-        return ResponseEntity.ok(cartService.removeCartItem(userId, cartItemId));
+        return ResponseEntity.ok(cartService.removeCartItem(tenantId, userId, cartItemId));
     }
 
     /* ============================
@@ -141,14 +142,14 @@ public class CartController {
      * ============================ */
 
     @DeleteMapping(produces = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "Clear my cart", description = "Removes all items from the authenticated user's cart")
+    @Operation(summary = "Clear my cart", description = "Removes all items from the authenticated user's cart (tenant-scoped)")
     public ResponseEntity<?> clearCart(
             @RequestHeader("Authorization") String authHeader
     ) {
         Long tenantId = requireTenantId(authHeader);
         Long userId = requireUserId(authHeader);
 
-        cartService.clearCart(userId);
+        cartService.clearCart(tenantId, userId);
         return ResponseEntity.noContent().build();
     }
 
@@ -156,8 +157,10 @@ public class CartController {
      * CHECKOUT
      * ============================ */
 
-    @PostMapping(value = "/checkout", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "Checkout cart and create order", description = "Converts the authenticated user's active cart to an Order + OrderItems")
+    @PostMapping(value = "/checkout",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Checkout cart and create order", description = "Converts the authenticated user's active cart to an Order + OrderItems (tenant-scoped)")
     public ResponseEntity<?> checkout(
             @RequestHeader("Authorization") String authHeader,
             @RequestBody Map<String, Object> body
@@ -177,6 +180,7 @@ public class CartController {
                 : null;
 
         Long orderId = cartService.checkout(
+                tenantId,
                 userId,
                 paymentMethod,
                 stripePaymentId,
@@ -205,6 +209,9 @@ public class CartController {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<?> serverError(Exception ex) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("error", "Internal server error", "details", ex.getClass().getSimpleName()));
+                .body(Map.of(
+                        "error", "Internal server error",
+                        "details", ex.getClass().getSimpleName()
+                ));
     }
 }

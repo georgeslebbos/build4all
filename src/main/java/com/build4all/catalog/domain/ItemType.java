@@ -5,14 +5,22 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 
 @Entity
-@Table(name = "ItemTypes")
+@Table(
+    name = "item_types",
+    uniqueConstraints = {
+        @UniqueConstraint(
+            name = "uk_item_type_name_per_category",
+            columnNames = {"category_id", "item_type_name"}
+        )
+    }
+)
 public class ItemType {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "item_type_name", unique = true, nullable = false)
+    @Column(name = "item_type_name", nullable = false)
     @JsonProperty("item_type")
     private String name;
 
