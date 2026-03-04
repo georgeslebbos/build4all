@@ -43,6 +43,10 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
                                       @Param("projectId") Long projectId,
                                       @Param("businessId") Long businessId);
     
+    
+    @Query("select i.stock from Item i where i.id = :id")
+    Integer findStockValue(@Param("id") Long id);
+    
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
         select i

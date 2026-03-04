@@ -57,10 +57,10 @@ public class ApiRateLimitFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         if (path == null) return true;
 
-        // Skip non-API paths (uploads, websocket, static, etc.)
-        if (!path.startsWith("/api/")) return true;
+        // ✅ Skip websocket handshakes even though they are under /api/
+        if (path.startsWith("/api/ws")) return true;
 
-        // Skip preflight
+        if (!path.startsWith("/api/")) return true;
         return "OPTIONS".equalsIgnoreCase(request.getMethod());
     }
 

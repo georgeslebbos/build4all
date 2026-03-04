@@ -175,7 +175,7 @@ public class SecurityConfig implements WebMvcConfigurer {
                 		.requestMatchers(
                 		    "/api/auth/**",
                 		    "/api/ci/**",
-                		    "/ws-chat/**",
+                		    
                 		    "/error",
                 		    "/api/public/runtime-config/**",
                 		    "/api/public/runtime-config",
@@ -186,7 +186,11 @@ public class SecurityConfig implements WebMvcConfigurer {
                 		    "/api/users/reset-password",
                 		    "/api/users/verify-reset-code",
                 		    "/api/users/update-password",
-                		    "/api/public/app-access/**"
+                		    "/api/public/app-access/**",
+                		    "/api/ws/**",
+                		    "/api/ws-native/**",
+                		    "/ws-chat/**",
+                		    "/ws-chat-native/**"
                 		).permitAll()
                 	
                         // Any other endpoint requires authentication (JWT must be valid).

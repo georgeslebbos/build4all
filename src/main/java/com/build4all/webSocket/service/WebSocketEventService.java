@@ -3,7 +3,10 @@ package com.build4all.webSocket.service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
-
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
@@ -13,6 +16,8 @@ import java.util.UUID;
 public class WebSocketEventService {
 
     private final SimpMessagingTemplate messagingTemplate;
+    
+    private static final Logger log = LoggerFactory.getLogger(WebSocketEventService.class);
 
     @Autowired
     public WebSocketEventService(SimpMessagingTemplate messagingTemplate) {
@@ -121,5 +126,87 @@ public class WebSocketEventService {
             if (v != null) m.put(k, v);
         }
         return m;
+    }
+    
+    
+    private Map<String, Object> tenantEnvelope(Long tenantId, String domain, String action, long resourceId, Map<String, Object> data) {
+        Map<String, Object> env = envelope(domain, action, resourceId, data);
+        env.put("tenantId", tenantId == null ? 0 : tenantId);
+        return env;
+    }
+
+    private void afterCommit(Runnable r) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { r.run(); }
+            });
+        } else {
+            r.run();
+        }
+    }
+
+    private String tenantTopic(Long tenantId) {
+        return "/topic/tenant/" + (tenantId == null ? 0 : tenantId) + "/events";
+    }
+    
+    
+    public void sendProductCreated(Long tenantId, Object productDto) {
+        long id = extractId(productDto);
+        log.info("[WS] send product.created tenant={} id={}", tenantId, id);
+
+        afterCommit(() -> messagingTemplate.convertAndSend(
+            tenantTopic(tenantId),
+            tenantEnvelope(tenantId, "product", "created", id, mapOf("productId", id)) // ✅ better than full dto
+        ));
+    }
+
+    public void sendProductUpdated(Long tenantId, Object productDto) {
+        long id = extractId(productDto);
+        log.info("[WS] send product.updated tenant={} id={}", tenantId, id);
+
+        afterCommit(() -> messagingTemplate.convertAndSend(
+            tenantTopic(tenantId),
+            tenantEnvelope(tenantId, "product", "updated", id, mapOf("productId", id))
+        ));
+    }
+
+    public void sendProductDeleted(Long tenantId, Long productId) {
+        afterCommit(() -> messagingTemplate.convertAndSend(
+            tenantTopic(tenantId),
+            tenantEnvelope(tenantId, "product", "deleted", productId == null ? 0 : productId, mapOf("productId", productId))
+        ));
+    }
+
+    public void sendStockChanged(Long tenantId, Long itemId, int delta, Integer newStock, String reason, Long orderId) {
+        afterCommit(() -> messagingTemplate.convertAndSend(
+            tenantTopic(tenantId),
+            tenantEnvelope(tenantId, "stock", "changed", itemId == null ? 0 : itemId,
+                mapOf(
+                    "itemId", itemId,
+                    "delta", delta,
+                    "newStock", newStock,
+                    "reason", reason,
+                    "orderId", orderId
+                )
+            )
+        ));
+    }
+
+    public void sendImportCompleted(Long tenantId, Object resultDto) {
+        afterCommit(() -> messagingTemplate.convertAndSend(
+            tenantTopic(tenantId),
+            tenantEnvelope(tenantId, "import", "completed", 0L, mapOf("result", resultDto))
+        ));
+    }
+
+    // try extract id from DTO via reflection (safe-ish)
+    private long extractId(Object dto) {
+        if (dto == null) return 0L;
+        try {
+            var m = dto.getClass().getMethod("getId");
+            Object v = m.invoke(dto);
+            if (v instanceof Number n) return n.longValue();
+        } catch (Exception ignored) {}
+        return 0L;
     }
 }

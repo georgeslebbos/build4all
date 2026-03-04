@@ -36,6 +36,8 @@ import com.build4all.payment.service.PaymentOrchestratorService;
 import com.build4all.promo.service.CouponService;
 import com.build4all.user.domain.Users;
 import com.build4all.user.repository.UsersRepository;
+import com.build4all.webSocket.service.WebSocketEventService;
+
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
@@ -55,6 +57,7 @@ public class OrderServiceImpl implements OrderService {
     private final ItemRepository itemRepo;
     private final CurrencyRepository currencyRepo;
     private final OrderStatusRepository orderStatusRepo;
+    private final WebSocketEventService wsEvents;
 
     private final OrderPaymentReadService paymentRead;
     private final OrderPaymentWriteService paymentWrite;
@@ -90,7 +93,8 @@ public class OrderServiceImpl implements OrderService {
             OrderPaymentReadService paymentRead,
             OrderPaymentWriteService paymentWrite,
             CouponService couponService,
-            OrderSequenceRepository orderSeqRepo
+            OrderSequenceRepository orderSeqRepo,
+            WebSocketEventService wsEvents
     ) {
         this.orderItemRepo = orderItemRepo;
         this.orderRepo = orderRepo;
@@ -109,6 +113,7 @@ public class OrderServiceImpl implements OrderService {
         this.paymentWrite = paymentWrite;
         this.couponService = couponService;
         this.orderSeqRepo = orderSeqRepo;
+        this.wsEvents = wsEvents;
     }
 
     /* ===============================
@@ -703,6 +708,7 @@ public class OrderServiceImpl implements OrderService {
                 }
             }
 
+            
             BigDecimal unit = resolveUnitPrice(item);
 
             CartLine line = new CartLine();
@@ -1015,6 +1021,8 @@ public class OrderServiceImpl implements OrderService {
                     lineErrors.add(Map.of("itemId", fresh.getId(), "reason", "QTY_EXCEEDS_CAPACITY", "availableStock", Math.max(remaining, 0), "maxAllowedQuantity", Math.max(remaining, 0)));
                 }
             }
+            
+            
         }
 
         if (!blockingErrors.isEmpty()) {
@@ -1037,6 +1045,10 @@ public class OrderServiceImpl implements OrderService {
                             List.of(Map.of("itemId", fresh.getId(), "reason", "STOCK_CHANGED", "message", "Stock changed, please refresh"))
                     );
                 }
+                
+                Integer newStock = itemRepo.findStockValue(fresh.getId());
+                Long tenantId = fresh.getOwnerProject().getId();
+                wsEvents.sendStockChanged(tenantId, fresh.getId(), -qty, newStock, "ORDER_RESERVED", null);
             }
         }
 
@@ -1069,7 +1081,12 @@ public class OrderServiceImpl implements OrderService {
             if (stock == null) continue;
 
             int qty = oi.getQuantity();
-            if (qty > 0) itemRepo.incrementStock(item.getId(), qty);
+            if (qty > 0) {
+               itemRepo.incrementStock(item.getId(), qty);
+               Integer newStock = itemRepo.findStockValue(item.getId());
+               Long tenantId = item.getOwnerProject().getId();
+               wsEvents.sendStockChanged(tenantId, item.getId(), +qty, newStock, "ORDER_RELEASED", order.getId());
+            }
         }
     }
 

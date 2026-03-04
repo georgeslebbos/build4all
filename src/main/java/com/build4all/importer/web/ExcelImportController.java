@@ -7,6 +7,8 @@ import com.build4all.importer.model.ReplaceScope;
 import com.build4all.importer.service.ExcelSeederService;
 import com.build4all.importer.service.TenantContextResolver;
 import com.build4all.licensing.guard.OwnerSubscriptionGuard;
+import com.build4all.webSocket.service.WebSocketEventService;
+
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -21,15 +23,18 @@ public class ExcelImportController {
     private final ExcelSeederService service;
     private final TenantContextResolver tenantContextResolver;
     private final OwnerSubscriptionGuard ownerSubscriptionGuard;
+    private final WebSocketEventService wsEvents;
 
     public ExcelImportController(
             ExcelSeederService service,
             TenantContextResolver tenantContextResolver,
-            OwnerSubscriptionGuard ownerSubscriptionGuard
+            OwnerSubscriptionGuard ownerSubscriptionGuard,
+            WebSocketEventService wsEvents
     ) {
         this.service = service;
         this.tenantContextResolver = tenantContextResolver;
         this.ownerSubscriptionGuard = ownerSubscriptionGuard;
+        this.wsEvents = wsEvents;
     }
 
     // ✅ ADD THIS ENDPOINT (your Flutter app is calling it)
@@ -65,6 +70,8 @@ public class ExcelImportController {
         ExcelImportResult result =
                 service.importExcel(file, new ImportOptions(replace, replaceScope), ownerProjectId);
 
+      
+        wsEvents.sendImportCompleted(ownerProjectId, result);
         return ResponseEntity.ok(result);
     }
 }

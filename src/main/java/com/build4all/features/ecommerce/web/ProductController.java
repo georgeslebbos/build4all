@@ -11,6 +11,7 @@ import com.build4all.licensing.dto.OwnerAppAccessResponse;
 import com.build4all.licensing.service.LicensingService;
 import com.build4all.security.JwtUtil;
 import com.build4all.tax.domain.TaxClass;
+import com.build4all.webSocket.service.WebSocketEventService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
@@ -30,15 +31,19 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/products")
 public class ProductController {
+	
+	
 
     private final ProductService productService;
     private final JwtUtil jwtUtil;
     private final LicensingService licensingService;
+    private final WebSocketEventService wsEvents;
 
-    public ProductController(ProductService productService, JwtUtil jwtUtil, LicensingService licensingService) {
+    public ProductController(ProductService productService, JwtUtil jwtUtil, LicensingService licensingService, WebSocketEventService wsEvents) {
         this.productService = productService;
         this.jwtUtil = jwtUtil;
         this.licensingService = licensingService;
+        this.wsEvents = wsEvents;
     }
 
     /* =========================================================
@@ -196,6 +201,7 @@ public class ProductController {
             if (attrs != null) req.setAttributes(attrs);
 
             ProductResponse saved = productService.createWithImage(req, image);
+            wsEvents.sendProductCreated(ownerProjectId, saved);
             return ResponseEntity.status(HttpStatus.CREATED).body(saved);
 
         } catch (IllegalArgumentException e) {
@@ -297,9 +303,13 @@ public class ProductController {
             List<AttributeValueDTO> attrs = parseAttributes(attributesJson);
             if (attrs != null) req.setAttributes(attrs);
 
-            ProductResponse updated =
-                    productService.updateWithImageTenant(id, ownerProjectId, req, image);
+            ProductResponse updated = productService.updateWithImageTenant(id, ownerProjectId, req, image);
+            wsEvents.sendProductUpdated(ownerProjectId, updated);
 
+           
+            if (stock != null) {
+               wsEvents.sendStockChanged(ownerProjectId, updated.getId(), 0, stock, "MANUAL_UPDATE", null);
+            }
             return ResponseEntity.ok(updated);
 
         } catch (IllegalArgumentException e) {
@@ -332,9 +342,10 @@ public class ProductController {
         Long ownerProjectId = tenantFromAuth(auth);
 
         try {
-            productService.deleteTenant(id, ownerProjectId);
-            return ResponseEntity.noContent().build();
-
+        	productService.deleteTenant(id, ownerProjectId);
+        	wsEvents.sendProductDeleted(ownerProjectId, id);
+        	return ResponseEntity.noContent().build();
+        	
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("code", "PRODUCT_NOT_FOUND"));
         } catch (DataIntegrityViolationException e) {
