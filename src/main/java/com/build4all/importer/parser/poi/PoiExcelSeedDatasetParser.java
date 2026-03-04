@@ -6,6 +6,10 @@ import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -333,14 +337,49 @@ public class PoiExcelSeedDatasetParser implements ExcelSeedDatasetParser {
             Cell c = row.getCell(i);
             if (c == null) return null;
 
+            // ✅ Proper Excel date cell
             if (c.getCellType() == CellType.NUMERIC && DateUtil.isCellDateFormatted(c)) {
                 return c.getDateCellValue().toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime();
             }
 
-            String s = PoiExcelSeedDatasetParser.s(c);
-            if (blank(s)) return null;
+            String raw = PoiExcelSeedDatasetParser.s(c);
+            if (blank(raw)) return null;
 
-            try { return LocalDateTime.parse(s.trim()); } catch (Exception e) { return null; }
+            String s = raw.trim();
+
+            // 1) ISO LocalDateTime: 2026-03-04T12:30:00
+            try { return LocalDateTime.parse(s); } catch (DateTimeParseException ignored) {}
+
+            // 2) ISO LocalDate: 2026-03-04
+            try { return LocalDate.parse(s).atStartOfDay(); } catch (DateTimeParseException ignored) {}
+
+            // 3) Common patterns (date-time)
+            String[] dtPatterns = {
+                    "yyyy-MM-dd HH:mm",
+                    "yyyy-MM-dd HH:mm:ss",
+                    "dd/MM/yyyy HH:mm",
+                    "dd/MM/yyyy HH:mm:ss",
+                    "MM/dd/yyyy HH:mm",
+                    "MM/dd/yyyy HH:mm:ss"
+            };
+
+            for (String p : dtPatterns) {
+                try { return LocalDateTime.parse(s, DateTimeFormatter.ofPattern(p)); }
+                catch (DateTimeParseException ignored) {}
+            }
+
+            // 4) Common patterns (date-only)
+            String[] dPatterns = {
+                    "dd/MM/yyyy",
+                    "MM/dd/yyyy"
+            };
+
+            for (String p : dPatterns) {
+                try { return LocalDate.parse(s, DateTimeFormatter.ofPattern(p)).atStartOfDay(); }
+                catch (DateTimeParseException ignored) {}
+            }
+
+            return null;
         }
     }
 }

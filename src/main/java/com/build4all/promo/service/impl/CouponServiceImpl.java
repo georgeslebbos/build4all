@@ -60,6 +60,12 @@ public class CouponServiceImpl implements CouponService {
                 .ifPresent(c -> {
                     throw new IllegalArgumentException("Coupon code already exists for this ownerProjectId");
                 });
+        
+        LocalDateTime from = req.getStartsAt();
+        LocalDateTime to = req.getExpiresAt();
+        if (from != null && to != null && from.isAfter(to)) {
+            throw new IllegalArgumentException("startsAt must be <= expiresAt");
+        }
 
         Coupon coupon = new Coupon();
         coupon.setOwnerProjectId(req.getOwnerProjectId());
@@ -153,12 +159,19 @@ public class CouponServiceImpl implements CouponService {
                 existing.setValue(req.getDiscountValue());
             }
         }
+        
+        LocalDateTime from = existing.getValidFrom();
+        LocalDateTime to = existing.getValidTo();
+        if (from != null && to != null && from.isAfter(to)) {
+            throw new IllegalArgumentException("startsAt must be <= expiresAt");
+        }
 
         if (req.getMaxUses() != null) existing.setGlobalUsageLimit(req.getMaxUses());
         if (req.getMinOrderAmount() != null) existing.setMinOrderAmount(req.getMinOrderAmount());
         if (req.getMaxDiscountAmount() != null) existing.setMaxDiscountAmount(req.getMaxDiscountAmount());
         if (req.getStartsAt() != null) existing.setValidFrom(req.getStartsAt());
         if (req.getExpiresAt() != null) existing.setValidTo(req.getExpiresAt());
+      
 
         // ✅ Only update active if client sent it
         if (req.getActive() != null) {

@@ -78,9 +78,21 @@ public class ExcelSeederService {
             if (!itemTypes.add(k)) warnings.add("Duplicate itemType: " + it.name);
         }
 
+     // Products: FK + basic validation + prevent silent DB conflicts
+        Set<String> skusInFile = new HashSet<>();
+
         for (int i = 0; i < data.products.size(); i++) {
             var p = data.products.get(i);
             if (blank(p.name)) continue;
+
+            if (!blank(p.sku)) {
+                String skuKey = p.sku.trim().toUpperCase();
+                if (!skusInFile.add(skuKey)) {
+                    errors.add("PRODUCTS.row#" + (i + 2) + ": duplicate sku in Excel: " + p.sku);
+                }
+            } else {
+                warnings.add("PRODUCTS.row#" + (i + 2) + ": sku is empty (a SKU will be auto-generated)");
+            }
 
             if (blank(p.itemTypeName)) errors.add("PRODUCTS.row#" + (i + 2) + ": itemTypeName is required");
             else if (!itemTypes.contains(p.itemTypeName.trim().toLowerCase()))
@@ -88,6 +100,7 @@ public class ExcelSeederService {
 
             checkEnum(errors, "PRODUCTS.row#" + (i + 2) + ".productType", p.productType, ProductType.class, false);
         }
+        
 
         for (int i = 0; i < data.shippingMethods.size(); i++) {
             checkEnum(errors, "SHIPPING_METHODS.row#" + (i + 2) + ".type",

@@ -197,7 +197,7 @@ public class ProductService {
         p.setItemName(request.getName());
         p.setDescription(request.getDescription());
         p.setPrice(request.getPrice());
-        p.setStatus(request.getStatus() != null ? request.getStatus() : "Upcoming");
+        p.setStatus(request.getStatus() != null ? request.getStatus() : "Available");
         p.setImageUrl(request.getImageUrl());
         if (request.getStock() != null) p.setStock(request.getStock());
 

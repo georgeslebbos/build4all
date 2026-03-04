@@ -45,6 +45,23 @@ public class AuthRefreshTokenService {
         return raw;
     }
 
+    
+    @Transactional
+    public String issueWO(String subjectType, Long subjectId) {
+        String raw = generateRawToken();
+        String hash = sha256Base64(raw);
+
+        AuthRefreshToken row = new AuthRefreshToken();
+        row.setSubjectType(subjectType);
+        row.setSubjectId(subjectId);
+        
+        row.setTokenHash(hash);
+        row.setExpiresAt(LocalDateTime.now().plusDays(REFRESH_DAYS));
+
+        repo.save(row);
+        return raw;
+    }
+
     @Transactional
     public Rotated rotate(String oldRaw) {
         LocalDateTime now = LocalDateTime.now();

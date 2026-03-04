@@ -1223,24 +1223,10 @@ public class AuthController {
                     "Access denied for this role");
         }
 
-        Long ownerProjectId = null;
-
-        if ("OWNER".equalsIgnoreCase(role)) {
-            List<AdminUserProject> links = adminUserProjectRepo.findByAdmin_AdminId(admin.getAdminId());
-            if (links == null || links.isEmpty()) {
-                return authError(HttpStatus.BAD_REQUEST, "OWNER_NO_APP",
-                        "Owner has no AdminUserProject link.");
-            }
-            ownerProjectId = links.get(0).getId();
-        } else if ("MANAGER".equalsIgnoreCase(role)) {
-            if (admin.getBusiness() != null && admin.getBusiness().getOwnerProjectLink() != null) {
-                ownerProjectId = admin.getBusiness().getOwnerProjectLink().getId();
-            }
-        }
-
+       
         // SUPER_ADMIN stays null
-        String token = jwtUtil.generateToken(admin, ownerProjectId);
-        String refreshToken = refreshTokenService.issue("ADMIN", admin.getAdminId(), ownerProjectId);
+        String token = jwtUtil.generateToken(admin);
+        String refreshToken = refreshTokenService.issueWO("ADMIN", admin.getAdminId());
 
        
 
@@ -1257,7 +1243,7 @@ public class AuthController {
                 "token", token,
                 "refreshToken", refreshToken,
                 "role", role,
-                "ownerProjectId", ownerProjectId,
+              
                 "admin", adminData
         ));
         

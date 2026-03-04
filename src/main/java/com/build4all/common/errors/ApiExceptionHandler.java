@@ -11,7 +11,9 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.web.servlet.NoHandlerFoundException;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
@@ -136,4 +138,17 @@ public class ApiExceptionHandler {
                         req.getRequestURI(), null, requestId)
         );
     }
+    
+    @ExceptionHandler(NoHandlerFoundException.class)
+    public ResponseEntity<?> handleNoHandler(NoHandlerFoundException ex, HttpServletRequest req) {
+        String requestId = UUID.randomUUID().toString();
+        
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+                body(HttpStatus.NOT_FOUND, "NOT_FOUND",
+                        "No endpoint for this path", req.getRequestURI(), null, requestId)
+        );
+    }
+
+   
+  
 }

@@ -132,6 +132,7 @@ public class DatasetImporterImpl implements DatasetImporter {
         }
 
         // 3) Products (tenant-scoped)
+     // 3) Products (tenant-scoped)
         Set<String> existingSkus = new HashSet<>();
         for (Product p : productRepo.findByOwnerProject_Id(aup.getId())) {
             if (p.getSku() != null) existingSkus.add(p.getSku().trim().toUpperCase());
@@ -140,15 +141,12 @@ public class DatasetImporterImpl implements DatasetImporter {
         for (var ps : data.products) {
             if (ps == null || blank(ps.name)) continue;
 
-            String skuKey = ps.sku != null ? ps.sku.trim().toUpperCase() : null;
-         
-            
-
             ItemType itemType = itemTypesByName.get(ps.itemTypeName.trim().toLowerCase());
             if (itemType == null) throw new IllegalStateException("Missing itemType for product: " + ps.name);
 
+            // ✅ generate SKU + track the GENERATED one (not the raw one)
             String finalSku = ensureUniqueSku(ps.sku, ps.name, existingSkus);
-            
+
             Product p = new Product();
             p.setOwnerProject(aup);
             p.setItemType(itemType);
@@ -161,8 +159,12 @@ public class DatasetImporterImpl implements DatasetImporter {
             p.setStock(ps.stock != null ? ps.stock : 0);
 
             p.setStatus(ps.status != null ? ps.status : "Active");
-            p.setImageUrl(ps.imageUrl);
+
+            // ✅ fallback: many people fill imageRemoteUrl not imageUrl
+            p.setImageUrl(!blank(ps.imageUrl) ? ps.imageUrl : ps.imageRemoteUrl);
+
             p.setSku(finalSku);
+
             p.setProductType(ps.productType != null
                     ? ProductType.valueOf(ps.productType.trim().toUpperCase())
                     : ProductType.SIMPLE);
@@ -172,9 +174,12 @@ public class DatasetImporterImpl implements DatasetImporter {
 
             productRepo.save(p);
             res.insertedProducts++;
-            if (skuKey != null) existingSkus.add(skuKey);
-        }
 
+            // ✅ THIS is the key line that prevents duplicate import crashes
+            existingSkus.add(finalSku.trim().toUpperCase());
+        }
+        
+        
         // 4) Tax rules
         Set<String> existingRuleNames = new HashSet<>();
         for (TaxRule r : taxRuleRepo.findByOwnerProject_Id(aup.getId())) {
@@ -261,7 +266,11 @@ public class DatasetImporterImpl implements DatasetImporter {
             if (!blank(cs.type)) t = CouponDiscountType.valueOf(cs.type.trim().toUpperCase());
             c.setType(t);
 
-            c.setValue(cs.value);
+            if (t == CouponDiscountType.FREE_SHIPPING) {
+                c.setValue(BigDecimal.ZERO);
+            } else {
+                c.setValue(cs.value != null ? cs.value : BigDecimal.ZERO);
+            };
             c.setGlobalUsageLimit(cs.globalUsageLimit);
             c.setMaxDiscountAmount(cs.maxDiscountAmount);
             c.setMinOrderAmount(cs.minOrderAmount);
