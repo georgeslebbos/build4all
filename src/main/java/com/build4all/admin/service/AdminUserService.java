@@ -1,14 +1,20 @@
 package com.build4all.admin.service;
 
 import com.build4all.admin.domain.AdminUser;
+import com.build4all.admin.domain.PendingAdminEmailChange;
 import com.build4all.admin.dto.AdminUserProfileDTO;
 import com.build4all.business.domain.Businesses;
+import com.build4all.notifications.service.EmailService;
 import com.build4all.review.repository.ReviewRepository;
 import com.build4all.role.domain.Role;
 import com.build4all.admin.repository.AdminUsersRepository;
+import com.build4all.admin.repository.PendingAdminEmailChangeRepository;
 import com.build4all.role.repository.RoleRepository;
 import com.build4all.user.domain.Users;
 import com.build4all.user.repository.UsersRepository;
+
+import jakarta.mail.internet.InternetAddress;
+
 import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.user.dto.UserSummaryDTO;
 import com.build4all.admin.dto.AdminUserUpdateProfileRequest;
@@ -19,10 +25,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.Random;
 import java.util.stream.Collectors;
 
 @Service
@@ -60,9 +68,140 @@ public class AdminUserService {
     @Autowired
     private UsersRepository usersRepository;
     
+    @Autowired private PendingAdminEmailChangeRepository pendingAdminEmailRepo;
+    @Autowired private EmailService emailService;
     
     
     
+    
+    private static final int ADMIN_EMAIL_CHANGE_TTL_MIN = 15;
+    private static final int ADMIN_EMAIL_CHANGE_MAX_ATTEMPTS = 5;
+    private static final int ADMIN_EMAIL_CHANGE_RESEND_COOLDOWN_SEC = 60;
+
+    private String otp6() {
+        return String.format("%06d", new Random().nextInt(1_000_000));
+    }
+
+    private void validateEmailOrThrow(String email) {
+        try {
+            InternetAddress addr = new InternetAddress(email, true);
+            addr.validate();
+        } catch (Exception ex) {
+            throw new RuntimeException("Invalid email format");
+        }
+    }
+
+    private void sendAdminEmailChangeOtp(String to, String code) {
+        String html = """
+            <html><body style="font-family: Arial; text-align:center; padding:20px">
+              <h2>Confirm your new email</h2>
+              <p>Use this code to verify your new email:</p>
+              <h1 style="letter-spacing:6px">%s</h1>
+           
+            </body></html>
+        """.formatted(code, ADMIN_EMAIL_CHANGE_TTL_MIN);
+
+        emailService.sendHtmlEmail(to, "Confirm your new email", html);
+    }
+    
+    
+    @Transactional
+    public void requestAdminEmailChange(Long adminId, String newEmail) {
+
+        if (newEmail == null || newEmail.trim().isEmpty()) {
+            throw new RuntimeException("New email is required");
+        }
+
+        String normalized = newEmail.trim().toLowerCase();
+        validateEmailOrThrow(normalized);
+
+        AdminUser admin = requireById(adminId);
+
+        // same email? nothing to do
+        if (admin.getEmail() != null && admin.getEmail().trim().equalsIgnoreCase(normalized)) {
+            return;
+        }
+
+        // unique across admins (excluding self) ✅ you already have this repo method
+        if (adminUserRepository.existsByEmailIgnoreCaseAndAdminIdNot(normalized, adminId)) {
+            throw new RuntimeException("Email already in use");
+        }
+
+        PendingAdminEmailChange pending = pendingAdminEmailRepo.findByAdmin_AdminId(adminId)
+                .orElseGet(PendingAdminEmailChange::new);
+
+        String code = otp6();
+        LocalDateTime now = LocalDateTime.now();
+
+        pending.setAdmin(admin);
+        pending.setNewEmail(normalized);
+        pending.setCodeHash(passwordEncoder.encode(code));
+        pending.setAttempts(0);
+        pending.setCreatedAt(now);
+        pending.setExpiresAt(now.plusMinutes(ADMIN_EMAIL_CHANGE_TTL_MIN));
+        pending.setLastSentAt(now);
+
+        pendingAdminEmailRepo.save(pending);
+        sendAdminEmailChangeOtp(normalized, code);
+    }
+
+    @Transactional
+    public void verifyAdminEmailChange(Long adminId, String code) {
+        if (code == null || code.trim().isEmpty()) {
+            throw new RuntimeException("Verification code is required");
+        }
+
+        PendingAdminEmailChange pending = pendingAdminEmailRepo.findByAdmin_AdminId(adminId)
+                .orElseThrow(() -> new RuntimeException("No pending email change request"));
+
+        LocalDateTime now = LocalDateTime.now();
+
+        if (pending.getExpiresAt() != null && pending.getExpiresAt().isBefore(now)) {
+            pendingAdminEmailRepo.delete(pending);
+            throw new RuntimeException("Verification code expired. Request again.");
+        }
+
+        pending.setAttempts(pending.getAttempts() + 1);
+
+        if (pending.getAttempts() > ADMIN_EMAIL_CHANGE_MAX_ATTEMPTS) {
+            pendingAdminEmailRepo.delete(pending);
+            throw new RuntimeException("Too many attempts. Request a new code.");
+        }
+
+        if (!passwordEncoder.matches(code.trim(), pending.getCodeHash())) {
+            pendingAdminEmailRepo.save(pending);
+            throw new RuntimeException("Invalid verification code");
+        }
+
+        AdminUser admin = requireById(adminId);
+        admin.setEmail(pending.getNewEmail());
+        adminUserRepository.save(admin);
+
+        pendingAdminEmailRepo.delete(pending);
+    }
+
+    @Transactional
+    public void resendAdminEmailChangeCode(Long adminId) {
+        PendingAdminEmailChange pending = pendingAdminEmailRepo.findByAdmin_AdminId(adminId)
+                .orElseThrow(() -> new RuntimeException("No pending email change request"));
+
+        LocalDateTime now = LocalDateTime.now();
+
+        if (pending.getLastSentAt() != null
+                && pending.getLastSentAt().plusSeconds(ADMIN_EMAIL_CHANGE_RESEND_COOLDOWN_SEC).isAfter(now)) {
+            throw new RuntimeException("Please wait before resending the code");
+        }
+
+        String code = otp6();
+        pending.setCodeHash(passwordEncoder.encode(code));
+        pending.setAttempts(0);
+        pending.setCreatedAt(now);
+        pending.setExpiresAt(now.plusMinutes(ADMIN_EMAIL_CHANGE_TTL_MIN));
+        pending.setLastSentAt(now);
+
+        pendingAdminEmailRepo.save(pending);
+        sendAdminEmailChangeOtp(pending.getNewEmail(), code);
+    }
 
     /**
      * Finds an admin user by email.
@@ -113,8 +252,14 @@ public class AdminUserService {
             throw new RuntimeException("Admin user with email " + email + " already exists");
         }
 
-        // Hash the password before storing it in DB.
-        String encodedPassword = passwordEncoder.encode(plainPassword);
+        if (!StringUtils.hasText(plainPassword)) {
+            throw new RuntimeException("password is required");
+        }
+
+        String cleaned = plainPassword.trim();
+        validateAdminPasswordOrThrow(cleaned);
+
+        String encodedPassword = passwordEncoder.encode(cleaned);
 
         AdminUser admin = new AdminUser(username, firstName, lastName, email, encodedPassword, role);
         return adminUserRepository.save(admin);
@@ -348,9 +493,13 @@ public class AdminUserService {
 
         AdminUser admin = requireById(adminId);
 
-        // --- username ---
+  
+     // --- username ---
         if (StringUtils.hasText(req.getUsername())) {
             String newUsername = req.getUsername().trim();
+            if (newUsername.length() < 3) {
+                throw new RuntimeException("Username must be at least 3 characters");
+            }
             if (adminUserRepository.existsByUsernameIgnoreCaseAndAdminIdNot(newUsername, adminId)) {
                 throw new RuntimeException("Username already in use");
             }
@@ -359,19 +508,25 @@ public class AdminUserService {
 
         // --- first / last name ---
         if (StringUtils.hasText(req.getFirstName())) {
-            admin.setFirstName(req.getFirstName().trim());
+            String fn = req.getFirstName().trim();
+            if (fn.length() < 3) throw new RuntimeException("First name must be at least 3 characters");
+            admin.setFirstName(fn);
         }
         if (StringUtils.hasText(req.getLastName())) {
-            admin.setLastName(req.getLastName().trim());
+            String ln = req.getLastName().trim();
+            if (ln.length() < 3) throw new RuntimeException("Last name must be at least 3 characters");
+            admin.setLastName(ln);
         }
 
         // --- email ---
+     // --- email --- (NO direct change anymore)
         if (StringUtils.hasText(req.getEmail())) {
             String newEmail = req.getEmail().trim();
-            if (adminUserRepository.existsByEmailIgnoreCaseAndAdminIdNot(newEmail, adminId)) {
-                throw new RuntimeException("Email already in use");
+
+            // allow same email only (ignore)
+            if (admin.getEmail() != null && !admin.getEmail().equalsIgnoreCase(newEmail)) {
+                throw new RuntimeException("Email change requires verification. Use request-email-change.");
             }
-            admin.setEmail(newEmail);
         }
 
         // --- phone (allow clearing by sending empty string) ---
@@ -393,9 +548,15 @@ public class AdminUserService {
             admin.setAiEnabled(req.getAiEnabled());
         }
 
-        // --- optional password change ---
+    
+     // --- optional password change ---
         boolean wantsPasswordChange = StringUtils.hasText(req.getNewPassword());
         if (wantsPasswordChange) {
+
+            // ✅ validate new password before anything
+            String newPw = req.getNewPassword().trim();
+            validateAdminPasswordOrThrow(newPw); // ✅ min 6 (same as UI)
+
             if (!StringUtils.hasText(req.getCurrentPassword())) {
                 throw new RuntimeException("Current password is required to change password");
             }
@@ -405,12 +566,23 @@ public class AdminUserService {
                 throw new RuntimeException("Current password is incorrect");
             }
 
-            admin.setPasswordHash(passwordEncoder.encode(req.getNewPassword()));
+            admin.setPasswordHash(passwordEncoder.encode(newPw));
         }
 
         adminUserRepository.save(admin);
         return toProfileDTO(admin);
     }
 
+    
+    private static final int PASSWORD_MIN_LEN = 6;
+
+    private void validateAdminPasswordOrThrow(String password) {
+        if (password == null || password.isBlank()) {
+            throw new RuntimeException("newPassword is required");
+        }
+        if (password.length() < PASSWORD_MIN_LEN) {
+            throw new RuntimeException("newPassword must be at least " + PASSWORD_MIN_LEN + " characters");
+        }
+    }
 
 }

@@ -7,6 +7,7 @@ import com.build4all.ai.service.AiEntitlementService;
 import com.build4all.ai.service.AiItemChatService;
 import com.build4all.ai.service.AiUsageLimitService;
 import com.build4all.security.JwtUtil;
+import com.build4all.security.TenantContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -14,7 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/ai")
-@PreAuthorize("hasAnyRole('OWNER''USER','SUPER_ADMIN')")
+@PreAuthorize("hasAnyRole('OWNER','USER','SUPER_ADMIN')") // ✅ FIXED
 public class AiItemController {
 
     private final AiItemChatService service;
@@ -40,46 +41,66 @@ public class AiItemController {
     @PostMapping("/item-chat")
     public AiChatResponse itemChat(
             @RequestHeader("Authorization") String authHeader,
-            @RequestParam("ownerProjectLinkId") Long ownerProjectLinkId,
             @RequestBody AiItemChatRequest req
     ) {
         String token = extractToken(authHeader);
 
-        // ✅ role gate (extra safety حتى مع @PreAuthorize)
+        // ✅ role
         String role = jwtUtil.extractRole(token);
+        if (role == null || role.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid token role");
+        }
         boolean isSuper = "SUPER_ADMIN".equalsIgnoreCase(role);
 
-        // ✅ ownerId from token
-        Long tokenOwnerId = jwtUtil.extractAdminId(token);
-        if (tokenOwnerId == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token missing admin id");
+        // ✅ tenant (AUP id) comes from JWT claim "ownerProjectId"
+        final Long aupId;
+        try {
+            aupId = jwtUtil.requireOwnerProjectId(token); // works for USER/OWNER/SUPER_ADMIN
+        } catch (RuntimeException ex) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage());
         }
 
-        // ✅ ownership check (ONLY if not super admin)
-        Long linkOwnerId = aupRepo.findOwnerIdByLinkId(ownerProjectLinkId)
+        // ✅ Owner id for this tenant (needed for usage limit + ownership checks)
+        Long linkOwnerId = aupRepo.findOwnerIdByLinkId(aupId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
-                        "Owner not found for ownerProjectLinkId=" + ownerProjectLinkId
+                        "Owner not found for ownerProjectId=" + aupId
                 ));
 
-        if (!isSuper && !tokenOwnerId.equals(linkOwnerId)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden: link does not belong to this owner");
+        // ✅ Ownership check ONLY for OWNER role (USER has no adminId)
+        if (!isSuper && "OWNER".equalsIgnoreCase(role)) {
+            Long tokenOwnerId = jwtUtil.extractAdminId(token);
+            if (tokenOwnerId == null) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token missing admin id");
+            }
+            if (!tokenOwnerId.equals(linkOwnerId)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden: link does not belong to this owner");
+            }
         }
 
-        // 1) feature flag
-        entitlement.assertAiEnabled(ownerProjectLinkId);
+        // ✅ Set tenant for the service layer (ThreadLocal)
+        TenantContext.setOwnerProjectId(aupId);
 
-        // 2) usage limit for owner
-        usageLimit.checkAndIncrement(linkOwnerId);
+        try {
+            // 1) feature flag
+            entitlement.assertAiEnabled(aupId);
 
-        // 3) run AI
-        return new AiChatResponse(service.handle(req));
+            // 2) usage limit for OWNER (owner-based)
+            usageLimit.checkAndIncrement(linkOwnerId);
+
+            // 3) run AI (service will load item by tenant from TenantContext)
+            return new AiChatResponse(service.handle(req));
+
+        } finally {
+            // ✅ CRITICAL: prevent ThreadLocal leaking between requests
+            TenantContext.clear();
+        }
     }
 
     private String extractToken(String authHeader) {
         if (authHeader == null || authHeader.isBlank() || !authHeader.startsWith("Bearer ")) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing/invalid Authorization header");
         }
-        return authHeader.replace("Bearer ", "").trim();
+        return authHeader.substring(7).trim();
     }
 }

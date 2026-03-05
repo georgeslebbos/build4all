@@ -921,6 +921,8 @@ public class OrderController {
         return ResponseEntity.ok(out);
     }
 
+ // OrderController.java
+
     @PreAuthorize("hasRole('SUPER_ADMIN')")
     @GetMapping("/superadmin/applications/{ownerProjectId}/orders")
     public ResponseEntity<?> superAdminOrdersByApplication(@PathVariable Long ownerProjectId) {
@@ -929,6 +931,7 @@ public class OrderController {
 
         Map<Long, BigDecimal> totalsByOrderId = new HashMap<>();
         for (Order o : list) totalsByOrderId.put(o.getId(), o.getTotalPrice());
+
         Map<Long, OrderPaymentReadService.PaymentSummary> payByOrderId =
                 paymentRead.summariesForOrders(totalsByOrderId);
 
@@ -937,10 +940,16 @@ public class OrderController {
             m.put("id", o.getId());
             m.put("orderDate", o.getOrderDate());
             m.put("totalPrice", o.getTotalPrice());
+
             String st = (o.getStatus() != null) ? o.getStatus().getName() : null;
             m.put("status", st);
             m.put("statusUi", titleCaseStatus(st));
+
             m.put("itemsCount", (o.getOrderItems() == null) ? 0 : o.getOrderItems().size());
+
+            // ✅ ADD THESE (THE FIX)
+            m.put("orderCode", o.getOrderCode());
+            m.put("orderSeq", o.getOrderSeq());
 
             OrderPaymentReadService.PaymentSummary ps = payByOrderId.get(o.getId());
             m.put("fullyPaid", ps != null && ps.isFullyPaid());
@@ -963,6 +972,7 @@ public class OrderController {
 
         Map<Long, BigDecimal> totalsByOrderId = new HashMap<>();
         for (Order o : list) totalsByOrderId.put(o.getId(), o.getTotalPrice());
+
         Map<Long, OrderPaymentReadService.PaymentSummary> payByOrderId =
                 paymentRead.summariesForOrders(totalsByOrderId);
 
@@ -971,10 +981,16 @@ public class OrderController {
             m.put("id", o.getId());
             m.put("orderDate", o.getOrderDate());
             m.put("totalPrice", o.getTotalPrice());
+
             String st = (o.getStatus() != null) ? o.getStatus().getName() : null;
             m.put("status", st);
             m.put("statusUi", titleCaseStatus(st));
+
             m.put("itemsCount", (o.getOrderItems() == null) ? 0 : o.getOrderItems().size());
+
+            // ✅ ADD THESE (THE FIX)
+            m.put("orderCode", o.getOrderCode());
+            m.put("orderSeq", o.getOrderSeq());
 
             OrderPaymentReadService.PaymentSummary ps = payByOrderId.get(o.getId());
             m.put("fullyPaid", ps != null && ps.isFullyPaid());
@@ -984,8 +1000,8 @@ public class OrderController {
 
         return ResponseEntity.ok(out);
     }
-    
-    
+
+   
     
     @PreAuthorize("hasRole('OWNER')")
     @PutMapping("/owner/orders/{orderId}/cash/reset-to-unpaid")

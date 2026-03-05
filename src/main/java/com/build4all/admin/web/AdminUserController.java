@@ -4,6 +4,7 @@ import com.build4all.user.dto.UserSummaryDTO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import jakarta.validation.Valid;
 
 import com.build4all.security.JwtUtil;
 import com.build4all.admin.dto.AdminUserProfileDTO;
@@ -13,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -241,7 +243,7 @@ public class AdminUserController {
     @PatchMapping("/me")
     public ResponseEntity<?> updateMyAdminProfile(
             @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader,
-            @RequestBody AdminUserUpdateProfileRequest req
+            @Valid @RequestBody AdminUserUpdateProfileRequest req
     ) {
         try {
             String token = requireAdminOrOwner(authHeader);
@@ -253,6 +255,62 @@ public class AdminUserController {
 
         } catch (RuntimeException re) {
             return err(HttpStatus.BAD_REQUEST, re.getMessage() == null ? "Bad request" : re.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    }
+    
+    
+    @PostMapping("/me/request-email-change")
+    public ResponseEntity<?> requestEmailChange(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader,
+            @RequestBody Map<String, String> body
+    ) {
+        try {
+            String token = requireAdminOrOwner(authHeader);
+            Long myId = requireBackofficeId(token);
+
+            String newEmail = body.get("newEmail");
+            adminUserService.requestAdminEmailChange(myId, newEmail);
+
+            return ok("Verification code sent to new email");
+        } catch (RuntimeException re) {
+            return err(HttpStatus.BAD_REQUEST, re.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    }
+
+    @PostMapping("/me/verify-email-change")
+    public ResponseEntity<?> verifyEmailChange(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader,
+            @RequestBody Map<String, String> body
+    ) {
+        try {
+            String token = requireAdminOrOwner(authHeader);
+            Long myId = requireBackofficeId(token);
+
+            adminUserService.verifyAdminEmailChange(myId, body.get("code"));
+            return ok("Email updated successfully");
+        } catch (RuntimeException re) {
+            return err(HttpStatus.BAD_REQUEST, re.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    }
+
+    @PostMapping("/me/resend-email-change")
+    public ResponseEntity<?> resendEmailChange(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader
+    ) {
+        try {
+            String token = requireAdminOrOwner(authHeader);
+            Long myId = requireBackofficeId(token);
+
+            adminUserService.resendAdminEmailChangeCode(myId);
+            return ok("Verification code resent");
+        } catch (RuntimeException re) {
+            return err(HttpStatus.BAD_REQUEST, re.getMessage());
         } catch (Exception e) {
             return err(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
         }
@@ -284,5 +342,15 @@ public class AdminUserController {
         } catch (Exception e) {
             return err(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    }
+    
+    
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException ex) {
+        String msg = ex.getBindingResult().getAllErrors().isEmpty()
+                ? "Bad request"
+                : ex.getBindingResult().getAllErrors().get(0).getDefaultMessage();
+
+        return err(HttpStatus.BAD_REQUEST, msg);
     }
 }

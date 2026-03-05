@@ -145,7 +145,7 @@ public class LicensingController {
     @GetMapping("/upgrade-requests/pending")
     public ResponseEntity<?> listPendingUpgradeRequests() {
         return ResponseEntity.ok(
-                upgradeReqRepo.findByStatusOrderByRequestedAtAsc(PlanUpgradeRequestStatus.PENDING)
+                upgradeReqRepo.findPendingRows(PlanUpgradeRequestStatus.PENDING)
         );
     }
 

@@ -33,6 +33,7 @@ import com.build4all.payment.repository.PaymentMethodRepository;
 import com.build4all.payment.service.OrderPaymentReadService;
 import com.build4all.payment.service.OrderPaymentWriteService;
 import com.build4all.payment.service.PaymentOrchestratorService;
+import com.build4all.promo.domain.Coupon;
 import com.build4all.promo.service.CouponService;
 import com.build4all.user.domain.Users;
 import com.build4all.user.repository.UsersRepository;
@@ -119,6 +120,10 @@ public class OrderServiceImpl implements OrderService {
     /* ===============================
        STATUS HELPERS
        =============================== */
+    
+    
+    
+    
 
     private OrderStatus requireStatus(String code) {
         return orderStatusRepo.findByNameIgnoreCase(code)
@@ -261,6 +266,64 @@ public class OrderServiceImpl implements OrderService {
         return orderItemRepo.save(line);
     }
 
+    
+ // Put near other helpers in OrderServiceImpl
+
+    private static boolean isBlank(String s) {
+        return s == null || s.trim().isEmpty();
+    }
+
+    private static String trimOrNull(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
+    }
+
+    /**
+     * Shipping is required if the order contains stock-based items (physical products).
+     * In your codebase, stock != null is the signal for "shippable".
+     */
+    private boolean isShippingRequired(Item item) {
+        return readStock(item) != null; // ✅ physical/shippable
+    }
+
+    private void validateShippingOrThrow(ShippingAddressDTO addr, boolean required) {
+        if (!required) return;
+
+        if (addr == null) {
+            throw new IllegalArgumentException("CHECKOUT_SHIPPING_ADDRESS_REQUIRED");
+        }
+
+        // ✅ NEW: require name
+        if (isBlank(addr.getFullName())) {
+            throw new IllegalArgumentException("CHECKOUT_SHIPPING_FULLNAME_REQUIRED");
+        }
+
+        if (addr.getCountryId() == null || addr.getCountryId() <= 0) {
+            throw new IllegalArgumentException("CHECKOUT_SHIPPING_COUNTRY_REQUIRED");
+        }
+
+        if (isBlank(addr.getCity())) {
+            throw new IllegalArgumentException("CHECKOUT_SHIPPING_CITY_REQUIRED");
+        }
+
+        if (isBlank(addr.getAddressLine())) {
+            throw new IllegalArgumentException("CHECKOUT_SHIPPING_ADDRESSLINE_REQUIRED");
+        }
+
+        if (isBlank(addr.getPhone())) {
+            throw new IllegalArgumentException("CHECKOUT_SHIPPING_PHONE_REQUIRED");
+        }
+
+        if (addr.getShippingMethodId() == null || addr.getShippingMethodId() <= 0) {
+            throw new IllegalArgumentException("CHECKOUT_SHIPPING_METHOD_REQUIRED");
+        }
+
+        String p = addr.getPhone().trim();
+        if (p.length() < 6 || p.length() > 24) {
+            throw new IllegalArgumentException("CHECKOUT_SHIPPING_PHONE_INVALID");
+        }
+    }
     /* ===============================
        LEGACY CREATE (CASH)
        =============================== */
@@ -627,23 +690,14 @@ public class OrderServiceImpl implements OrderService {
         return key + "-" + yymm + "-" + seqBase36(seq, 5);
     }
     
-    private synchronized void assignOrderCode(Order order, Long ownerProjectId, String slug) {
-        OrderSequence seq = orderSeqRepo.findForUpdate(ownerProjectId)
-                .orElseGet(() -> {
-                    OrderSequence s = new OrderSequence();
-                    s.setOwnerProjectId(ownerProjectId);
-                    s.setNextSeq(1L);
-                    return s;
-                });
-
-        long current = seq.getNextSeq();
-        seq.setNextSeq(current + 1);
-        orderSeqRepo.save(seq);
+    private void assignOrderCode(Order order, Long ownerProjectId, String slug) {
+        Long seq = orderSeqRepo.allocateNext(ownerProjectId);
+        if (seq == null) throw new IllegalStateException("Failed to allocate order sequence");
 
         String prefix = appPrefix(ownerProjectId, slug);
-        String code = formatCode(prefix, current);
+        String code = formatCode(prefix, seq);
 
-        order.setOrderSeq(current);
+        order.setOrderSeq(seq);
         order.setOrderCode(code);
     }
     
@@ -651,6 +705,24 @@ public class OrderServiceImpl implements OrderService {
        QUOTE FROM CART (NO SIDE EFFECTS)
        =============================== */
 
+    private BigDecimal computeItemsSubtotal(List<CartLine> lines) {
+        BigDecimal sum = BigDecimal.ZERO;
+        if (lines == null) return sum;
+
+        for (CartLine l : lines) {
+            if (l == null) continue;
+
+            BigDecimal lineSubtotal = l.getLineSubtotal();
+            if (lineSubtotal == null) {
+                BigDecimal unit = (l.getUnitPrice() == null) ? BigDecimal.ZERO : l.getUnitPrice();
+                int qty = l.getQuantity();
+                lineSubtotal = unit.multiply(BigDecimal.valueOf(qty));
+            }
+            sum = sum.add(lineSubtotal);
+        }
+        return sum;
+    }
+    
     @Override
     public CheckoutSummaryResponse quoteCheckoutFromCart(Long userId, CheckoutRequest request) {
 
@@ -677,6 +749,7 @@ public class OrderServiceImpl implements OrderService {
 
         List<CartLine> lines = new ArrayList<>();
         Long ownerProjectId = null;
+        boolean shippingRequired = false; // ✅ NEW
         List<String> reservedStatuses = List.of("PENDING", "COMPLETED", "CANCEL_REQUESTED");
 
         for (var e : qtyByItemId.entrySet()) {
@@ -685,8 +758,10 @@ public class OrderServiceImpl implements OrderService {
 
             Item item = itemRepo.findById(itemId)
                     .orElseThrow(() -> new IllegalArgumentException("Item not found: " + itemId));
-            
-            
+
+            if (isShippingRequired(item)) {
+                shippingRequired = true;
+            }
 
             if (item.getOwnerProject() == null || item.getOwnerProject().getId() == null)
                 throw new IllegalStateException("Item " + item.getId() + " has no ownerProject");
@@ -708,7 +783,6 @@ public class OrderServiceImpl implements OrderService {
                 }
             }
 
-            
             BigDecimal unit = resolveUnitPrice(item);
 
             CartLine line = new CartLine();
@@ -731,13 +805,15 @@ public class OrderServiceImpl implements OrderService {
 
         request.setLines(lines);
 
+        // ✅ NEW: enforce shipping even on quote for physical items
+        validateShippingOrThrow(request.getShippingAddress(), shippingRequired);
+
         return checkoutPricingService.priceCheckout(
                 ownerProjectId,
                 request.getCurrencyId(),
                 request
         );
     }
-
     /* ===============================
        CHECKOUT (CREATE ORDER + PAYMENT)
        =============================== */
@@ -766,6 +842,8 @@ public class OrderServiceImpl implements OrderService {
         Long ownerProjectId = null;
         String ownerSlug = null;
 
+        boolean shippingRequired = false; // ✅ NEW
+
         for (CartLine line : lines) {
             if (line.getItemId() == null)
                 throw new IllegalArgumentException("itemId is required in cart line");
@@ -775,7 +853,9 @@ public class OrderServiceImpl implements OrderService {
             Item item = itemRepo.findById(line.getItemId())
                     .orElseThrow(() -> new IllegalArgumentException("Item not found: " + line.getItemId()));
             itemCache.put(item.getId(), item);
-            
+
+            if (isShippingRequired(item)) shippingRequired = true; // ✅ NEW
+
             Object n = tryGet(item, "getName", "getItemName", "getTitle");
             String itemName = (n == null) ? null : n.toString().trim();
             if (itemName != null && !itemName.isBlank()) {
@@ -787,9 +867,8 @@ public class OrderServiceImpl implements OrderService {
 
             Long opId = item.getOwnerProject().getId();
             if (ownerProjectId == null) {
-            	 ownerProjectId = opId;
-                 // if ownerProject is AdminUserProject (AUP), this exists
-                 ownerSlug = item.getOwnerProject().getSlug();
+                ownerProjectId = opId;
+                ownerSlug = item.getOwnerProject().getSlug();
             }
             else if (!ownerProjectId.equals(opId))
                 throw new IllegalArgumentException("All cart items must belong to the same app (ownerProjectId)");
@@ -810,6 +889,9 @@ public class OrderServiceImpl implements OrderService {
 
         if (ownerProjectId == null)
             throw new IllegalArgumentException("Could not resolve ownerProjectId from cart items");
+
+        // ✅ NEW: enforce shipping here too (blocks direct /checkout calls)
+        validateShippingOrThrow(request.getShippingAddress(), shippingRequired);
 
         ShippingAddressDTO addr = request.getShippingAddress();
         Country shippingCountry = null;
@@ -839,6 +921,45 @@ public class OrderServiceImpl implements OrderService {
                 request.getCurrencyId(),
                 request
         );
+
+        // ✅ FIX: Coupon must NOT be consumed or stored unless it actually applied
+        boolean couponApplied = false;
+
+        String pricedCouponCode = priced.getCouponCode();
+        BigDecimal pricedCouponDiscount = (priced.getCouponDiscount() == null)
+                ? BigDecimal.ZERO
+                : priced.getCouponDiscount();
+
+        if (pricedCouponCode != null && !pricedCouponCode.isBlank()) {
+
+            BigDecimal itemsSubtotal = computeItemsSubtotal(lines);
+
+            // Re-validate against actual order subtotal (minOrderAmount etc)
+            Coupon validated = couponService.validateForOrder(ownerProjectId, pricedCouponCode, itemsSubtotal);
+
+            if (validated == null) {
+                // Not valid for this order => don't store it, don't consume it
+                priced.setCouponCode(null);
+                priced.setCouponDiscount(BigDecimal.ZERO);
+            } else {
+                // FREE_SHIPPING counts as "applied" even if couponDiscount is 0
+                if (validated.getType() == com.build4all.promo.domain.CouponDiscountType.FREE_SHIPPING) {
+                    couponApplied = true;
+                    priced.setCouponCode(validated.getCode()); // normalize case
+                    // couponDiscount stays whatever pricing uses (often 0)
+                } else {
+                    // FIXED/PERCENT must produce an actual positive discount
+                    if (pricedCouponDiscount.compareTo(BigDecimal.ZERO) > 0) {
+                        couponApplied = true;
+                        priced.setCouponCode(validated.getCode()); // normalize case
+                    } else {
+                        // Valid coupon in general, but NOT applied to this order amount => don't consume/store it
+                        priced.setCouponCode(null);
+                        priced.setCouponDiscount(BigDecimal.ZERO);
+                    }
+                }
+            }
+        }
 
         PaymentMethod pmEntity = paymentMethodRepo.findByNameIgnoreCase(paymentMethodCode)
                 .orElseThrow(() -> new IllegalArgumentException("Payment method not found in platform: " + paymentMethodCode));
@@ -900,10 +1021,8 @@ public class OrderServiceImpl implements OrderService {
                 request.getDestinationAccountId()
         );
 
-        // consume coupon ONLY after payment start succeeded
-        String couponCode = priced.getCouponCode();
-        if (couponCode != null && !couponCode.isBlank()) {
-            couponService.consumeOrThrow(ownerProjectId, couponCode);
+        if (couponApplied) {
+            couponService.consumeOrThrow(ownerProjectId, priced.getCouponCode());
         }
 
         priced.setPaymentTransactionId(pay.getTransactionId());
@@ -953,8 +1072,6 @@ public class OrderServiceImpl implements OrderService {
 
             Long itemId = ci.getItem().getId();
             qtyByItemId.merge(itemId, qty, Integer::sum);
-            
-            
         }
 
         if (qtyByItemId.isEmpty())
@@ -963,7 +1080,6 @@ public class OrderServiceImpl implements OrderService {
         List<CartLine> lines = new ArrayList<>();
         for (Map.Entry<Long, Integer> e : qtyByItemId.entrySet()) {
             CartLine line = new CartLine();
-           
             line.setItemId(e.getKey());
             line.setQuantity(e.getValue());
             lines.add(line);
@@ -973,6 +1089,7 @@ public class OrderServiceImpl implements OrderService {
         List<Map<String, Object>> lineErrors = new ArrayList<>();
 
         Long ownerProjectId = null;
+        boolean shippingRequired = false;
         List<String> reservedStatuses = List.of("PENDING", "COMPLETED", "CANCEL_REQUESTED");
 
         for (CartLine line : lines) {
@@ -981,13 +1098,16 @@ public class OrderServiceImpl implements OrderService {
             Item fresh = itemRepo.findByIdForStockCheck(line.getItemId())
                     .orElseThrow(() -> new IllegalArgumentException("Item not found: " + line.getItemId()));
 
+            if (isShippingRequired(fresh)) {
+                shippingRequired = true;
+            }
+
             if (fresh.getOwnerProject() == null || fresh.getOwnerProject().getId() == null) {
                 blockingErrors.add("Item " + fresh.getId() + " has no ownerProject");
                 lineErrors.add(Map.of("itemId", fresh.getId(), "reason", "NO_TENANT", "message", "Item has no ownerProject"));
                 continue;
             }
 
-            
             Long opId = fresh.getOwnerProject().getId();
             if (ownerProjectId == null) ownerProjectId = opId;
             else if (!ownerProjectId.equals(opId)) {
@@ -1007,7 +1127,12 @@ public class OrderServiceImpl implements OrderService {
             if (stock != null) {
                 if (stock <= 0 || qty > stock) {
                     blockingErrors.add("Only " + stock + " left for item " + fresh.getId());
-                    lineErrors.add(Map.of("itemId", fresh.getId(), "reason", "QTY_EXCEEDS_STOCK", "availableStock", stock, "maxAllowedQuantity", Math.max(stock, 0)));
+                    lineErrors.add(Map.of(
+                            "itemId", fresh.getId(),
+                            "reason", "QTY_EXCEEDS_STOCK",
+                            "availableStock", stock,
+                            "maxAllowedQuantity", Math.max(stock, 0)
+                    ));
                 }
                 continue;
             }
@@ -1018,16 +1143,22 @@ public class OrderServiceImpl implements OrderService {
                 int remaining = capacity - alreadyReserved;
                 if (remaining <= 0 || qty > remaining) {
                     blockingErrors.add("Only " + remaining + " seats left for item " + fresh.getId());
-                    lineErrors.add(Map.of("itemId", fresh.getId(), "reason", "QTY_EXCEEDS_CAPACITY", "availableStock", Math.max(remaining, 0), "maxAllowedQuantity", Math.max(remaining, 0)));
+                    lineErrors.add(Map.of(
+                            "itemId", fresh.getId(),
+                            "reason", "QTY_EXCEEDS_CAPACITY",
+                            "availableStock", Math.max(remaining, 0),
+                            "maxAllowedQuantity", Math.max(remaining, 0)
+                    ));
                 }
             }
-            
-            
         }
 
         if (!blockingErrors.isEmpty()) {
             throw new com.build4all.order.web.CheckoutBlockedException(blockingErrors, lineErrors);
         }
+
+        // ✅ validate shipping BEFORE decrementing stock
+        validateShippingOrThrow(request.getShippingAddress(), shippingRequired);
 
         for (CartLine line : lines) {
             if (line.getItemId() == null) continue;
@@ -1045,7 +1176,7 @@ public class OrderServiceImpl implements OrderService {
                             List.of(Map.of("itemId", fresh.getId(), "reason", "STOCK_CHANGED", "message", "Stock changed, please refresh"))
                     );
                 }
-                
+
                 Integer newStock = itemRepo.findStockValue(fresh.getId());
                 Long tenantId = fresh.getOwnerProject().getId();
                 wsEvents.sendStockChanged(tenantId, fresh.getId(), -qty, newStock, "ORDER_RESERVED", null);
