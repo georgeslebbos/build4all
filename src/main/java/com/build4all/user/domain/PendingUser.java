@@ -64,6 +64,19 @@ public class PendingUser {
      */
     @Column(name = "is_verified")
     private boolean isVerified = false;
+    
+    
+    @Column(name = "verification_expires_at")
+    private LocalDateTime verificationExpiresAt;
+
+    @Column(name = "verification_attempts", nullable = false)
+    private int verificationAttempts = 0;
+
+    @Column(name = "locked_until")
+    private LocalDateTime lockedUntil;
+
+    @Column(name = "last_verification_sent_at")
+    private LocalDateTime lastVerificationSentAt;
 
     /**
      * Status reference.
@@ -145,4 +158,16 @@ public class PendingUser {
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    
+    public LocalDateTime getVerificationExpiresAt() { return verificationExpiresAt; }
+    public void setVerificationExpiresAt(LocalDateTime verificationExpiresAt) { this.verificationExpiresAt = verificationExpiresAt; }
+
+    public int getVerificationAttempts() { return verificationAttempts; }
+    public void setVerificationAttempts(int verificationAttempts) { this.verificationAttempts = verificationAttempts; }
+
+    public LocalDateTime getLockedUntil() { return lockedUntil; }
+    public void setLockedUntil(LocalDateTime lockedUntil) { this.lockedUntil = lockedUntil; }
+
+    public LocalDateTime getLastVerificationSentAt() { return lastVerificationSentAt; }
+    public void setLastVerificationSentAt(LocalDateTime lastVerificationSentAt) { this.lastVerificationSentAt = lastVerificationSentAt; }
 }

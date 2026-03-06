@@ -13,6 +13,7 @@ import com.build4all.catalog.repository.CountryRepository;
 import com.build4all.catalog.repository.CurrencyRepository;
 import com.build4all.catalog.repository.ItemRepository;
 import com.build4all.catalog.repository.RegionRepository;
+import com.build4all.common.errors.ApiException;
 import com.build4all.order.domain.Order;
 import com.build4all.order.domain.OrderItem;
 import com.build4all.order.domain.OrderSequence;
@@ -34,6 +35,7 @@ import com.build4all.payment.service.OrderPaymentReadService;
 import com.build4all.payment.service.OrderPaymentWriteService;
 import com.build4all.payment.service.PaymentOrchestratorService;
 import com.build4all.promo.domain.Coupon;
+import com.build4all.promo.domain.CouponDiscountType;
 import com.build4all.promo.service.CouponService;
 import com.build4all.user.domain.Users;
 import com.build4all.user.repository.UsersRepository;
@@ -121,8 +123,40 @@ public class OrderServiceImpl implements OrderService {
        STATUS HELPERS
        =============================== */
     
-    
-    
+    private String mapCouponErrorMessage(Exception ex) {
+        if (ex instanceof ApiException apiEx) {
+            return switch (apiEx.getCode()) {
+                case "COUPON_EXPIRED" -> "Coupon was not applied because it is expired";
+                case "COUPON_USAGE_LIMIT_REACHED" -> "Coupon was not applied because it reached the usage limit";
+                case "COUPON_INVALID" -> "Coupon was not applied because it is invalid";
+                case "COUPON_MINIMUM_NOT_REACHED" -> "Coupon was not applied because order minimum was not reached";
+                case "COUPON_INACTIVE" -> "Coupon was not applied because it is inactive";
+                default -> "Coupon was not applied";
+            };
+        }
+
+        String msg = ex == null || ex.getMessage() == null
+                ? ""
+                : ex.getMessage().trim().toLowerCase(Locale.ROOT);
+
+        if (msg.contains("expired")) {
+            return "Coupon was not applied because it is expired";
+        }
+        if ((msg.contains("max") && msg.contains("use")) || msg.contains("usage limit")) {
+            return "Coupon was not applied because it reached the usage limit";
+        }
+        if (msg.contains("inactive")) {
+            return "Coupon was not applied because it is inactive";
+        }
+        if (msg.contains("not found") || msg.contains("invalid")) {
+            return "Coupon was not applied because it is invalid";
+        }
+        if (msg.contains("minimum")) {
+            return "Coupon was not applied because order minimum was not reached";
+        }
+
+        return "Coupon was not applied";
+    }
     
 
     private OrderStatus requireStatus(String code) {
@@ -683,24 +717,32 @@ public class OrderServiceImpl implements OrderService {
         return prefix + "-" + yyyymmdd + "-" + String.format("%06d", seq);
     }
 
-    private String formatCode(String slugOrAppCode, long seq) {
+    private String formatCode(Long ownerProjectId, String slugOrAppCode, long seq) {
         String key = shortKeyFromSlug(slugOrAppCode);
         if (key.isBlank()) key = "APP";
-        String yymm = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyMM"));
-        return key + "-" + yymm + "-" + seqBase36(seq, 5);
+
+        String projectKey = ownerProjectId == null
+                ? "0"
+                : Long.toString(ownerProjectId, 36).toUpperCase(Locale.ROOT);
+
+        String yymm = java.time.LocalDate.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyMM"));
+
+        return key + "-" + projectKey + "-" + yymm + "-" + seqBase36(seq, 5);
     }
     
     private void assignOrderCode(Order order, Long ownerProjectId, String slug) {
         Long seq = orderSeqRepo.allocateNext(ownerProjectId);
-        if (seq == null) throw new IllegalStateException("Failed to allocate order sequence");
+        if (seq == null) {
+            throw new IllegalStateException("Failed to allocate order sequence");
+        }
 
         String prefix = appPrefix(ownerProjectId, slug);
-        String code = formatCode(prefix, seq);
+        String code = formatCode(ownerProjectId, prefix, seq);
 
         order.setOrderSeq(seq);
         order.setOrderCode(code);
     }
-    
     /* ===============================
        QUOTE FROM CART (NO SIDE EFFECTS)
        =============================== */
@@ -916,14 +958,34 @@ public class OrderServiceImpl implements OrderService {
             shippingName = full.isBlank() ? String.valueOf(user.getUsername()) : full;
         }
 
-        CheckoutSummaryResponse priced = checkoutPricingService.priceCheckout(
-                ownerProjectId,
-                request.getCurrencyId(),
-                request
-        );
+        CheckoutSummaryResponse priced;
+        String couponMessage = null;
 
-        // ✅ FIX: Coupon must NOT be consumed or stored unless it actually applied
+        try {
+            priced = checkoutPricingService.priceCheckout(
+                    ownerProjectId,
+                    request.getCurrencyId(),
+                    request
+            );
+        } catch (Exception ex) {
+            if (request.getCouponCode() != null && !request.getCouponCode().isBlank()) {
+                request.setCouponCode(null);
+
+                priced = checkoutPricingService.priceCheckout(
+                        ownerProjectId,
+                        request.getCurrencyId(),
+                        request
+                );
+
+                couponMessage = mapCouponErrorMessage(ex);
+            } else {
+                throw ex;
+            }
+        }
+
+     // ✅ FIX: Coupon must NOT be consumed or stored unless it actually applied
         boolean couponApplied = false;
+        
 
         String pricedCouponCode = priced.getCouponCode();
         BigDecimal pricedCouponDiscount = (priced.getCouponDiscount() == null)
@@ -931,33 +993,37 @@ public class OrderServiceImpl implements OrderService {
                 : priced.getCouponDiscount();
 
         if (pricedCouponCode != null && !pricedCouponCode.isBlank()) {
+            try {
+                BigDecimal itemsSubtotal = computeItemsSubtotal(lines);
 
-            BigDecimal itemsSubtotal = computeItemsSubtotal(lines);
+                // Re-validate against actual order subtotal (minOrderAmount etc)
+                Coupon validated = couponService.validateForOrder(ownerProjectId, pricedCouponCode, itemsSubtotal);
 
-            // Re-validate against actual order subtotal (minOrderAmount etc)
-            Coupon validated = couponService.validateForOrder(ownerProjectId, pricedCouponCode, itemsSubtotal);
-
-            if (validated == null) {
-                // Not valid for this order => don't store it, don't consume it
-                priced.setCouponCode(null);
-                priced.setCouponDiscount(BigDecimal.ZERO);
-            } else {
-                // FREE_SHIPPING counts as "applied" even if couponDiscount is 0
-                if (validated.getType() == com.build4all.promo.domain.CouponDiscountType.FREE_SHIPPING) {
-                    couponApplied = true;
-                    priced.setCouponCode(validated.getCode()); // normalize case
-                    // couponDiscount stays whatever pricing uses (often 0)
+                if (validated == null) {
+                    priced.setCouponCode(null);
+                    priced.setCouponDiscount(BigDecimal.ZERO);
+                    couponMessage = "Coupon was not applied";
                 } else {
-                    // FIXED/PERCENT must produce an actual positive discount
-                    if (pricedCouponDiscount.compareTo(BigDecimal.ZERO) > 0) {
+                    // FREE_SHIPPING counts as applied even if discount = 0
+                	if (validated.getType() == CouponDiscountType.FREE_SHIPPING){
                         couponApplied = true;
-                        priced.setCouponCode(validated.getCode()); // normalize case
+                        priced.setCouponCode(validated.getCode());
                     } else {
-                        // Valid coupon in general, but NOT applied to this order amount => don't consume/store it
-                        priced.setCouponCode(null);
-                        priced.setCouponDiscount(BigDecimal.ZERO);
+                        // FIXED/PERCENT must produce real discount
+                        if (pricedCouponDiscount.compareTo(BigDecimal.ZERO) > 0) {
+                            couponApplied = true;
+                            priced.setCouponCode(validated.getCode());
+                        } else {
+                            priced.setCouponCode(null);
+                            priced.setCouponDiscount(BigDecimal.ZERO);
+                            couponMessage = "Coupon was not applied because it did not affect this order";
+                        }
                     }
                 }
+            } catch (Exception ex) {
+                priced.setCouponCode(null);
+                priced.setCouponDiscount(BigDecimal.ZERO);
+                couponMessage = mapCouponErrorMessage(ex);
             }
         }
 
@@ -1012,6 +1078,29 @@ public class OrderServiceImpl implements OrderService {
             orderItemRepo.save(oi);
         }
 
+        if (couponApplied) {
+            try {
+                couponService.consumeOrThrow(ownerProjectId, priced.getCouponCode());
+            } catch (Exception ex) {
+                BigDecimal restoredGrandTotal = priced.getItemsSubtotal()
+                        .add(priced.getShippingTotal() == null ? BigDecimal.ZERO : priced.getShippingTotal())
+                        .add(priced.getItemTaxTotal() == null ? BigDecimal.ZERO : priced.getItemTaxTotal())
+                        .add(priced.getShippingTaxTotal() == null ? BigDecimal.ZERO : priced.getShippingTaxTotal());
+
+                priced.setCouponCode(null);
+                priced.setCouponDiscount(BigDecimal.ZERO);
+                priced.setGrandTotal(restoredGrandTotal);
+
+                order.setCouponCode(null);
+                order.setCouponDiscount(BigDecimal.ZERO);
+                order.setTotalPrice(restoredGrandTotal);
+                orderRepo.save(order);
+
+                couponMessage = mapCouponErrorMessage(ex);
+                couponApplied = false;
+            }
+        }
+
         StartPaymentResponse pay = paymentOrchestrator.startPayment(
                 ownerProjectId,
                 order.getId(),
@@ -1020,11 +1109,8 @@ public class OrderServiceImpl implements OrderService {
                 currency.getCode(),
                 request.getDestinationAccountId()
         );
-
-        if (couponApplied) {
-            couponService.consumeOrThrow(ownerProjectId, priced.getCouponCode());
-        }
-
+        
+        
         priced.setPaymentTransactionId(pay.getTransactionId());
         priced.setPaymentProviderCode(pay.getProviderCode());
         priced.setProviderPaymentId(pay.getProviderPaymentId());
@@ -1048,6 +1134,9 @@ public class OrderServiceImpl implements OrderService {
         recalcTotals(cart);
         cartRepo.save(cart);
 
+        if (couponMessage != null && !couponMessage.isBlank()) {
+            priced.setMessage(couponMessage);
+        }
         return priced;
     }
 

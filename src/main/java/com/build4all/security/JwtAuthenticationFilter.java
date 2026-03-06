@@ -119,8 +119,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             };
 
             // ✅ Revocation check (now runs in correct tenant context for USER/BUSINESS)
+         // ✅ Revocation check scoped by ownerProjectId
             if (subjectType != null && idClaim != null && issuedAt != null) {
-                if (tokenRevocationService.isRevoked(subjectType, idClaim, issuedAt)) {
+                if (tokenRevocationService.isRevoked(subjectType, idClaim, ownerProjectId, issuedAt)) {
                     SecurityContextHolder.clearContext();
                     filterChain.doFilter(request, response);
                     return;

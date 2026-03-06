@@ -14,6 +14,9 @@ public class CouponResponse {
     private BigDecimal discountValue;
 
     private Integer maxUses;
+    private Integer usedCount;
+    private Integer remainingUses;
+
     private BigDecimal minOrderAmount;
     private BigDecimal maxDiscountAmount;
 
@@ -21,6 +24,13 @@ public class CouponResponse {
     private LocalDateTime expiresAt;
 
     private boolean active;
+
+    // computed admin info
+    private boolean started;
+    private boolean expired;
+    private boolean usageLimitReached;
+    private boolean currentlyValid;
+    private String status;
 
     public Long getId() {
         return id;
@@ -74,6 +84,22 @@ public class CouponResponse {
         this.maxUses = maxUses;
     }
 
+    public Integer getUsedCount() {
+        return usedCount;
+    }
+
+    public void setUsedCount(Integer usedCount) {
+        this.usedCount = usedCount;
+    }
+
+    public Integer getRemainingUses() {
+        return remainingUses;
+    }
+
+    public void setRemainingUses(Integer remainingUses) {
+        this.remainingUses = remainingUses;
+    }
+
     public BigDecimal getMinOrderAmount() {
         return minOrderAmount;
     }
@@ -112,6 +138,46 @@ public class CouponResponse {
 
     public void setActive(boolean active) {
         this.active = active;
+    }
+
+    public boolean isStarted() {
+        return started;
+    }
+
+    public void setStarted(boolean started) {
+        this.started = started;
+    }
+
+    public boolean isExpired() {
+        return expired;
+    }
+
+    public void setExpired(boolean expired) {
+        this.expired = expired;
+    }
+
+    public boolean isUsageLimitReached() {
+        return usageLimitReached;
+    }
+
+    public void setUsageLimitReached(boolean usageLimitReached) {
+        this.usageLimitReached = usageLimitReached;
+    }
+
+    public boolean isCurrentlyValid() {
+        return currentlyValid;
+    }
+
+    public void setCurrentlyValid(boolean currentlyValid) {
+        this.currentlyValid = currentlyValid;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
     }
 
     public void setDescription(String description) {

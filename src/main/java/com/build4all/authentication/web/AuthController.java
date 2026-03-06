@@ -268,29 +268,35 @@ public class AuthController {
             @RequestBody(required = false) LogoutRequest body
     ) {
         try {
-            // (A) revoke access فورًا (مثل ما عندك)
+            
             if (authHeader != null && !authHeader.isBlank()) {
                 String token = authHeader.replaceFirst("(?i)^Bearer\\s+", "").trim();
+
                 if (jwtUtil.validateToken(token)) {
                     Claims claims = jwtUtil.extractAllClaims(token);
+
                     String role = claims.get("role", String.class);
                     Long id = asLong(claims.get("id"));
+                    Long ownerProjectId = asLong(claims.get("ownerProjectId"));
 
                     if (role != null && id != null) {
                         String roleUpper = role.toUpperCase();
+
                         String subjectType = switch (roleUpper) {
                             case "USER" -> "USER";
                             case "BUSINESS" -> "BUSINESS";
                             case "SUPER_ADMIN", "OWNER", "MANAGER" -> "ADMIN";
                             default -> null;
                         };
-                        if (subjectType != null) tokenRevocationService.revokeNow(subjectType, id);
+
+                        if (subjectType != null) {
+                            tokenRevocationService.revokeNow(subjectType, id, ownerProjectId);
+                        }
                     }
                 }
             }
 
-            // (B) revoke refresh (session)
-            if (body != null && body.refreshToken != null && !body.refreshToken.isBlank()) {
+                     if (body != null && body.refreshToken != null && !body.refreshToken.isBlank()) {
                 refreshTokenService.revoke(body.refreshToken);
             }
 

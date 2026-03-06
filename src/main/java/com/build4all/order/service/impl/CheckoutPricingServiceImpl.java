@@ -2,6 +2,7 @@ package com.build4all.order.service.impl;
 
 import com.build4all.catalog.domain.Currency;
 import com.build4all.catalog.repository.CurrencyRepository;
+import com.build4all.common.errors.ApiException;
 import com.build4all.order.dto.CartLine;
 import com.build4all.order.dto.CheckoutLineSummary;
 import com.build4all.order.dto.CheckoutRequest;
@@ -9,6 +10,7 @@ import com.build4all.order.dto.CheckoutSummaryResponse;
 import com.build4all.order.dto.ShippingAddressDTO;
 import com.build4all.order.service.CheckoutPricingService;
 import com.build4all.promo.domain.Coupon;
+import com.build4all.promo.domain.CouponDiscountType;
 import com.build4all.promo.service.CouponService;
 import com.build4all.shipping.dto.ShippingQuote;
 import com.build4all.shipping.service.ShippingService;
@@ -20,37 +22,13 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * CheckoutPricingServiceImpl
- *
- * This class is the "pricing engine" for checkout.
- * It does NOT create orders and does NOT trigger payment.
- *
- * Responsibilities:
- * 1) Compute items subtotal from cart lines (unitPrice * quantity)
- * 2) Compute shipping total using ShippingService (if address + shipping method exist)
- * 3) Compute item tax and shipping tax using TaxService
- * 4) Validate coupon and compute discount using CouponService
- * 5) Return a CheckoutSummaryResponse to be used by OrderServiceImpl
- *
- * Notes:
- * - Multi-tenant: pricing logic depends on ownerProjectId (each app can have its own shipping/tax/coupon rules).
- * - The CartLine.unitPrice is usually filled earlier in OrderServiceImpl (from Item/Product effective price).
- */
 @Service
 @Transactional
 public class CheckoutPricingServiceImpl implements CheckoutPricingService {
 
-    /** Calculates shipping quotes (cost) based on address + lines + ownerProject rules */
     private final ShippingService shippingService;
-
-    /** Calculates taxes for items and shipping based on country/region/app rules */
     private final TaxService taxService;
-
-    /** Loads currency info (code + symbol) to include in response for UI */
     private final CurrencyRepository currencyRepository;
-
-    /** Validates coupons and computes the discount amount */
     private final CouponService couponService;
 
     public CheckoutPricingServiceImpl(ShippingService shippingService,
@@ -63,141 +41,124 @@ public class CheckoutPricingServiceImpl implements CheckoutPricingService {
         this.couponService = couponService;
     }
 
-    /**
-     * Calculate checkout totals for the given cart request.
-     *
-     * @param ownerProjectId identifies the app/tenant (shipping/tax/coupon rules can vary per app)
-     * @param currencyId     optional currency id (used to fill currencyCode/currencySymbol)
-     * @param request        cart lines + shipping info + coupon info
-     * @return CheckoutSummaryResponse (items subtotal, shipping, taxes, discount, grand total, line summaries)
-     */
     @Override
     public CheckoutSummaryResponse priceCheckout(Long ownerProjectId,
                                                  Long currencyId,
                                                  CheckoutRequest request) {
 
-        // Guard: must have at least 1 line to price
         if (request == null || request.getLines() == null || request.getLines().isEmpty()) {
             throw new IllegalArgumentException("Cart is empty");
         }
 
-        // Cart lines (each line should have itemId, quantity, and ideally unitPrice)
         List<CartLine> lines = request.getLines();
 
-        // ---- Compute items subtotal and enrich lines ----
-        // itemsSubtotal = Σ(unitPrice * quantity)
-        // Also re-set unitPrice/lineSubtotal to ensure no null values.
         BigDecimal itemsSubtotal = BigDecimal.ZERO;
         for (CartLine line : lines) {
             BigDecimal unit = line.getUnitPrice() != null ? line.getUnitPrice() : BigDecimal.ZERO;
             int qty = line.getQuantity();
             BigDecimal lineTotal = unit.multiply(BigDecimal.valueOf(qty));
 
-            // Keep the line enriched for consumers (controllers/UI/logging)
             line.setUnitPrice(unit);
             line.setLineSubtotal(lineTotal);
 
             itemsSubtotal = itemsSubtotal.add(lineTotal);
         }
 
-        // ---- Shipping & tax ----
-        // Shipping depends on address + selected shipping method.
         ShippingAddressDTO address = request.getShippingAddress();
 
-        // Keep your previous behavior: copy selected shippingMethodId into address
-        // (Some clients send shippingMethodId outside the address object.)
         if (address != null && request.getShippingMethodId() != null) {
             address.setShippingMethodId(request.getShippingMethodId());
         }
 
         BigDecimal shippingTotal = BigDecimal.ZERO;
 
-        // Calculate shipping only if the user selected a shipping method
         if (address != null && address.getShippingMethodId() != null) {
-            // Shipping service can return a quote based on:
-            // - ownerProjectId (tenant rules)
-            // - destination address (country/region/city)
-            // - cart lines (weight/size/categories/etc. if you implement these rules)
             ShippingQuote quote = shippingService.getQuote(
                     ownerProjectId,
                     address,
                     lines
             );
 
-            // If quote is available, take its cost
             if (quote != null && quote.getCost() != null) {
                 shippingTotal = quote.getCost();
             }
         }
 
-        // Tax on items: usually based on item categories + destination address + app rules
         BigDecimal itemTaxTotal = taxService.calculateItemTax(
                 ownerProjectId,
                 address,
                 lines
         );
 
-        // Tax on shipping: some regions tax shipping cost
         BigDecimal shippingTaxTotal = taxService.calculateShippingTax(
                 ownerProjectId,
                 address,
                 shippingTotal
         );
 
-        // ---- Coupon logic ----
-        // Coupon discount currently applies on itemsSubtotal (not shipping/tax).
         BigDecimal couponDiscount = BigDecimal.ZERO;
-        String couponCode = request.getCouponCode();
+        String couponCode = null;
+        String couponMessage = null;
 
-        if (couponCode != null && !couponCode.isBlank()) {
-            // Validate coupon constraints:
-            // - exists and active
-            // - belongs to ownerProjectId
-            // - minimum subtotal, expiry, usage limits, etc.
-            Coupon coupon = couponService.validateForOrder(
-                    ownerProjectId,
-                    couponCode,
-                    itemsSubtotal
-            );
+        String requestedCouponCode = request.getCouponCode();
 
-            // If valid, compute discount amount (fixed or percentage)
-            if (coupon != null) {
-                couponDiscount = couponService.computeDiscount(coupon, itemsSubtotal);
+        if (requestedCouponCode != null && !requestedCouponCode.isBlank()) {
+            try {
+                Coupon coupon = couponService.validateForOrder(
+                        ownerProjectId,
+                        requestedCouponCode,
+                        itemsSubtotal
+                );
+
+                if (coupon != null) {
+                    if (coupon.getType() == CouponDiscountType.FREE_SHIPPING) {
+                        shippingTotal = BigDecimal.ZERO;
+                        shippingTaxTotal = BigDecimal.ZERO;
+                        couponDiscount = BigDecimal.ZERO;
+                        couponCode = coupon.getCode();
+                    } else {
+                        BigDecimal computedDiscount =
+                                couponService.computeDiscount(coupon, itemsSubtotal);
+
+                        if (computedDiscount != null && computedDiscount.compareTo(BigDecimal.ZERO) > 0) {
+                            couponDiscount = computedDiscount;
+                            couponCode = coupon.getCode();
+                        } else {
+                            couponDiscount = BigDecimal.ZERO;
+                            couponCode = null;
+                            couponMessage = "Coupon was not applied because it did not affect this order";
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                couponDiscount = BigDecimal.ZERO;
+                couponCode = null;
+                couponMessage = mapCouponErrorMessage(ex);
             }
         }
 
-        // ---- Grand total (after discount) ----
-        // grand = items + shipping + itemTax + shippingTax - discount
         BigDecimal grandTotal = itemsSubtotal
                 .add(shippingTotal)
                 .add(itemTaxTotal)
                 .add(shippingTaxTotal)
                 .subtract(couponDiscount);
 
-        // Safety: avoid negative totals if discount > totals
         if (grandTotal.compareTo(BigDecimal.ZERO) < 0) {
             grandTotal = BigDecimal.ZERO;
         }
 
-        // ---- Build line summaries ----
-        // These line summaries are returned to the client/UI.
-        // itemName is null here because this class focuses only on pricing.
         List<CheckoutLineSummary> lineSummaries = lines.stream()
-        		.map(line -> new CheckoutLineSummary(
-        		        line.getItemId(),
-        		        (line.getItemName() == null || line.getItemName().trim().isBlank())
-        		            ? null
-        		            : line.getItemName().trim(),
-        		        line.getQuantity(),
-        		        line.getUnitPrice(),
-        		        line.getLineSubtotal()
-        		))
+                .map(line -> new CheckoutLineSummary(
+                        line.getItemId(),
+                        (line.getItemName() == null || line.getItemName().trim().isBlank())
+                                ? null
+                                : line.getItemName().trim(),
+                        line.getQuantity(),
+                        line.getUnitPrice(),
+                        line.getLineSubtotal()
+                ))
                 .collect(Collectors.toList());
 
-        // ---- Build response ----
-        // This response will be used by OrderServiceImpl to:
-        // - save totals into Order header
-        // - show breakdown to the user before/while paying
         CheckoutSummaryResponse response = new CheckoutSummaryResponse();
         response.setItemsSubtotal(itemsSubtotal);
         response.setShippingTotal(shippingTotal);
@@ -206,11 +167,10 @@ public class CheckoutPricingServiceImpl implements CheckoutPricingService {
         response.setGrandTotal(grandTotal);
         response.setLines(lineSummaries);
 
-        // NEW: coupon info in response
         response.setCouponCode(couponCode);
         response.setCouponDiscount(couponDiscount);
+        response.setMessage(couponMessage);
 
-        // Currency info (optional; used by UI to display totals)
         if (currencyId != null) {
             Currency currency = currencyRepository.findById(currencyId).orElse(null);
             if (currency != null) {
@@ -220,5 +180,40 @@ public class CheckoutPricingServiceImpl implements CheckoutPricingService {
         }
 
         return response;
+    }
+
+    private String mapCouponErrorMessage(Exception ex) {
+        if (ex instanceof ApiException apiEx) {
+            return switch (apiEx.getCode()) {
+                case "COUPON_EXPIRED" -> "Coupon was not applied because it is expired";
+                case "COUPON_USAGE_LIMIT_REACHED" -> "Coupon was not applied because it reached the usage limit";
+                case "COUPON_INVALID" -> "Coupon was not applied because it is invalid";
+                case "COUPON_MINIMUM_NOT_REACHED" -> "Coupon was not applied because order minimum was not reached";
+                case "COUPON_INACTIVE" -> "Coupon was not applied because it is inactive";
+                default -> "Coupon was not applied";
+            };
+        }
+
+        String msg = ex == null || ex.getMessage() == null
+                ? ""
+                : ex.getMessage().trim().toLowerCase();
+
+        if (msg.contains("expired")) {
+            return "Coupon was not applied because it is expired";
+        }
+        if ((msg.contains("max") && msg.contains("use")) || msg.contains("usage limit")) {
+            return "Coupon was not applied because it reached the usage limit";
+        }
+        if (msg.contains("inactive")) {
+            return "Coupon was not applied because it is inactive";
+        }
+        if (msg.contains("not found") || msg.contains("invalid")) {
+            return "Coupon was not applied because it is invalid";
+        }
+        if (msg.contains("minimum")) {
+            return "Coupon was not applied because order minimum was not reached";
+        }
+
+        return "Coupon was not applied";
     }
 }

@@ -28,7 +28,8 @@ import org.springframework.web.multipart.MultipartFile;
 import jakarta.mail.internet.InternetAddress;
 import com.build4all.common.errors.ApiException;
 import org.springframework.http.HttpStatus;
-
+import java.security.SecureRandom;
+import java.time.Duration;
 
 import java.io.IOException;
 import java.nio.file.*;
@@ -74,7 +75,7 @@ public class UserService {
     private static final int EMAIL_CHANGE_RESEND_COOLDOWN_SEC = 60;
 
     private String generateOtp6() {
-        return String.format("%06d", new Random().nextInt(1_000_000));
+        return String.format("%06d", secureRandom.nextInt(1_000_000));
     }
 
     private void sendEmailChangeOtp(String to, String code) {
@@ -106,6 +107,68 @@ public class UserService {
 
     /* ============================ Helpers ============================ */
 
+    
+    private static final int OTP_LENGTH = 6;
+    private static final int OTP_TTL_MINUTES = 5;
+    private static final int OTP_MAX_ATTEMPTS = 5;
+    private static final int OTP_LOCK_MINUTES = 15;
+    private static final int OTP_RESEND_COOLDOWN_SECONDS = 60;
+
+    private final SecureRandom secureRandom = new SecureRandom();
+
+    private String generateNumericOtp() {
+        
+        return String.format("%0" + OTP_LENGTH + "d", secureRandom.nextInt((int) Math.pow(10, OTP_LENGTH)));
+    }
+
+    private void validateOtpState(PendingUser pending) {
+        LocalDateTime now = LocalDateTime.now();
+
+        if (pending.getLockedUntil() != null && pending.getLockedUntil().isAfter(now)) {
+            throw new RuntimeException("Too many attempts. Try again later.");
+        }
+
+        if (pending.getVerificationExpiresAt() == null || pending.getVerificationExpiresAt().isBefore(now)) {
+            throw new RuntimeException("Invalid or expired code");
+        }
+    }
+
+    private void validateResendCooldown(PendingUser pending) {
+        LocalDateTime now = LocalDateTime.now();
+
+        if (pending.getLastVerificationSentAt() != null) {
+            long seconds = Duration.between(pending.getLastVerificationSentAt(), now).getSeconds();
+            if (seconds < OTP_RESEND_COOLDOWN_SECONDS) {
+                throw new RuntimeException("Please wait before requesting a new code.");
+            }
+        }
+    }
+
+    private void registerFailedOtpAttempt(PendingUser pending) {
+        int attempts = pending.getVerificationAttempts() + 1;
+        pending.setVerificationAttempts(attempts);
+
+        if (attempts >= OTP_MAX_ATTEMPTS) {
+            pending.setLockedUntil(LocalDateTime.now().plusMinutes(OTP_LOCK_MINUTES));
+        }
+
+        pendingUserRepository.save(pending);
+        throw new RuntimeException(
+                attempts >= OTP_MAX_ATTEMPTS
+                        ? "Too many attempts. Try again later."
+                        : "Invalid or expired code"
+        );
+    }
+
+    private void prepareNewOtp(PendingUser pending, String code) {
+        LocalDateTime now = LocalDateTime.now();
+        pending.setVerificationCode(code);
+        pending.setVerificationExpiresAt(now.plusMinutes(OTP_TTL_MINUTES));
+        pending.setVerificationAttempts(0);
+        pending.setLockedUntil(null);
+        pending.setLastVerificationSentAt(now);
+        pending.setCreatedAt(now);
+    }
     /**
      * Resolve a UserStatus by name (throws if missing).
      *
@@ -415,7 +478,7 @@ public class UserService {
                 ? pendingUserRepository.findByEmail(email)
                 : pendingUserRepository.findByPhoneNumber(phone);
 
-        String code = phoneProvided ? "123456" : String.format("%06d", new Random().nextInt(999999));
+        String code = generateNumericOtp();
 
         if (pending != null) {
             if (Boolean.TRUE.equals(pending.isVerified())) {
@@ -429,33 +492,31 @@ public class UserService {
             }
 
             pending.setPasswordHash(passwordEncoder.encode(password));
-            pending.setVerificationCode(code);
-            pending.setCreatedAt(LocalDateTime.now());
+            prepareNewOtp(pending, code);
             pending.setStatus(status);
         }
- else {
+        else {
             pending = new PendingUser();
             pending.setEmail(emailProvided ? email : null);
             pending.setPhoneNumber(phoneProvided ? phone : null);
             pending.setPasswordHash(passwordEncoder.encode(password));
-            pending.setVerificationCode(code);
-            pending.setCreatedAt(LocalDateTime.now());
             pending.setStatus(status);
             pending.setIsPublicProfile(true);
             pending.setIsVerified(false);
+            prepareNewOtp(pending, code);
         }
 
         pendingUserRepository.save(pending);
 
         if (emailProvided) {
-            String htmlMessage = """
-                <html><body style="font-family: Arial; text-align:center; padding:20px">
-                <h2>Welcome to build4all</h2>
-                <p>Use this code to verify your email:</p>
-                <h1>%s</h1>
-             
-                </body></html>
-            """.formatted(code);
+        	String htmlMessage = """
+        		    <html><body style="font-family: Arial; text-align:center; padding:20px">
+        		    <h2>Welcome to build4all</h2>
+        		    <p>Use this code to verify your email:</p>
+        		    <h1>%s</h1>
+        		    <p>This code expires in %d minutes.</p>
+        		    </body></html>
+        		""".formatted(code, OTP_TTL_MINUTES);
 
             emailService.sendHtmlEmail(email, "Email Verification Code", htmlMessage);
         }
@@ -578,12 +639,12 @@ public class UserService {
                     Map.of("pendingId", pending.getId())
             );
         }
-        String code = phoneProvided ? "123456" : String.format("%06d", new Random().nextInt(999999));
+        validateResendCooldown(pending);
 
-        pending.setVerificationCode(code);
-        pending.setCreatedAt(LocalDateTime.now());
+        String code = generateNumericOtp();
+        prepareNewOtp(pending, code);
         pendingUserRepository.save(pending);
-
+        
         if (emailProvided) {
             String html = """
                 <html><body style="font-family: Arial; text-align:center; padding:20px">
@@ -606,94 +667,94 @@ public class UserService {
      * For SMS we keep a fixed code "123456" for testing/dev.
      */
     public boolean resendVerificationCode(String emailOrPhone) {
-        boolean isEmail = emailOrPhone != null && emailOrPhone.contains("@");
+    	emailOrPhone = emailOrPhone == null ? null : emailOrPhone.trim();
+    	boolean isEmail = emailOrPhone != null && emailOrPhone.contains("@");
 
         PendingUser pending = isEmail
-                ? (
-                // SQL:
-                //   SELECT * FROM pending_users WHERE email = :emailOrPhone LIMIT 1;
-                pendingUserRepository.findByEmail(emailOrPhone)
-        )
-                : (
-                // SQL:
-                //   SELECT * FROM pending_users WHERE phone_number = :emailOrPhone LIMIT 1;
-                pendingUserRepository.findByPhoneNumber(emailOrPhone)
-        );
+                ? pendingUserRepository.findByEmail(emailOrPhone)
+                : pendingUserRepository.findByPhoneNumber(emailOrPhone);
 
-        if (pending == null) throw new RuntimeException("No pending user found");
+        if (pending == null) {
+            throw new RuntimeException("No pending user found");
+        }
+
+        validateResendCooldown(pending);
+
+        String code = generateNumericOtp();
+        prepareNewOtp(pending, code);
+        pendingUserRepository.save(pending);
 
         if (isEmail) {
-            String code = String.format("%06d", new Random().nextInt(999999));
-
-            // UPDATE pending_users ...
-            pending.setVerificationCode(code);
-            pending.setCreatedAt(LocalDateTime.now());
-
-            // SQL:
-            //   UPDATE pending_users SET verification_code=?, created_at=? WHERE id=?;
-            pendingUserRepository.save(pending);
-
             String html = """
                 <html><body style="font-family: Arial; padding: 20px;">
                     <h2>build4all Verification</h2>
                     <p>Your new verification code is:</p>
                     <h1>%s</h1>
+                    <p>This code expires in %d minutes.</p>
                 </body></html>
-            """.formatted(code);
+            """.formatted(code, OTP_TTL_MINUTES);
 
             emailService.sendHtmlEmail(emailOrPhone, "New Verification Code", html);
-
         } else {
-            // UPDATE pending_users ...
-            pending.setVerificationCode("123456");
-            pending.setCreatedAt(LocalDateTime.now());
-
-            // SQL:
-            //   UPDATE pending_users SET verification_code='123456', created_at=? WHERE id=?;
-            pendingUserRepository.save(pending);
+            System.out.println("📱 SMS to " + emailOrPhone + ": code " + code);
         }
 
         return true;
     }
-
+    
     public Long verifyEmailCodeAndRegister(String email, String code) {
+        email = email == null ? null : email.trim();
+        code = code == null ? null : code.trim();
 
-        // SQL:
-        //   SELECT * FROM pending_users WHERE email = :email LIMIT 1;
         PendingUser pending = pendingUserRepository.findByEmail(email);
 
-        if (pending == null) throw new RuntimeException("No pending user for this email");
-        if (!Objects.equals(pending.getVerificationCode(), code)) throw new RuntimeException("Invalid code");
+        if (pending == null) {
+            throw new RuntimeException("Invalid or expired code");
+        }
 
-        // UPDATE pending_users SET is_verified=true WHERE id=?;
+        validateOtpState(pending);
+
+        if (!Objects.equals(pending.getVerificationCode(), code)) {
+            registerFailedOtpAttempt(pending);
+        }
+
         pending.setIsVerified(true);
+        pending.setVerificationCode(null);
+        pending.setVerificationExpiresAt(null);
+        pending.setVerificationAttempts(0);
+        pending.setLockedUntil(null);
+        pending.setLastVerificationSentAt(null);
 
-        // SQL:
-        //   UPDATE pending_users SET is_verified=true WHERE id=:id;
         pendingUserRepository.save(pending);
-
         return pending.getId();
     }
-
+    
     public Long verifyPhoneCodeAndRegister(String phoneNumber, String code) {
-        if (!"123456".equals(code)) throw new RuntimeException("Invalid code");
+        phoneNumber = phoneNumber == null ? null : phoneNumber.trim();
+        code = code == null ? null : code.trim();
 
-        // SQL:
-        //   SELECT * FROM pending_users WHERE phone_number = :phoneNumber LIMIT 1;
         PendingUser pending = pendingUserRepository.findByPhoneNumber(phoneNumber);
 
-        if (pending == null) throw new RuntimeException("Pending user not found");
+        if (pending == null) {
+            throw new RuntimeException("Invalid or expired code");
+        }
 
-        // UPDATE pending_users SET is_verified=true WHERE id=?;
+        validateOtpState(pending);
+
+        if (!Objects.equals(pending.getVerificationCode(), code)) {
+            registerFailedOtpAttempt(pending);
+        }
+
         pending.setIsVerified(true);
+        pending.setVerificationCode(null);
+        pending.setVerificationExpiresAt(null);
+        pending.setVerificationAttempts(0);
+        pending.setLockedUntil(null);
+        pending.setLastVerificationSentAt(null);
 
-        // SQL:
-        //   UPDATE pending_users SET is_verified=true WHERE id=:id;
         pendingUserRepository.save(pending);
-
         return pending.getId();
     }
-
     /**
      * Finish registration: create the real user in the right tenant.
      *

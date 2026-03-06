@@ -160,6 +160,12 @@ public class LicensingController {
     }
 
     @PreAuthorize("hasRole('SUPER_ADMIN')")
+    @GetMapping("/apps")
+    public ResponseEntity<?> listAllAppsForSuperAdmin() {
+        return ResponseEntity.ok(licensingService.listAllAppsForSuperAdmin());
+    }
+    
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @PostMapping("/upgrade-requests/{requestId}/reject")
     public ResponseEntity<?> reject(
             @PathVariable Long requestId,

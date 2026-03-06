@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
         name = "auth_token_revocations",
         uniqueConstraints = @UniqueConstraint(
                 name = "uq_auth_token_revocations",
-                columnNames = {"subject_type", "subject_id"}
+                columnNames = {"subject_type", "subject_id", "owner_project_id"}
         )
 )
 public class AuthTokenRevocation {
@@ -22,6 +22,9 @@ public class AuthTokenRevocation {
 
     @Column(name = "subject_id", nullable = false)
     private Long subjectId;
+
+    @Column(name = "owner_project_id")
+    private Long ownerProjectId;
 
     @Column(name = "revoked_after", nullable = false)
     private LocalDateTime revokedAfter;
@@ -47,6 +50,9 @@ public class AuthTokenRevocation {
 
     public Long getSubjectId() { return subjectId; }
     public void setSubjectId(Long subjectId) { this.subjectId = subjectId; }
+
+    public Long getOwnerProjectId() { return ownerProjectId; }
+    public void setOwnerProjectId(Long ownerProjectId) { this.ownerProjectId = ownerProjectId; }
 
     public LocalDateTime getRevokedAfter() { return revokedAfter; }
     public void setRevokedAfter(LocalDateTime revokedAfter) { this.revokedAfter = revokedAfter; }

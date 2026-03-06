@@ -15,7 +15,12 @@ import com.build4all.licensing.repository.PlanCatalogRepository;
 import com.build4all.licensing.repository.PlanUpgradeRequestRepository;
 import com.build4all.licensing.repository.SubscriptionRepository;
 import com.build4all.user.repository.UsersRepository;
+import com.build4all.admin.domain.AdminUser;
+import com.build4all.licensing.dto.SuperAdminAppLicenseRow;
+import com.build4all.project.domain.Project;
 
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -403,5 +408,119 @@ public class LicensingService {
 
      return upgradeReqRepo.save(r);
  }
+ 
+ @Transactional(readOnly = true)
+ public List<SuperAdminAppLicenseRow> listAllAppsForSuperAdmin() {
+     List<AdminUserProject> apps = aupRepo.findAll();
+     List<SuperAdminAppLicenseRow> rows = new ArrayList<>();
+
+     for (AdminUserProject app : apps) {
+         ensureSubscriptionExists(app);
+
+         OwnerAppAccessResponse access = getOwnerDashboardAccess(app.getId());
+
+         SuperAdminAppLicenseRow row = new SuperAdminAppLicenseRow();
+         row.setAupId(app.getId());
+
+         row.setAppName(resolveAppName(app));
+         row.setSlug(app.getSlug());
+         row.setAppStatus(app.getStatus());
+
+         row.setAdminId(app.getAdminId());
+         row.setOwnerName(resolveOwnerName(app));
+         row.setOwnerEmail(resolveOwnerEmail(app));
+         row.setOwnerUsername(resolveOwnerUsername(app));
+
+         row.setProjectId(app.getProjectId());
+         row.setProjectName(resolveProjectName(app));
+
+         row.setPlanCode(access.getPlanCode());
+         row.setPlanName(access.getPlanName());
+         row.setSubscriptionStatus(access.getSubscriptionStatus());
+         row.setPeriodEnd(access.getPeriodEnd());
+         row.setDaysLeft(access.getDaysLeft());
+
+         row.setUsersAllowed(access.getUsersAllowed());
+         row.setActiveUsers(access.getActiveUsers());
+         row.setUsersRemaining(access.getUsersRemaining());
+
+         row.setRequiresDedicatedServer(access.isRequiresDedicatedServer());
+         row.setDedicatedInfraReady(access.isDedicatedInfraReady());
+
+         row.setCanAccessDashboard(access.isCanAccessDashboard());
+         row.setBlockingReason(access.getBlockingReason());
+
+         row.setUpgradeRequestStatus(access.getUpgradeRequestStatus());
+
+         rows.add(row);
+     }
+
+     return rows;
+ }
+
+ private String resolveAppName(AdminUserProject app) {
+     if (app.getAppName() != null && !app.getAppName().isBlank()) {
+         return app.getAppName();
+     }
+
+     if (app.getSlug() != null && !app.getSlug().isBlank()) {
+         return app.getSlug();
+     }
+
+     return "App #" + app.getId();
+ }
+
+ private String resolveOwnerName(AdminUserProject app) {
+     AdminUser admin = app.getAdmin();
+     if (admin == null) return null;
+
+     String first = admin.getFirstName() != null ? admin.getFirstName().trim() : "";
+     String last = admin.getLastName() != null ? admin.getLastName().trim() : "";
+     String full = (first + " " + last).trim();
+
+     if (!full.isBlank()) {
+         return full;
+     }
+
+     if (admin.getUsername() != null && !admin.getUsername().isBlank()) {
+         return admin.getUsername();
+     }
+
+     return null;
+ }
+
+ private String resolveOwnerEmail(AdminUserProject app) {
+     AdminUser admin = app.getAdmin();
+     return admin != null ? admin.getEmail() : null;
+ }
+
+ private String resolveOwnerUsername(AdminUserProject app) {
+     AdminUser admin = app.getAdmin();
+     return admin != null ? admin.getUsername() : null;
+ }
+
+ private String resolveProjectName(AdminUserProject app) {
+     Project project = app.getProject();
+     if (project == null) return null;
+
+     try {
+         return (String) project.getClass().getMethod("getName").invoke(project);
+     } catch (Exception ignored) {
+     }
+
+     try {
+         return (String) project.getClass().getMethod("getProjectName").invoke(project);
+     } catch (Exception ignored) {
+     }
+
+     try {
+         return (String) project.getClass().getMethod("getTitle").invoke(project);
+     } catch (Exception ignored) {
+     }
+
+     return null;
+ }
+ 
+ 
 
 }

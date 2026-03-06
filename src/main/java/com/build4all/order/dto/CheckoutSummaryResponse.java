@@ -36,68 +36,26 @@ public class CheckoutSummaryResponse {
        ORDER HEADER INFO
        ========================================================= */
 
-    /**
-     * Database id of the created Order header.
-     * - Set in OrderServiceImpl after saving the Order.
-     * - Useful for showing "Order #123" in UI and for later status checks.
-     */
     private Long orderId;
-
-    /**
-     * Creation datetime of the Order header.
-     * - Typically set to LocalDateTime.now() when order is created.
-     */
     private LocalDateTime orderDate;
 
     /* =========================================================
        PRICING BREAKDOWN
        ========================================================= */
 
-    /**
-     * Sum of (unitPrice * quantity) across all cart lines.
-     * Does NOT include shipping or taxes.
-     */
     private BigDecimal itemsSubtotal;
-
-    /**
-     * Shipping total cost (based on selected shipping method + address).
-     * If no shipping method/address, may be 0.
-     */
     private BigDecimal shippingTotal;
-
-    /**
-     * Total tax computed on items (VAT / sales tax / etc.).
-     * Calculated by TaxService based on ownerProject rules and address.
-     */
     private BigDecimal itemTaxTotal;
-
-    /**
-     * Total tax computed on shipping cost (some regions tax shipping).
-     */
     private BigDecimal shippingTaxTotal;
-
-    /**
-     * Final amount to pay:
-     *   itemsSubtotal + shippingTotal + itemTaxTotal + shippingTaxTotal - couponDiscount
-     */
     private BigDecimal grandTotal;
 
     /* =========================================================
        CURRENCY DISPLAY (for UI convenience)
        ========================================================= */
 
-    /**
-     * Currency code (e.g., "USD", "SAR", "LBP").
-     * Derived from Currency entity loaded by currencyId.
-     */
     private String currencyCode;
-
-    /**
-     * Currency symbol (e.g., "$", "﷼").
-     */
     private String currencySymbol;
-    
-    
+
     private String orderCode;
     private Long orderSeq;
 
@@ -105,106 +63,37 @@ public class CheckoutSummaryResponse {
        LINE SUMMARIES (for UI)
        ========================================================= */
 
-    /**
-     * Summary list of all lines included in this checkout.
-     * Each line includes itemId, quantity, unitPrice, lineSubtotal (and optionally name).
-     */
     private List<CheckoutLineSummary> lines;
 
     /* =========================================================
        COUPON INFO
-       (do NOT touch existing constructor as you noted)
        ========================================================= */
 
-    /**
-     * Coupon code provided by the user (if any).
-     * Note: you may also want to return the validated coupon code (normalized).
-     */
     private String couponCode;
-
-    /**
-     * Absolute discount amount applied to itemsSubtotal.
-     * (Your implementation currently discounts itemsSubtotal only.)
-     */
     private BigDecimal couponDiscount;
+
+    /* =========================================================
+       CLEAN UI MESSAGE
+       ========================================================= */
+
+    private String message;
 
     /* =========================================================
        PAYMENT BOOTSTRAP INFO (NEW)
        ========================================================= */
 
-    /**
-     * Internal PaymentTransaction id (your DB).
-     * Useful for:
-     * - debugging payment attempts
-     * - webhook reconciliation
-     * - querying payment status later
-     */
     private Long paymentTransactionId;
-
-    /**
-     * Provider code used by your payment module.
-     * Examples: "STRIPE", "CASH", "PAYPAL"
-     *
-     * (In your code you return providerCode from PaymentOrchestratorService)
-     */
     private String paymentProviderCode;
-
-    /**
-     * Provider-side payment id/reference.
-     * Examples:
-     * - Stripe PaymentIntent id: "pi_..."
-     * - Cash reference: "CASH_ORDER_..." (or any offline reference you generate)
-     */
     private String providerPaymentId;
-
-    /**
-     * Stripe-only: client secret used by Stripe SDK on client side to confirm payment.
-     * Example: "pi_123_secret_..."
-     *
-     * IMPORTANT:
-     * - Never log this in plaintext in production.
-     * - Only return it to the authenticated user who owns the order.
-     */
     private String clientSecret;
-
-    /**
-     * Stripe-only (PUBLIC, safe):
-     * Needed by mobile/web to initialize Stripe SDK dynamically per ownerProject.
-     * Comes from the same payment config JSON in DB (PaymentMethodConfig.configJson).
-     *
-     * SECURITY:
-     * - Must be pk_... only
-     * - Never expose sk_... (secret key)
-     */
     private String publishableKey;
-
-    /**
-     * Redirect-based providers (PayPal-like) can return a URL to complete payment.
-     * Client opens it in a browser/webview and then returns to the app.
-     */
     private String redirectUrl;
-
-    /**
-     * Payment status returned by your payment module.
-     * Typical values depend on your design, e.g.:
-     * - "CREATED" (payment created but not completed)
-     * - "OFFLINE_PENDING" (cash / bank transfer waiting)
-     * - "REQUIRES_ACTION" (3DS step-up)
-     * - "SUCCEEDED" (if you ever allow instant confirmation)
-     */
     private String paymentStatus;
 
     // ===== Constructors =====
 
-    /** No-arg constructor (needed by Jackson) */
     public CheckoutSummaryResponse() { }
 
-    /**
-     * All-args constructor used earlier in OrderServiceImpl.
-     * Keep as-is (you explicitly requested).
-     * Note: this constructor does not include coupon/payment fields;
-     * those are expected to be set through setters afterwards.
-     */
     public CheckoutSummaryResponse(Long orderId,
                                    LocalDateTime orderDate,
                                    BigDecimal itemsSubtotal,
@@ -246,7 +135,7 @@ public class CheckoutSummaryResponse {
 
     public BigDecimal getShippingTaxTotal() { return shippingTaxTotal; }
     public void setShippingTaxTotal(BigDecimal shippingTaxTotal) { this.shippingTaxTotal = shippingTaxTotal; }
-    
+
     public String getOrderCode() { return orderCode; }
     public void setOrderCode(String orderCode) { this.orderCode = orderCode; }
 
@@ -265,15 +154,14 @@ public class CheckoutSummaryResponse {
     public List<CheckoutLineSummary> getLines() { return lines; }
     public void setLines(List<CheckoutLineSummary> lines) { this.lines = lines; }
 
-    // --- Coupon fields ---
-
     public String getCouponCode() { return couponCode; }
     public void setCouponCode(String couponCode) { this.couponCode = couponCode; }
 
     public BigDecimal getCouponDiscount() { return couponDiscount; }
     public void setCouponDiscount(BigDecimal couponDiscount) { this.couponDiscount = couponDiscount; }
 
-    // --- Payment fields ---
+    public String getMessage() { return message; }
+    public void setMessage(String message) { this.message = message; }
 
     public Long getPaymentTransactionId() { return paymentTransactionId; }
     public void setPaymentTransactionId(Long paymentTransactionId) { this.paymentTransactionId = paymentTransactionId; }

@@ -19,27 +19,40 @@ public class AuthTokenRevocationService {
     }
 
     @Transactional
-    public void revokeNow(String subjectType, Long subjectId) {
+    public void revokeNow(String subjectType, Long subjectId, Long ownerProjectId) {
         final LocalDateTime now = LocalDateTime.now();
 
-        AuthTokenRevocation row = repo.findBySubjectTypeAndSubjectId(subjectType, subjectId)
-                .orElseGet(() -> {
-                    AuthTokenRevocation r = new AuthTokenRevocation();
-                    r.setSubjectType(subjectType);
-                    r.setSubjectId(subjectId);
-                    return r;
-                });
+        AuthTokenRevocation row = (ownerProjectId == null)
+                ? repo.findBySubjectTypeAndSubjectIdAndOwnerProjectIdIsNull(subjectType, subjectId)
+                    .orElseGet(() -> {
+                        AuthTokenRevocation r = new AuthTokenRevocation();
+                        r.setSubjectType(subjectType);
+                        r.setSubjectId(subjectId);
+                        r.setOwnerProjectId(null);
+                        return r;
+                    })
+                : repo.findBySubjectTypeAndSubjectIdAndOwnerProjectId(subjectType, subjectId, ownerProjectId)
+                    .orElseGet(() -> {
+                        AuthTokenRevocation r = new AuthTokenRevocation();
+                        r.setSubjectType(subjectType);
+                        r.setSubjectId(subjectId);
+                        r.setOwnerProjectId(ownerProjectId);
+                        return r;
+                    });
 
         row.setRevokedAfter(now);
         repo.save(row);
     }
 
-    public boolean isRevoked(String subjectType, Long subjectId, Date issuedAt) {
+    public boolean isRevoked(String subjectType, Long subjectId, Long ownerProjectId, Date issuedAt) {
         if (subjectType == null || subjectType.isBlank()) return false;
         if (subjectId == null) return false;
         if (issuedAt == null) return false;
 
-        var rowOpt = repo.findBySubjectTypeAndSubjectId(subjectType, subjectId);
+        var rowOpt = (ownerProjectId == null)
+                ? repo.findBySubjectTypeAndSubjectIdAndOwnerProjectIdIsNull(subjectType, subjectId)
+                : repo.findBySubjectTypeAndSubjectIdAndOwnerProjectId(subjectType, subjectId, ownerProjectId);
+
         if (rowOpt.isEmpty()) return false;
 
         var revokedAfter = rowOpt.get().getRevokedAfter();

@@ -160,9 +160,10 @@ public class CouponServiceImpl implements CouponService {
             }
         }
         
-        LocalDateTime from = existing.getValidFrom();
-        LocalDateTime to = existing.getValidTo();
-        if (from != null && to != null && from.isAfter(to)) {
+        LocalDateTime newFrom = req.getStartsAt() != null ? req.getStartsAt() : existing.getValidFrom();
+        LocalDateTime newTo = req.getExpiresAt() != null ? req.getExpiresAt() : existing.getValidTo();
+
+        if (newFrom != null && newTo != null && newFrom.isAfter(newTo)) {
             throw new IllegalArgumentException("startsAt must be <= expiresAt");
         }
 
@@ -171,7 +172,6 @@ public class CouponServiceImpl implements CouponService {
         if (req.getMaxDiscountAmount() != null) existing.setMaxDiscountAmount(req.getMaxDiscountAmount());
         if (req.getStartsAt() != null) existing.setValidFrom(req.getStartsAt());
         if (req.getExpiresAt() != null) existing.setValidTo(req.getExpiresAt());
-      
 
         // ✅ Only update active if client sent it
         if (req.getActive() != null) {
@@ -308,18 +308,64 @@ public class CouponServiceImpl implements CouponService {
     @Override
     public CouponResponse toResponse(Coupon c) {
         CouponResponse r = new CouponResponse();
+
         r.setId(c.getId());
         r.setOwnerProjectId(c.getOwnerProjectId());
         r.setCode(c.getCode());
         r.setDescription(c.getDescription());
         r.setDiscountType(c.getType() != null ? c.getType().name() : null);
         r.setDiscountValue(c.getValue());
+
         r.setMaxUses(c.getGlobalUsageLimit());
+        r.setUsedCount(c.getUsedCount() == null ? 0 : c.getUsedCount());
+
+        if (c.getGlobalUsageLimit() == null) {
+            r.setRemainingUses(null); // unlimited
+        } else {
+            int used = c.getUsedCount() == null ? 0 : c.getUsedCount();
+            r.setRemainingUses(Math.max(c.getGlobalUsageLimit() - used, 0));
+        }
+
         r.setMinOrderAmount(c.getMinOrderAmount());
         r.setMaxDiscountAmount(c.getMaxDiscountAmount());
         r.setStartsAt(c.getValidFrom());
         r.setExpiresAt(c.getValidTo());
         r.setActive(c.isActive());
+
+        LocalDateTime now = LocalDateTime.now();
+
+        boolean started = c.getValidFrom() == null || !now.isBefore(c.getValidFrom());
+        boolean expired = c.getValidTo() != null && now.isAfter(c.getValidTo());
+        boolean usageLimitReached =
+                c.getGlobalUsageLimit() != null
+                        && (c.getUsedCount() == null ? 0 : c.getUsedCount()) >= c.getGlobalUsageLimit();
+
+        boolean currentlyValid =
+                c.isActive()
+                        && started
+                        && !expired
+                        && !usageLimitReached;
+
+        r.setStarted(started);
+        r.setExpired(expired);
+        r.setUsageLimitReached(usageLimitReached);
+        r.setCurrentlyValid(currentlyValid);
+
+        String status;
+        if (!c.isActive()) {
+            status = "INACTIVE";
+        } else if (!started) {
+            status = "SCHEDULED";
+        } else if (expired) {
+            status = "EXPIRED";
+        } else if (usageLimitReached) {
+            status = "USAGE_LIMIT_REACHED";
+        } else {
+            status = "ACTIVE";
+        }
+
+        r.setStatus(status);
+
         return r;
     }
 }

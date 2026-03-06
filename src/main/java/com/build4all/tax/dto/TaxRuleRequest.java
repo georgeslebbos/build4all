@@ -1,6 +1,10 @@
 package com.build4all.tax.dto;
 
 import java.math.BigDecimal;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 
 /**
  * Request DTO for creating/updating tax rules.
@@ -32,16 +36,13 @@ public class TaxRuleRequest {
      * Human readable rule name (e.g., "Lebanon VAT", "KSA VAT", "Default Tax").
      * Required.
      */
-    private String name;           // required
+    @NotBlank(message = "name is required")
+    private String name;
 
-    /**
-     * Tax percentage rate.
-     * Required and must be > 0 (e.g. 11.00 for 11%).
-     *
-     * IMPORTANT:
-     * This is NOT a fraction (0.11). It's "11.00".
-     */
-    private BigDecimal rate;       // required, > 0 (e.g. 11.00 for 11%)
+    @NotNull(message = "rate is required")
+    @DecimalMin(value = "0.01", message = "rate must be greater than 0")
+    @DecimalMax(value = "100.00", message = "rate cannot be greater than 100%")
+    private BigDecimal rate;      // required, > 0 (e.g. 11.00 for 11%)
 
     /**
      * If true, this rule is allowed to apply on shipping fees

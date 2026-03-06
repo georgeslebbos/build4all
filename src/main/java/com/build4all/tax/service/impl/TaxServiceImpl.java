@@ -35,6 +35,35 @@ public class TaxServiceImpl implements TaxService {
         return v == null ? BigDecimal.ZERO : v;
     }
 
+    
+    private static final BigDecimal ZERO = BigDecimal.ZERO;
+    private static final BigDecimal MAX_TAX_RATE = new BigDecimal("100.00");
+
+    private void validateRuleForSave(TaxRule rule) {
+        if (rule == null) {
+            throw new IllegalArgumentException("Tax rule is required");
+        }
+
+        if (rule.getOwnerProject() == null || rule.getOwnerProject().getId() == null) {
+            throw new IllegalArgumentException("ownerProject (with id) is required");
+        }
+
+        if (rule.getName() == null || rule.getName().isBlank()) {
+            throw new IllegalArgumentException("name is required");
+        }
+
+        if (rule.getRate() == null) {
+            throw new IllegalArgumentException("rate is required");
+        }
+
+        if (rule.getRate().compareTo(ZERO) <= 0) {
+            throw new IllegalArgumentException("rate must be greater than 0");
+        }
+
+        if (rule.getRate().compareTo(MAX_TAX_RATE) > 0) {
+            throw new IllegalArgumentException("rate cannot be greater than 100%");
+        }
+    }
     /**
      * ✅ NEW (important):
      * Pick the best matching rule with clear priority:
@@ -95,22 +124,7 @@ public class TaxServiceImpl implements TaxService {
 
     @Override
     public TaxRule createRule(TaxRule rule) {
-
-        // tenant boundary: rule must belong to an ownerProject
-        if (rule.getOwnerProject() == null || rule.getOwnerProject().getId() == null) {
-            throw new IllegalArgumentException("ownerProject (with id) is required");
-        }
-
-        // basic validation
-        if (rule.getName() == null || rule.getName().isBlank()) {
-            throw new IllegalArgumentException("name is required");
-        }
-
-        // rate is percentage (10.00 = 10%)
-        if (rule.getRate() == null || rule.getRate().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("rate must be > 0");
-        }
-
+        validateRuleForSave(rule);
         return ruleRepository.save(rule);
     }
 
@@ -127,30 +141,31 @@ public class TaxServiceImpl implements TaxService {
         TaxRule existing = ruleRepository.findByIdAndOwnerProject_Id(id, ownerProjectId)
                 .orElseThrow(() -> new IllegalArgumentException("TaxRule not found for this ownerProject"));
 
-        // Partial update (PATCH-like behavior)
-        if (updates.getName() != null) existing.setName(updates.getName());
+        if (updates.getName() != null) {
+            if (updates.getName().isBlank()) {
+                throw new IllegalArgumentException("name is required");
+            }
+            existing.setName(updates.getName());
+        }
 
         if (updates.getRate() != null) {
-            if (updates.getRate().compareTo(BigDecimal.ZERO) <= 0) {
-                throw new IllegalArgumentException("rate must be > 0");
+            if (updates.getRate().compareTo(ZERO) <= 0) {
+                throw new IllegalArgumentException("rate must be greater than 0");
+            }
+            if (updates.getRate().compareTo(MAX_TAX_RATE) > 0) {
+                throw new IllegalArgumentException("rate cannot be greater than 100%");
             }
             existing.setRate(updates.getRate());
         }
 
-        // booleans: keep your behavior (always copy)
         existing.setAppliesToShipping(updates.isAppliesToShipping());
         existing.setEnabled(updates.isEnabled());
 
-        // optional geographic filters
         existing.setCountry(updates.getCountry());
         existing.setRegion(updates.getRegion());
 
-        // 🚫 DO NOT allow changing ownerProject here
-        // existing.setOwnerProject(...);
-
         return ruleRepository.save(existing);
     }
-
     /**
      * Kept for interface compatibility.
      * Prefer calling updateRuleScoped from controller.

@@ -3,34 +3,31 @@ package com.build4all.admin.service;
 import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.domain.PendingAdminEmailChange;
 import com.build4all.admin.dto.AdminUserProfileDTO;
-import com.build4all.business.domain.Businesses;
-import com.build4all.notifications.service.EmailService;
-import com.build4all.review.repository.ReviewRepository;
-import com.build4all.role.domain.Role;
+import com.build4all.admin.dto.AdminUserUpdateProfileRequest;
 import com.build4all.admin.repository.AdminUsersRepository;
 import com.build4all.admin.repository.PendingAdminEmailChangeRepository;
+import com.build4all.business.domain.Businesses;
+import com.build4all.notifications.service.EmailService;
+import com.build4all.order.repository.OrderItemRepository;
+import com.build4all.review.repository.ReviewRepository;
+import com.build4all.role.domain.Role;
 import com.build4all.role.repository.RoleRepository;
 import com.build4all.user.domain.Users;
-import com.build4all.user.repository.UsersRepository;
-
-import jakarta.mail.internet.InternetAddress;
-
-import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.user.dto.UserSummaryDTO;
-import com.build4all.admin.dto.AdminUserUpdateProfileRequest;
-import org.springframework.util.StringUtils;
-
+import com.build4all.user.repository.UsersRepository;
+import jakarta.mail.internet.InternetAddress;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
-import java.util.Random;
 import java.util.stream.Collectors;
 
 @Service
@@ -49,9 +46,6 @@ public class AdminUserService {
     @Autowired
     private AdminUsersRepository adminUserRepository;
 
-    // REMOVED: AdminUserBusinessRepository
-    // Reason (based on your comments): the relationship is now stored directly via FK on AdminUser (business_id).
-
     @Autowired
     private OrderItemRepository OrderItemRepository;
 
@@ -62,24 +56,26 @@ public class AdminUserService {
     private RoleRepository roleRepository;
 
     @Autowired
-    // Used to hash plain passwords when creating admin users.
     private PasswordEncoder passwordEncoder;
 
     @Autowired
     private UsersRepository usersRepository;
-    
-    @Autowired private PendingAdminEmailChangeRepository pendingAdminEmailRepo;
-    @Autowired private EmailService emailService;
-    
-    
-    
-    
+
+    @Autowired
+    private PendingAdminEmailChangeRepository pendingAdminEmailRepo;
+
+    @Autowired
+    private EmailService emailService;
+
     private static final int ADMIN_EMAIL_CHANGE_TTL_MIN = 15;
     private static final int ADMIN_EMAIL_CHANGE_MAX_ATTEMPTS = 5;
     private static final int ADMIN_EMAIL_CHANGE_RESEND_COOLDOWN_SEC = 60;
+    private static final int PASSWORD_MIN_LEN = 6;
+
+    private final SecureRandom secureRandom = new SecureRandom();
 
     private String otp6() {
-        return String.format("%06d", new Random().nextInt(1_000_000));
+        return String.format("%06d", secureRandom.nextInt(1_000_000));
     }
 
     private void validateEmailOrThrow(String email) {
@@ -97,17 +93,15 @@ public class AdminUserService {
               <h2>Confirm your new email</h2>
               <p>Use this code to verify your new email:</p>
               <h1 style="letter-spacing:6px">%s</h1>
-           
+              <p>This code expires in <b>%d minutes</b>.</p>
             </body></html>
         """.formatted(code, ADMIN_EMAIL_CHANGE_TTL_MIN);
 
         emailService.sendHtmlEmail(to, "Confirm your new email", html);
     }
-    
-    
+
     @Transactional
     public void requestAdminEmailChange(Long adminId, String newEmail) {
-
         if (newEmail == null || newEmail.trim().isEmpty()) {
             throw new RuntimeException("New email is required");
         }
@@ -122,7 +116,7 @@ public class AdminUserService {
             return;
         }
 
-        // unique across admins (excluding self) ✅ you already have this repo method
+        // unique across admins (excluding self)
         if (adminUserRepository.existsByEmailIgnoreCaseAndAdminIdNot(normalized, adminId)) {
             throw new RuntimeException("Email already in use");
         }
@@ -147,7 +141,9 @@ public class AdminUserService {
 
     @Transactional
     public void verifyAdminEmailChange(Long adminId, String code) {
-        if (code == null || code.trim().isEmpty()) {
+        code = code == null ? null : code.trim();
+
+        if (code == null || code.isEmpty()) {
             throw new RuntimeException("Verification code is required");
         }
 
@@ -168,7 +164,7 @@ public class AdminUserService {
             throw new RuntimeException("Too many attempts. Request a new code.");
         }
 
-        if (!passwordEncoder.matches(code.trim(), pending.getCodeHash())) {
+        if (!passwordEncoder.matches(code, pending.getCodeHash())) {
             pendingAdminEmailRepo.save(pending);
             throw new RuntimeException("Invalid verification code");
         }
@@ -291,7 +287,6 @@ public class AdminUserService {
             throw new RuntimeException("User already promoted to admin");
         }
 
-        // Uses the user's passwordHash directly (meaning the user already has a hashed password).
         AdminUser manager = new AdminUser(
                 user.getUsername(),
                 user.getFirstName(),
@@ -334,17 +329,14 @@ public class AdminUserService {
     public List<UserSummaryDTO> getAllUserSummaries() {
         List<UserSummaryDTO> result = new ArrayList<>();
 
-        // Map Users entities into summary DTOs.
         List<UserSummaryDTO> users = usersRepository.findAll().stream()
                 .map(u -> new UserSummaryDTO(
                         u.getId(),
                         u.getFirstName() + " " + u.getLastName(),
-                        // Prefer email; fallback to phone number if email is null.
                         u.getEmail() != null ? u.getEmail() : u.getPhoneNumber(),
                         "USER"))
                 .collect(Collectors.toList());
 
-        // Map AdminUser entities into summary DTOs (role name included).
         List<UserSummaryDTO> admins = adminUserRepository.findAll().stream()
                 .map(a -> new UserSummaryDTO(
                         a.getAdminId(),
@@ -381,8 +373,6 @@ public class AdminUserService {
      */
     @Transactional
     public void deleteManagerById(Long adminId) {
-        // OLD: delete links from admin_user_business
-        // NEW: not needed; just delete the AdminUser (FK is on AdminUser now)
         adminUserRepository.findById(adminId).ifPresent(adminUserRepository::delete);
     }
 
@@ -395,7 +385,6 @@ public class AdminUserService {
         List<UserSummaryDTO> result = new ArrayList<>();
 
         if ("USER".equalsIgnoreCase(role)) {
-            // Return all regular users.
             result = usersRepository.findAll().stream()
                     .map(u -> new UserSummaryDTO(
                             u.getId(),
@@ -404,7 +393,6 @@ public class AdminUserService {
                             "USER"))
                     .collect(Collectors.toList());
         } else {
-            // Return all admins matching the given role.
             result = adminUserRepository.findAll().stream()
                     .filter(a -> a.getRole().getName().equalsIgnoreCase(role))
                     .map(a -> new UserSummaryDTO(
@@ -423,7 +411,6 @@ public class AdminUserService {
      * It searches AdminUser by (email + business).
      */
     public boolean isUserAlreadyManager(Users user, Businesses business) {
-        // Checks for an AdminUser with the same email tied to the same business (FK)
         List<AdminUser> results = adminUserRepository.findByEmailAndBusiness(user.getEmail(), business);
         return !results.isEmpty();
     }
@@ -473,28 +460,26 @@ public class AdminUserService {
      */
     public AdminUserProfileDTO toProfileDTO(AdminUser a) {
         return new AdminUserProfileDTO(
-            a.getAdminId(),
-            a.getUsername(),
-            a.getFirstName(),
-            a.getLastName(),
-            a.getEmail(),
-            a.getPhoneNumber(), // ✅ keep null if null
-            a.getRole() != null ? a.getRole().getName() : null,
-            a.getBusiness() != null ? a.getBusiness().getId() : null,
-            a.getNotifyItemUpdates(),
-            a.getNotifyUserFeedback(),
-            a.getCreatedAt(),
-            a.getUpdatedAt()
+                a.getAdminId(),
+                a.getUsername(),
+                a.getFirstName(),
+                a.getLastName(),
+                a.getEmail(),
+                a.getPhoneNumber(),
+                a.getRole() != null ? a.getRole().getName() : null,
+                a.getBusiness() != null ? a.getBusiness().getId() : null,
+                a.getNotifyItemUpdates(),
+                a.getNotifyUserFeedback(),
+                a.getCreatedAt(),
+                a.getUpdatedAt()
         );
     }
 
     @Transactional
     public AdminUserProfileDTO updateAdminProfile(Long adminId, AdminUserUpdateProfileRequest req) {
-
         AdminUser admin = requireById(adminId);
 
-  
-     // --- username ---
+        // --- username ---
         if (StringUtils.hasText(req.getUsername())) {
             String newUsername = req.getUsername().trim();
             if (newUsername.length() < 3) {
@@ -518,12 +503,10 @@ public class AdminUserService {
             admin.setLastName(ln);
         }
 
-        // --- email ---
-     // --- email --- (NO direct change anymore)
+        // --- email --- (NO direct change anymore)
         if (StringUtils.hasText(req.getEmail())) {
             String newEmail = req.getEmail().trim();
 
-            // allow same email only (ignore)
             if (admin.getEmail() != null && !admin.getEmail().equalsIgnoreCase(newEmail)) {
                 throw new RuntimeException("Email change requires verification. Use request-email-change.");
             }
@@ -548,14 +531,11 @@ public class AdminUserService {
             admin.setAiEnabled(req.getAiEnabled());
         }
 
-    
-     // --- optional password change ---
+        // --- optional password change ---
         boolean wantsPasswordChange = StringUtils.hasText(req.getNewPassword());
         if (wantsPasswordChange) {
-
-            // ✅ validate new password before anything
             String newPw = req.getNewPassword().trim();
-            validateAdminPasswordOrThrow(newPw); // ✅ min 6 (same as UI)
+            validateAdminPasswordOrThrow(newPw);
 
             if (!StringUtils.hasText(req.getCurrentPassword())) {
                 throw new RuntimeException("Current password is required to change password");
@@ -573,9 +553,6 @@ public class AdminUserService {
         return toProfileDTO(admin);
     }
 
-    
-    private static final int PASSWORD_MIN_LEN = 6;
-
     private void validateAdminPasswordOrThrow(String password) {
         if (password == null || password.isBlank()) {
             throw new RuntimeException("newPassword is required");
@@ -584,5 +561,4 @@ public class AdminUserService {
             throw new RuntimeException("newPassword must be at least " + PASSWORD_MIN_LEN + " characters");
         }
     }
-
 }

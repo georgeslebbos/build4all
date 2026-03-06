@@ -18,6 +18,10 @@ import com.build4all.tax.service.impl.TaxServiceImpl;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+
+import org.hibernate.exception.DataException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -62,6 +66,34 @@ public class TaxController {
     }
 
     /* ===================== helpers ===================== */
+    
+    private String cleanTaxError(Throwable ex) {
+        Throwable current = ex;
+
+        while (current != null) {
+            String msg = current.getMessage();
+            if (msg != null) {
+                String lower = msg.toLowerCase();
+
+                if (lower.contains("numeric field overflow")
+                        || lower.contains("precision 5")
+                        || lower.contains("scale 2")) {
+                    return "Rate cannot be greater than 100%";
+                }
+
+                if (lower.contains("rate cannot be greater than 100")) {
+                    return "Rate cannot be greater than 100%";
+                }
+
+                if (lower.contains("rate must be greater than 0")) {
+                    return "Rate must be greater than 0";
+                }
+            }
+            current = current.getCause();
+        }
+
+        return "Invalid tax rule data";
+    }
 
     private ResponseEntity<?> blockIfSubscriptionExceeded(Long ownerProjectId) {
         try {
@@ -168,8 +200,8 @@ public class TaxController {
     @PreAuthorize("hasAnyRole('OWNER','SUPER_ADMIN')")
     public ResponseEntity<?> createRule(
             @RequestHeader("Authorization") String auth,
-            @RequestBody TaxRuleRequest req
-    ) {
+            @Valid @RequestBody TaxRuleRequest req
+    ){
         try {
             Long ownerProjectId = tenantFromTokenOrThrow(auth);
 
@@ -181,11 +213,12 @@ public class TaxController {
 
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (DataIntegrityViolationException | DataException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", cleanTaxError(ex)));
         } catch (RuntimeException ex) {
-            // token / tenant issues
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", ex.getMessage()));
         } catch (Exception ex) {
-            return ResponseEntity.internalServerError().body(Map.of("error", "Server error"));
+            return ResponseEntity.internalServerError().body(Map.of("error", cleanTaxError(ex)));
         }
     }
 
@@ -207,13 +240,14 @@ public class TaxController {
 
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (DataIntegrityViolationException | DataException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", cleanTaxError(ex)));
         } catch (RuntimeException ex) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", ex.getMessage()));
         } catch (Exception ex) {
-            return ResponseEntity.internalServerError().body(Map.of("error", "Server error"));
+            return ResponseEntity.internalServerError().body(Map.of("error", cleanTaxError(ex)));
         }
     }
-
     /**
      * ✅ Return 200 JSON (Flutter friendly) instead of 204
      */
