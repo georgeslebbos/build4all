@@ -52,23 +52,45 @@ public class ActivityController {
 
     /* ------------------------ helpers ------------------------ */
 
-    private String strip(String auth) { return auth == null ? "" : auth.replace("Bearer ", "").trim(); }
+    private String strip(String auth) {
+        return auth == null ? "" : auth.replace("Bearer ", "").trim();
+    }
 
     private boolean hasRole(String token, String... roles) {
         String role = jwtUtil.extractRole(token);
-        for (String r : roles) if (r.equalsIgnoreCase(role)) return true;
+        for (String r : roles) {
+            if (r.equalsIgnoreCase(role)) return true;
+        }
         return false;
     }
 
-    /** App-scoped user resolver (email or phone from JWT) using a single ownerProjectLinkId. */
     private Users getScopedUserFromToken(String authHeader, Long ownerProjectLinkId) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             throw new RuntimeException("Missing or invalid Authorization header");
         }
         String jwt = authHeader.substring(7).trim();
-        String identity = jwtUtil.extractUsername(jwt); // may be email or phone
-        // NOTE: service must provide owner-link overloads
+        String identity = jwtUtil.extractUsername(jwt);
         return userService.getUserByEmaill(identity, ownerProjectLinkId);
+    }
+
+    private boolean isTerminated(Activity a) {
+        return a != null
+                && a.getEndDatetime() != null
+                && a.getEndDatetime().isBefore(LocalDateTime.now());
+    }
+
+    private String getStatusCode(Activity a) {
+        if (a == null || a.getStatus() == null || a.getStatus().getCode() == null) {
+            return null;
+        }
+        return a.getStatus().getCode();
+    }
+
+    private String getStatusName(Activity a) {
+        if (a == null || a.getStatus() == null || a.getStatus().getName() == null) {
+            return null;
+        }
+        return a.getStatus().getName();
     }
 
     private ActivityDetailsDTO toDto(Activity a) {
@@ -85,10 +107,31 @@ public class ActivityController {
                 a.getEndDatetime(),
                 a.getPrice(),
                 a.getMaxParticipants(),
-                a.getStatus(),
+                getStatusName(a),
                 a.getImageUrl(),
                 (a.getBusiness() != null ? a.getBusiness().getBusinessName() : null)
         );
+    }
+
+    private Map<String, Object> toResponseMap(Activity a) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("id", a.getId());
+        response.put("itemName", a.getItemName());
+        response.put("description", a.getDescription());
+        response.put("itemTypeId", a.getItemType() != null ? a.getItemType().getId() : null);
+        response.put("itemTypeName", a.getItemType() != null ? a.getItemType().getName() : null);
+        response.put("location", a.getLocation());
+        response.put("latitude", a.getLatitude());
+        response.put("longitude", a.getLongitude());
+        response.put("startDatetime", a.getStartDatetime());
+        response.put("endDatetime", a.getEndDatetime());
+        response.put("price", a.getPrice());
+        response.put("maxParticipants", a.getMaxParticipants());
+        response.put("statusCode", getStatusCode(a));
+        response.put("statusName", getStatusName(a));
+        response.put("terminated", isTerminated(a));
+        response.put("imageUrl", a.getImageUrl());
+        return response;
     }
 
     /* ------------------------ create ------------------------ */
@@ -107,23 +150,25 @@ public class ActivityController {
             @RequestParam("price") BigDecimal price,
             @RequestParam("startDatetime") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDatetime,
             @RequestParam("endDatetime") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDatetime,
-            @RequestParam(value = "status", defaultValue = "Upcoming") String status,
+            @RequestParam(value = "statusCode", required = false) String statusCode,
             @RequestParam("businessId") Long businessId,
             @RequestPart(value = "image", required = false) MultipartFile image
     ) throws Exception {
 
         String token = strip(auth);
-        if (!hasRole(token, "BUSINESS", "MANAGER","OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Business or Manager role required."));
+        if (!hasRole(token, "BUSINESS", "MANAGER", "OWNER")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Business or Manager role required."));
         }
 
         Activity saved = activityService.createActivityWithImage(
                 name, itemTypeId, description, location, latitude, longitude,
-                maxParticipants, price, startDatetime, endDatetime, status, businessId, image
+                maxParticipants, price, startDatetime, endDatetime, statusCode, businessId, image
         );
+
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                 "message", "Item created successfully",
-                "item", toDto(saved)
+                "item", toResponseMap(saved)
         ));
     }
 
@@ -144,24 +189,26 @@ public class ActivityController {
             @RequestParam("price") BigDecimal price,
             @RequestParam("startDatetime") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDatetime,
             @RequestParam("endDatetime") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDatetime,
-            @RequestParam(value = "status", defaultValue = "Upcoming") String status,
+            @RequestParam(value = "statusCode", required = false) String statusCode,
             @RequestParam("businessId") Long businessId,
             @RequestPart(value = "image", required = false) MultipartFile image,
             @RequestParam(value = "imageRemoved", defaultValue = "false") boolean imageRemoved
     ) throws Exception {
 
         String token = strip(auth);
-        if (!hasRole(token, "BUSINESS", "MANAGER","OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Business or Manager role required."));
+        if (!hasRole(token, "BUSINESS", "MANAGER", "OWNER")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Business or Manager role required."));
         }
 
         Activity saved = activityService.updateActivityWithImage(
                 id, name, itemTypeId, description, location, latitude, longitude,
-                maxParticipants, price, startDatetime, endDatetime, status, businessId, image, imageRemoved
+                maxParticipants, price, startDatetime, endDatetime, statusCode, businessId, image, imageRemoved
         );
+
         return ResponseEntity.ok(Map.of(
                 "message", "Item updated successfully",
-                "item", toDto(saved)
+                "item", toResponseMap(saved)
         ));
     }
 
@@ -172,12 +219,16 @@ public class ActivityController {
     public ResponseEntity<?> delete(@RequestHeader("Authorization") String auth,
                                     @PathVariable Long id) {
         String token = strip(auth);
-        if (!hasRole(token, "BUSINESS","OWNER")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Only Business users can delete items."));
+        if (!hasRole(token, "BUSINESS", "OWNER")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Only Business users can delete items."));
         }
 
         Activity a = activityService.findById(id);
-        if (a == null) return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "Item not found"));
+        if (a == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("message", "Item not found"));
+        }
 
         orderService.deleteordersByItemId(id);
         activityService.deleteActivity(id);
@@ -189,7 +240,10 @@ public class ActivityController {
     @GetMapping("/{id}")
     public ResponseEntity<?> getById(@PathVariable Long id) {
         Activity a = activityService.findById(id);
-        if (a == null) return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "Item not found"));
+        if (a == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("message", "Item not found"));
+        }
 
         Businesses b = a.getBusiness();
         Map<String, Object> businessInfo = new HashMap<>();
@@ -209,22 +263,9 @@ public class ActivityController {
             businessInfo.put("updatedAt", b.getUpdatedAt());
         }
 
-        Map<String, Object> response = new HashMap<>();
-        response.put("id", a.getId());
-        response.put("itemName", a.getItemName());
-        response.put("description", a.getDescription());
-        response.put("itemTypeId", a.getItemType() != null ? a.getItemType().getId() : null);
-        response.put("itemTypeName", a.getItemType() != null ? a.getItemType().getName() : null);
-        response.put("location", a.getLocation());
-        response.put("latitude", a.getLatitude());
-        response.put("longitude", a.getLongitude());
-        response.put("startDatetime", a.getStartDatetime());
-        response.put("endDatetime", a.getEndDatetime());
-        response.put("price", a.getPrice());
-        response.put("maxParticipants", a.getMaxParticipants());
-        response.put("status", a.getStatus());
-        response.put("imageUrl", a.getImageUrl());
+        Map<String, Object> response = toResponseMap(a);
         response.put("business", businessInfo);
+
         return ResponseEntity.ok(response);
     }
 
@@ -233,15 +274,7 @@ public class ActivityController {
     @GetMapping
     public ResponseEntity<?> getAll() {
         List<Activity> list = activityService.findAll();
-        LocalDateTime now = LocalDateTime.now();
-        for (Activity a : list) {
-            if (a.getEndDatetime() != null && a.getEndDatetime().isBefore(now)
-                    && !"Terminated".equalsIgnoreCase(a.getStatus())) {
-                a.setStatus("Terminated");
-                activityService.save(a);
-            }
-        }
-        return ResponseEntity.ok(list.stream().map(this::toDto).toList());
+        return ResponseEntity.ok(list.stream().map(this::toResponseMap).toList());
     }
 
     @GetMapping("/upcoming")
@@ -249,68 +282,65 @@ public class ActivityController {
         LocalDateTime now = LocalDateTime.now();
 
         List<Activity> upcoming = activityService.findByOwnerProject(ownerProjectLinkId).stream()
-                .filter(a -> a.getEndDatetime().isAfter(now))
-                .filter(a -> !"Terminated".equalsIgnoreCase(a.getStatus()))
+                .filter(a -> a.getEndDatetime() != null && a.getEndDatetime().isAfter(now))
+                .filter(a -> !isTerminated(a))
                 .toList();
 
-        return ResponseEntity.ok(upcoming.stream().map(this::toDto).toList());
+        return ResponseEntity.ok(upcoming.stream().map(this::toResponseMap).toList());
     }
-
 
     @GetMapping("/terminated")
     public ResponseEntity<?> getTerminated(@RequestHeader("Authorization") String auth) {
-        if (auth == null || !auth.startsWith("Bearer "))
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Missing token"));
+        if (auth == null || !auth.startsWith("Bearer ")) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Missing token"));
+        }
 
         String token = auth.substring(7).trim();
         String role = jwtUtil.extractRole(token);
-        if (!List.of("USER", "BUSINESS", "MANAGER", "SUPER_ADMIN").contains(role))
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied"));
+        if (!List.of("USER", "BUSINESS", "MANAGER", "SUPER_ADMIN").contains(role)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "Access denied"));
+        }
 
-        LocalDateTime now = LocalDateTime.now();
         List<Activity> terminated = activityService.findAll().stream()
-                .filter(a -> a.getEndDatetime() != null && a.getEndDatetime().isBefore(now))
-                .peek(a -> {
-                    if (!"Terminated".equalsIgnoreCase(a.getStatus())) {
-                        a.setStatus("Terminated");
-                        activityService.save(a);
-                    }
-                })
+                .filter(this::isTerminated)
                 .toList();
-        return ResponseEntity.ok(terminated);
+
+        return ResponseEntity.ok(terminated.stream().map(this::toResponseMap).toList());
     }
 
     @GetMapping("/business/{businessId}")
     public ResponseEntity<?> getByBusiness(@PathVariable Long businessId,
                                            @RequestHeader("Authorization") String tokenHeader) {
-        if (tokenHeader == null || !tokenHeader.startsWith("Bearer "))
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Missing or invalid Authorization header"));
+        if (tokenHeader == null || !tokenHeader.startsWith("Bearer ")) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Missing or invalid Authorization header"));
+        }
 
         String token = tokenHeader.substring(7).trim();
         boolean isBusiness = jwtUtil.isBusinessToken(token);
         boolean isAdmin = jwtUtil.isAdminToken(token);
-        if (!isBusiness && !isAdmin)
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied."));
+        if (!isBusiness && !isAdmin) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "Access denied."));
+        }
 
         if (isBusiness) {
             Long tokenBusinessId = jwtUtil.extractId(token);
-            if (!tokenBusinessId.equals(businessId))
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Not your business."));
+            if (!tokenBusinessId.equals(businessId)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Not your business."));
+            }
         }
 
         List<Activity> items = activityService.findByBusinessId(businessId);
-        if (items.isEmpty())
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "No items found for this business"));
-
-        LocalDateTime now = LocalDateTime.now();
-        for (Activity a : items) {
-            if (a.getEndDatetime() != null && a.getEndDatetime().isBefore(now)
-                    && !"Terminated".equalsIgnoreCase(a.getStatus())) {
-                a.setStatus("Terminated");
-                activityService.save(a);
-            }
+        if (items.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("message", "No items found for this business"));
         }
-        return ResponseEntity.ok(items);
+
+        return ResponseEntity.ok(items.stream().map(this::toResponseMap).toList());
     }
 
     @GetMapping("/by-type/{typeId}")
@@ -318,17 +348,17 @@ public class ActivityController {
             @PathVariable Long typeId,
             @RequestParam Long ownerProjectLinkId) {
 
+        LocalDateTime now = LocalDateTime.now();
+
         List<Activity> items = activityService.findByOwnerAndType(ownerProjectLinkId, typeId);
 
-        LocalDateTime now = LocalDateTime.now();
         List<Activity> upcoming = items.stream()
-                .filter(a -> a.getEndDatetime().isAfter(now))
-                .filter(a -> !"Terminated".equalsIgnoreCase(a.getStatus()))
+                .filter(a -> a.getEndDatetime() != null && a.getEndDatetime().isAfter(now))
+                .filter(a -> !isTerminated(a))
                 .toList();
 
-        return ResponseEntity.ok(upcoming.stream().map(this::toDto).toList());
+        return ResponseEntity.ok(upcoming.stream().map(this::toResponseMap).toList());
     }
-
 
     @GetMapping("/guest/upcoming")
     public ResponseEntity<?> guestUpcoming(
@@ -343,13 +373,12 @@ public class ActivityController {
 
         List<Activity> upcoming = all.stream()
                 .filter(a -> a.getEndDatetime() != null && a.getEndDatetime().isAfter(now))
-                .filter(a -> !"Terminated".equalsIgnoreCase(a.getStatus()))
+                .filter(a -> !isTerminated(a))
                 .filter(a -> a.getBusiness() != null && Boolean.TRUE.equals(a.getBusiness().getIsPublicProfile()))
                 .toList();
 
-        return ResponseEntity.ok(upcoming.stream().map(this::toDto).toList());
+        return ResponseEntity.ok(upcoming.stream().map(this::toResponseMap).toList());
     }
-
 
     /* ---------------- personalized feed (owner-linked user) ---------------- */
 
@@ -359,22 +388,30 @@ public class ActivityController {
                                            @PathVariable Long userId) {
         try {
             String token = strip(auth);
-            if (!jwtUtil.isUserToken(token))
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "User token required."));
+            if (!jwtUtil.isUserToken(token)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("message", "User token required."));
+            }
 
             Users u = getScopedUserFromToken(auth, ownerProjectLinkId);
-            if (u == null || !u.getId().equals(userId))
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Token does not match requested user ID"));
+            if (u == null || !u.getId().equals(userId)) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("message", "Token does not match requested user ID"));
+            }
 
             List<Activity> items = activityService.findItemsByUserCategories(userId);
-            LocalDateTime now = LocalDateTime.now();
+
             List<Activity> pending = items.stream()
-                    .filter(a -> a.getEndDatetime() != null && a.getEndDatetime().isAfter(now))
-                    .filter(a -> !"Terminated".equalsIgnoreCase(a.getStatus()))
+                    .filter(a -> a.getEndDatetime() != null && a.getEndDatetime().isAfter(LocalDateTime.now()))
+                    .filter(a -> !isTerminated(a))
                     .toList();
-            if (pending.isEmpty())
-                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "No pending items found for user's categories"));
-            return ResponseEntity.ok(pending.stream().map(this::toDto).toList());
+
+            if (pending.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(Map.of("message", "No pending items found for user's categories"));
+            }
+
+            return ResponseEntity.ok(pending.stream().map(this::toResponseMap).toList());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
                     "message", "Invalid or missing token",
@@ -394,16 +431,23 @@ public class ActivityController {
             int requested = Integer.parseInt(participantsStr.replaceAll("[^\\d]", ""));
             Users user = getScopedUserFromToken(authHeader, ownerProjectLinkId);
 
-            if (orderService.hasUserAlreadyBooked(itemId, user.getId()))
-                return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("available", false, "error", "You already booked this item."));
+            if (orderService.hasUserAlreadyBooked(itemId, user.getId())) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body(Map.of("available", false, "error", "You already booked this item."));
+            }
 
             boolean ok = activityService.isAvailable(itemId, requested);
-            if (ok) return ResponseEntity.ok(Map.of("available", true, "message", "Available to book"));
-            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("available", false, "error", "Item is fully booked or not enough slots."));
+            if (ok) {
+                return ResponseEntity.ok(Map.of("available", true, "message", "Available to book"));
+            }
+
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of("available", false, "error", "Item is fully booked or not enough slots."));
         } catch (NumberFormatException e) {
             return ResponseEntity.badRequest().body(Map.of("error", "Invalid participants value"));
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "Server error: " + e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Server error: " + e.getMessage()));
         }
     }
 
@@ -411,8 +455,8 @@ public class ActivityController {
 
     @PostMapping("/confirm-order")
     public ResponseEntity<?> confirmorder(@RequestHeader("Authorization") String auth,
-                                            @RequestParam Long ownerProjectLinkId,
-                                            @RequestBody Map<String, Object> data) {
+                                          @RequestParam Long ownerProjectLinkId,
+                                          @RequestBody Map<String, Object> data) {
         try {
             Users user = getScopedUserFromToken(auth, ownerProjectLinkId);
             Long itemId = Long.parseLong(data.get("itemId").toString());
@@ -428,7 +472,8 @@ public class ActivityController {
             OrderItem order = orderService.createBookItem(user.getId(), itemId, participants, stripePaymentId, currencyId);
             return ResponseEntity.ok(Map.of("message", "order confirmed", "orderId", order.getId()));
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
         }
     }
 
@@ -441,7 +486,8 @@ public class ActivityController {
             Long businessId = jwtUtil.extractBusinessId(auth);
             BusinessUser client = businessUserService.findBusinessUserById(dto.getBusinessUserId());
             if (client == null || client.getBusiness() == null || !client.getBusiness().getId().equals(businessId)) {
-                return ResponseEntity.status(403).body("Unauthorized: Client does not belong to your business");
+                return ResponseEntity.status(403)
+                        .body("Unauthorized: Client does not belong to your business");
             }
 
             OrderItem order = activityService.createCashorderByBusiness(
@@ -450,9 +496,11 @@ public class ActivityController {
             return ResponseEntity.ok(order);
 
         } catch (UnsupportedOperationException uoe) {
-            return ResponseEntity.status(501).body(Map.of("error", "Not implemented: " + uoe.getMessage()));
+            return ResponseEntity.status(501)
+                    .body(Map.of("error", "Not implemented: " + uoe.getMessage()));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body("Error: " + e.getMessage());
+            return ResponseEntity.status(500)
+                    .body("Error: " + e.getMessage());
         }
     }
 
@@ -467,17 +515,20 @@ public class ActivityController {
 
         public Long getItemId() { return itemId; }
         public void setItemId(Long itemId) { this.itemId = itemId; }
+
         public Long getBusinessUserId() { return businessUserId; }
         public void setBusinessUserId(Long businessUserId) { this.businessUserId = businessUserId; }
+
         public int getParticipants() { return participants; }
         public void setParticipants(int participants) { this.participants = participants; }
+
         public boolean isWasPaid() { return wasPaid; }
         public void setWasPaid(boolean wasPaid) { this.wasPaid = wasPaid; }
+
         public Long getCurrencyId() { return currencyId; }
         public void setCurrencyId(Long currencyId) { this.currencyId = currencyId; }
     }
-    
-    
+
     @GetMapping("/owner/app-items")
     @Operation(summary = "List all items for an app (by ownerProjectLinkId) – OWNER / SUPER_ADMIN only")
     public ResponseEntity<?> getByOwnerProject(
@@ -491,7 +542,6 @@ public class ActivityController {
 
         String token = strip(auth);
 
-        // OWNER or SUPER_ADMIN only
         if (!hasRole(token, "OWNER", "SUPER_ADMIN")) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(Map.of("error", "Access denied."));
@@ -503,23 +553,6 @@ public class ActivityController {
                     .body(Map.of("message", "No items found for this app"));
         }
 
-        LocalDateTime now = LocalDateTime.now();
-        List<Activity> normalized = new ArrayList<>();
-        for (Activity a : items) {
-            if (a.getEndDatetime() != null && a.getEndDatetime().isBefore(now)
-                    && !"Terminated".equalsIgnoreCase(a.getStatus())) {
-                a.setStatus("Terminated");
-                activityService.save(a);
-            }
-            normalized.add(a);
-        }
-
-        // Better to send DTOs not entities
-        return ResponseEntity.ok(
-                normalized.stream()
-                        .map(this::toDto)
-                        .toList()
-        );
+        return ResponseEntity.ok(items.stream().map(this::toResponseMap).toList());
     }
-
 }

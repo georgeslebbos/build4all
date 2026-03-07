@@ -18,6 +18,7 @@ public class AiItemContextDTO {
     public String description;
     public String itemTypeName;
 
+    // store status as readable text for AI
     public String status;
 
     public BigDecimal price;
@@ -29,7 +30,7 @@ public class AiItemContextDTO {
     public String imageUrl;
 
     public Boolean taxable;
-    public String taxClass; // keep string so AI reads it easily
+    public String taxClass;
 
     // ---------- Currency (relation) ----------
     public Long currencyId;
@@ -68,18 +69,19 @@ public class AiItemContextDTO {
 
     public AiItemContextDTO() {}
 
-    // ✅ Build from Item base fields only
+    // Build from Item base fields only
     public static AiItemContextDTO fromItem(Item i) {
         AiItemContextDTO dto = new AiItemContextDTO();
 
         dto.id = i.getId();
         dto.aupId = (i.getOwnerProject() != null) ? i.getOwnerProject().getId() : null;
 
-        dto.name = i.getName(); // ✅ real field
+        dto.name = i.getName();
         dto.description = i.getDescription();
         dto.itemTypeName = (i.getItemType() != null) ? i.getItemType().getName() : null;
 
-        dto.status = i.getStatus();
+        // ✅ FIX: ItemStatus -> String
+        dto.status = (i.getStatus() != null) ? i.getStatus().getCode() : null;
 
         dto.price = i.getPrice();
         dto.salePrice = i.getSalePrice();
@@ -94,13 +96,12 @@ public class AiItemContextDTO {
 
         if (i.getBusiness() != null) {
             dto.businessId = i.getBusiness().getId();
-            dto.businessName = i.getBusiness().getBusinessName(); // ✅ assuming field name
+            dto.businessName = i.getBusiness().getBusinessName();
         }
 
         Currency c = i.getCurrency();
         if (c != null) {
             dto.currencyId = c.getId();
-            // ⚠️ adjust these 2 lines to your Currency fields
             dto.currencyCode = c.getCode();
             dto.currencySymbol = c.getSymbol();
         }
@@ -108,7 +109,7 @@ public class AiItemContextDTO {
         return dto;
     }
 
-    // ✅ Attach Product fields
+    // Attach Product fields
     public void applyProduct(Product p) {
         this.isProduct = true;
 
@@ -126,7 +127,7 @@ public class AiItemContextDTO {
         this.lengthCm = p.getLengthCm();
     }
 
-    // ✅ Attach Activity fields
+    // Attach Activity fields
     public void applyActivity(Activity a) {
         this.isActivity = true;
 
@@ -138,7 +139,7 @@ public class AiItemContextDTO {
         this.maxParticipants = a.getMaxParticipants();
     }
 
-    //  Effective price computed WITHOUT transient reliance
+    // Effective price computed WITHOUT transient reliance
     public BigDecimal effectivePriceNow() {
         if (price == null) return null;
         if (salePrice == null) return price;

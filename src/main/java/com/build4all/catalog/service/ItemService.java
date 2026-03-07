@@ -7,10 +7,12 @@ import com.build4all.business.service.BusinessService;
 import com.build4all.catalog.domain.Currency;
 import com.build4all.catalog.domain.GenericItem;
 import com.build4all.catalog.domain.Item;
+import com.build4all.catalog.domain.ItemStatus;
 import com.build4all.catalog.domain.ItemType;
 import com.build4all.catalog.dto.ItemPriceResponse;
 import com.build4all.catalog.repository.CurrencyRepository;
 import com.build4all.catalog.repository.ItemRepository;
+import com.build4all.catalog.repository.ItemStatusRepository;
 import com.build4all.catalog.repository.ItemTypeRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
@@ -22,28 +24,53 @@ import java.math.BigDecimal;
 import java.nio.file.*;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 @Service
 @Transactional
 public class ItemService {
 
+    private static final String STATUS_DRAFT = "DRAFT";
+
     private final ItemRepository itemsRepository;
     private final ItemTypeRepository itemTypeRepository;
     private final CurrencyRepository currencyRepository;
     private final BusinessService businessService;
-    private final AdminUserProjectRepository adminUserProjectRepository; // 👈 instead of AppSettings
+    private final AdminUserProjectRepository adminUserProjectRepository;
+    private final ItemStatusRepository itemStatusRepository;
 
     public ItemService(ItemRepository itemsRepository,
                        ItemTypeRepository itemTypeRepository,
                        CurrencyRepository currencyRepository,
                        BusinessService businessService,
-                       AdminUserProjectRepository adminUserProjectRepository) {
+                       AdminUserProjectRepository adminUserProjectRepository,
+                       ItemStatusRepository itemStatusRepository) {
         this.itemsRepository = itemsRepository;
         this.itemTypeRepository = itemTypeRepository;
         this.currencyRepository = currencyRepository;
         this.businessService = businessService;
         this.adminUserProjectRepository = adminUserProjectRepository;
+        this.itemStatusRepository = itemStatusRepository;
+    }
+
+    /* =========================================================
+       STATUS HELPERS
+       ========================================================= */
+
+    private String normalizeStatusCode(String raw) {
+        if (raw == null) return null;
+        String s = raw.trim();
+        if (s.isBlank()) return null;
+        return s.toUpperCase(Locale.ROOT);
+    }
+
+    private ItemStatus resolveStatusOrDefault(String rawStatusCode) {
+        String normalized = normalizeStatusCode(rawStatusCode);
+        String finalCode = (normalized == null) ? STATUS_DRAFT : normalized;
+
+        return itemStatusRepository.findByCode(finalCode)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid statusCode: " + finalCode));
     }
 
     // -------------------- Create / Update --------------------
@@ -53,9 +80,9 @@ public class ItemService {
             Long itemTypeId,
             String description,
             BigDecimal price,
-            String status,        // e.g. "Upcoming", "Active", etc.
+            String statusCode,
             Long businessId,
-            Long ownerProjectId,  // 👈 NEW: which app this item belongs to
+            Long ownerProjectId,
             MultipartFile image
     ) throws IOException {
 
@@ -70,24 +97,24 @@ public class ItemService {
         AdminUserProject ownerProject = adminUserProjectRepository.findById(ownerProjectId)
                 .orElseThrow(() -> new IllegalArgumentException("Owner project (app) not found"));
 
-        // currency per APP (AdminUserProject)
         Currency currency = ownerProject.getCurrency();
         if (currency == null) {
-            // optional fallback if you want
             currency = currencyRepository.findByCurrencyType("CAD")
                     .orElseThrow(() -> new RuntimeException("Default currency not found"));
         }
+
+        ItemStatus status = resolveStatusOrDefault(statusCode);
 
         Item item = new GenericItem();
         item.setItemName(itemName);
         item.setItemType(type);
         item.setDescription(description);
         item.setPrice(price);
-        item.setStatus(status != null ? status : "Upcoming");
+        item.setStatus(status);
         item.setImageUrl(imageUrl);
         item.setBusiness(business);
-        item.setOwnerProject(ownerProject); // 👈 link to app
-        item.setCurrency(currency);         // 👈 app currency copied to item
+        item.setOwnerProject(ownerProject);
+        item.setCurrency(currency);
 
         return itemsRepository.save(item);
     }
@@ -98,7 +125,7 @@ public class ItemService {
             Long itemTypeId,
             String description,
             BigDecimal price,
-            String status,
+            String statusCode,
             Long businessId,
             MultipartFile image,
             boolean imageRemoved
@@ -114,7 +141,10 @@ public class ItemService {
         item.setItemType(type);
         item.setDescription(description);
         item.setPrice(price);
-        if (status != null) item.setStatus(status);
+
+        if (statusCode != null && !statusCode.isBlank()) {
+            item.setStatus(resolveStatusOrDefault(statusCode));
+        }
 
         Businesses business = businessService.findById(businessId);
         if (business == null) throw new IllegalArgumentException("Business not found");
@@ -184,9 +214,6 @@ public class ItemService {
         return itemsRepository.findTopItemNameByBusinessId(businessId);
     }
 
-    /**
-     * Prices for ONE APP (one AdminUserProject) with its currency symbol.
-     */
     @Transactional(Transactional.TxType.SUPPORTS)
     public List<ItemPriceResponse> getItemsWithCurrencySymbol(Long ownerProjectId) {
         AdminUserProject app = adminUserProjectRepository.findById(ownerProjectId)

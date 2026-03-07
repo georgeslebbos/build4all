@@ -10,14 +10,16 @@ public class ProductRequest {
 
     private Long ownerProjectId;  // aup_id
     private Long itemTypeId;
-    private Long categoryId;   // 🔴 NEW
+    private Long categoryId;
     private Long currencyId;      // optional; if null use default
 
     private String name;
     private String description;
     private BigDecimal price;
     private Integer stock;
-    private String status;        // Upcoming, Published...
+
+    // ✅ NEW: use statusCode instead of raw status text
+    private String statusCode;    // DRAFT, UPCOMING, PUBLISHED, ARCHIVED
 
     private String imageUrl;
     private String sku;
@@ -33,18 +35,19 @@ public class ProductRequest {
     private String saleStart;   // ISO string
     private String saleEnd;
 
-    private List<AttributeValueDTO> attributes; // brand, model, color, etc.
+    private List<AttributeValueDTO> attributes;
 
     // --- TAX ---
-    private Boolean taxable;        // nullable → default in service
-    private TaxClass taxClass;      // STANDARD, REDUCED, ZERO
+    private Boolean taxable;
+    private TaxClass taxClass;
 
-    // --- SHIPPING (physical products) ---
+    // --- SHIPPING ---
     private BigDecimal weightKg;
     private BigDecimal widthCm;
     private BigDecimal heightCm;
     private BigDecimal lengthCm;
-    // ===== Getters & Setters =====
+
+    // ===== Getters =====
 
     public Long getOwnerProjectId() {
         return ownerProjectId;
@@ -54,7 +57,6 @@ public class ProductRequest {
         return itemTypeId;
     }
 
-    // 🔴 NEW
     public Long getCategoryId() {
         return categoryId;
     }
@@ -79,8 +81,8 @@ public class ProductRequest {
         return stock;
     }
 
-    public String getStatus() {
-        return status;
+    public String getStatusCode() {
+        return statusCode;
     }
 
     public String getImageUrl() {
@@ -131,13 +133,31 @@ public class ProductRequest {
         return attributes;
     }
 
-    public Boolean getTaxable() { return taxable; }
-    public TaxClass getTaxClass() { return taxClass; }
+    public Boolean getTaxable() {
+        return taxable;
+    }
 
-    public BigDecimal getWeightKg() { return weightKg; }
-    public BigDecimal getWidthCm() { return widthCm; }
-    public BigDecimal getHeightCm() { return heightCm; }
-    public BigDecimal getLengthCm() { return lengthCm; }
+    public TaxClass getTaxClass() {
+        return taxClass;
+    }
+
+    public BigDecimal getWeightKg() {
+        return weightKg;
+    }
+
+    public BigDecimal getWidthCm() {
+        return widthCm;
+    }
+
+    public BigDecimal getHeightCm() {
+        return heightCm;
+    }
+
+    public BigDecimal getLengthCm() {
+        return lengthCm;
+    }
+
+    // ===== Setters =====
 
     public void setOwnerProjectId(Long ownerProjectId) {
         this.ownerProjectId = ownerProjectId;
@@ -147,7 +167,6 @@ public class ProductRequest {
         this.itemTypeId = itemTypeId;
     }
 
-    // 🔴 NEW
     public void setCategoryId(Long categoryId) {
         this.categoryId = categoryId;
     }
@@ -172,8 +191,8 @@ public class ProductRequest {
         this.stock = stock;
     }
 
-    public void setStatus(String status) {
-        this.status = status;
+    public void setStatusCode(String statusCode) {
+        this.statusCode = statusCode;
     }
 
     public void setImageUrl(String imageUrl) {
@@ -224,11 +243,27 @@ public class ProductRequest {
         this.attributes = attributes;
     }
 
-    public void setTaxable(Boolean taxable) { this.taxable = taxable; }
-    public void setTaxClass(TaxClass taxClass) { this.taxClass = taxClass; }
+    public void setTaxable(Boolean taxable) {
+        this.taxable = taxable;
+    }
 
-    public void setWeightKg(BigDecimal weightKg) { this.weightKg = weightKg; }
-    public void setWidthCm(BigDecimal widthCm) { this.widthCm = widthCm; }
-    public void setHeightCm(BigDecimal heightCm) { this.heightCm = heightCm; }
-    public void setLengthCm(BigDecimal lengthCm) { this.lengthCm = lengthCm; }
+    public void setTaxClass(TaxClass taxClass) {
+        this.taxClass = taxClass;
+    }
+
+    public void setWeightKg(BigDecimal weightKg) {
+        this.weightKg = weightKg;
+    }
+
+    public void setWidthCm(BigDecimal widthCm) {
+        this.widthCm = widthCm;
+    }
+
+    public void setHeightCm(BigDecimal heightCm) {
+        this.heightCm = heightCm;
+    }
+
+    public void setLengthCm(BigDecimal lengthCm) {
+        this.lengthCm = lengthCm;
+    }
 }

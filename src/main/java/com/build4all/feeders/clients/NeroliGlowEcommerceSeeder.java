@@ -7,11 +7,13 @@ import com.build4all.admin.repository.AdminUsersRepository;
 import com.build4all.catalog.domain.Category;
 import com.build4all.catalog.domain.Country;
 import com.build4all.catalog.domain.Currency;
+import com.build4all.catalog.domain.ItemStatus;
 import com.build4all.catalog.domain.ItemType;
 import com.build4all.catalog.domain.Region;
 import com.build4all.catalog.repository.CategoryRepository;
 import com.build4all.catalog.repository.CountryRepository;
 import com.build4all.catalog.repository.CurrencyRepository;
+import com.build4all.catalog.repository.ItemStatusRepository;
 import com.build4all.catalog.repository.ItemTypeRepository;
 import com.build4all.catalog.repository.RegionRepository;
 import com.build4all.features.ecommerce.domain.Product;
@@ -45,19 +47,15 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 
-/**
- * NeroliGlow seed data loader (JSON -> JPA repositories)
- *
- * Usage:
- *   1) Put JSON file under: src/main/resources/seed/neroliglow_seed_dataset_URL.json
- *   2) Run with profile "seed":
- *        mvn spring-boot:run -Dspring-boot.run.profiles=seed
- */
 @Configuration("NeroliGlowEcommerceSeeder")
 @Profile("seed")
 public class NeroliGlowEcommerceSeeder {
 
-    // ---------- JSON model ----------
+    private static final String STATUS_DRAFT = "DRAFT";
+    private static final String STATUS_UPCOMING = "UPCOMING";
+    private static final String STATUS_PUBLISHED = "PUBLISHED";
+    private static final String STATUS_ARCHIVED = "ARCHIVED";
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class SeedDataset {
         public String projectName;
@@ -69,7 +67,6 @@ public class NeroliGlowEcommerceSeeder {
         public List<ItemTypeSeed> itemTypes = new ArrayList<>();
         public List<ProductSeed> products = new ArrayList<>();
 
-        // NEW:
         public List<TaxRuleSeed> taxRules = new ArrayList<>();
         public List<ShippingMethodSeed> shippingMethods = new ArrayList<>();
         public List<CouponSeed> coupons = new ArrayList<>();
@@ -82,22 +79,22 @@ public class NeroliGlowEcommerceSeeder {
         public String lastName;
         public String email;
         public String password;
-        public String role; // OWNER
+        public String role;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Tenant {
         public String slug;
         public String appName;
-        public String status; // ACTIVE
-        public String currencyCode; // USD
+        public String status;
+        public String currencyCode;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class CategorySeed {
         public String name;
 
-        @JsonAlias({"iconName","icon"})
+        @JsonAlias({"iconName", "icon"})
         public String iconName;
 
         public String iconLibrary;
@@ -108,7 +105,7 @@ public class NeroliGlowEcommerceSeeder {
         public String name;
         public String categoryName;
 
-        @JsonAlias({"iconName","icon"})
+        @JsonAlias({"iconName", "icon"})
         public String iconName;
 
         public String iconLibrary;
@@ -119,8 +116,8 @@ public class NeroliGlowEcommerceSeeder {
     public static class ProductSeed {
         public String name;
         public String sku;
-        public String productType;     // SIMPLE | VARIABLE | ...
-        public String itemTypeName;    // must exist
+        public String productType;
+        public String itemTypeName;
         public BigDecimal price;
         public Integer stock;
         public String imageUrl;
@@ -131,25 +128,23 @@ public class NeroliGlowEcommerceSeeder {
         public Boolean downloadable;
     }
 
-    // ===== TAX RULE JSON (maps to your TaxRule) =====
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class TaxRuleSeed {
-        public String name;                 // "VAT Lebanon 11%"
-        public BigDecimal rate;             // 11.00 (%)
-        public Boolean appliesToShipping;   // true/false
-        public Boolean enabled;             // true/false
+        public String name;
+        public BigDecimal rate;
+        public Boolean appliesToShipping;
+        public Boolean enabled;
 
-        public String countryIso2;          // "LB"
-        public String countryIso3;          // optional "LBN"
-        public String regionCode;           // Region.code
+        public String countryIso2;
+        public String countryIso3;
+        public String regionCode;
     }
 
-    // ===== SHIPPING JSON (maps to your ShippingMethod) =====
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ShippingMethodSeed {
         public String name;
         public String description;
-        public String type;                 // FLAT_RATE, FREE_OVER_THRESHOLD, ...
+        public String type;
         public BigDecimal flatRate;
         public BigDecimal pricePerKg;
         public BigDecimal freeShippingThreshold;
@@ -160,12 +155,11 @@ public class NeroliGlowEcommerceSeeder {
         public String regionCode;
     }
 
-    // ===== COUPON JSON (maps to your promo.Coupon) =====
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class CouponSeed {
         public String code;
         public String description;
-        public String type;                 // PERCENT | FIXED | FREE_SHIPPING
+        public String type;
         public BigDecimal value;
         public Integer globalUsageLimit;
         public BigDecimal maxDiscountAmount;
@@ -191,6 +185,7 @@ public class NeroliGlowEcommerceSeeder {
             AdminUserProjectRepository aupRepo,
             CurrencyRepository currencyRepo,
             ProductRepository productRepo,
+            ItemStatusRepository itemStatusRepo,
 
             TaxRuleRepository taxRuleRepo,
             CountryRepository countryRepo,
@@ -203,7 +198,6 @@ public class NeroliGlowEcommerceSeeder {
 
             SeedDataset data = mapper.readValue(seedJson.getInputStream(), SeedDataset.class);
 
-            // 1) Project
             Project project = projectRepo.findByProjectNameIgnoreCase(data.projectName)
                     .orElseGet(() -> {
                         Project p = new Project();
@@ -213,7 +207,6 @@ public class NeroliGlowEcommerceSeeder {
                         return projectRepo.save(p);
                     });
 
-            // 2) Categories (project-scoped)
             Map<String, Category> categoriesByName = new HashMap<>();
             for (CategorySeed cs : data.categories) {
                 Category c = categoryRepo.findByNameIgnoreCaseAndProject_Id(cs.name, project.getId())
@@ -228,7 +221,6 @@ public class NeroliGlowEcommerceSeeder {
                 categoriesByName.put(cs.name.toUpperCase(), c);
             }
 
-            // 3) ItemTypes
             Map<String, ItemType> itemTypesByName = new HashMap<>();
             for (ItemTypeSeed its : data.itemTypes) {
                 Category cat = categoriesByName.get(its.categoryName.toUpperCase());
@@ -261,7 +253,6 @@ public class NeroliGlowEcommerceSeeder {
                 itemTypesByName.put(its.name.toLowerCase(), t);
             }
 
-            // 4) Role + Admin owner
             String ownerRoleName = (data.owner != null && data.owner.role != null) ? data.owner.role : "OWNER";
             Role ownerRole = roleRepo.findByNameIgnoreCase(ownerRoleName)
                     .orElseGet(() -> roleRepo.save(new Role(ownerRoleName.toUpperCase())));
@@ -278,7 +269,6 @@ public class NeroliGlowEcommerceSeeder {
                         return adminRepo.save(a);
                     });
 
-            // 5) Tenant link (AdminUserProject)
             AdminUserProject aup = aupRepo
                     .findByAdmin_AdminIdAndProject_IdAndSlug(owner.getAdminId(), project.getId(), data.tenant.slug)
                     .orElseGet(() -> {
@@ -293,12 +283,10 @@ public class NeroliGlowEcommerceSeeder {
                         return aupRepo.save(link);
                     });
 
-            // 6) Currency
             Currency currency = currencyRepo.findByCodeIgnoreCase(data.tenant.currencyCode)
                     .orElseGet(() -> currencyRepo.findByCurrencyType("DOLLAR")
                             .orElseThrow(() -> new IllegalStateException("USD currency not found. Ensure CurrencySeeder ran.")));
 
-            // 7) Products (tenant-scoped) - avoid duplicates by sku or name
             List<Product> existingProducts = productRepo.findByOwnerProject_Id(aup.getId());
             Set<String> existingSkus = new HashSet<>();
             Set<String> existingNames = new HashSet<>();
@@ -329,7 +317,7 @@ public class NeroliGlowEcommerceSeeder {
                 p.setCurrency(currency);
                 p.setStock(ps.stock != null ? ps.stock : 0);
 
-                p.setStatus(ps.status != null ? ps.status : "Active");
+                p.setStatus(resolveStatusForSeed(itemStatusRepo, ps.status));
                 p.setImageUrl(ps.imageUrl);
                 p.setSku(ps.sku);
                 p.setProductType(ps.productType != null ? ProductType.valueOf(ps.productType) : ProductType.SIMPLE);
@@ -341,7 +329,6 @@ public class NeroliGlowEcommerceSeeder {
                 insertedProducts++;
             }
 
-            // 8) TAX RULES (tenant-scoped)
             List<TaxRule> existingRules = taxRuleRepo.findByOwnerProject_Id(aup.getId());
             Set<String> existingRuleNames = new HashSet<>();
             for (TaxRule r : existingRules) {
@@ -373,7 +360,6 @@ public class NeroliGlowEcommerceSeeder {
                 existingRuleNames.add(key);
             }
 
-            // 9) SHIPPING METHODS (tenant-scoped)
             List<ShippingMethod> existingShipping = shippingRepo.findByOwnerProject_Id(aup.getId());
             Set<String> existingShippingNames = new HashSet<>();
             for (ShippingMethod m : existingShipping) {
@@ -415,7 +401,6 @@ public class NeroliGlowEcommerceSeeder {
                 existingShippingNames.add(key);
             }
 
-            // 10) COUPONS (tenant-scoped)
             List<Coupon> existingCoupons = couponRepo.findByOwnerProjectId(aup.getId());
             Set<String> existingCouponCodes = new HashSet<>();
             for (Coupon c : existingCoupons) {
@@ -463,7 +448,29 @@ public class NeroliGlowEcommerceSeeder {
         };
     }
 
-    // ---------- helpers ----------
+    private static ItemStatus resolveStatusForSeed(ItemStatusRepository repo, String rawStatus) {
+        String code = mapLegacyStatusCode(rawStatus);
+
+        return repo.findByCode(code)
+                .orElseThrow(() -> new IllegalStateException("ItemStatus not found in DB: " + code));
+    }
+
+    private static String mapLegacyStatusCode(String rawStatus) {
+        if (rawStatus == null || rawStatus.trim().isBlank()) {
+            return STATUS_DRAFT;
+        }
+
+        String v = rawStatus.trim().toUpperCase(Locale.ROOT);
+
+        return switch (v) {
+            case "DRAFT" -> STATUS_DRAFT;
+            case "UPCOMING", "COMING_SOON" -> STATUS_UPCOMING;
+            case "PUBLISHED", "PUBLISH", "ACTIVE", "AVAILABLE", "LIVE" -> STATUS_PUBLISHED;
+            case "ARCHIVED", "ARCHIVE" -> STATUS_ARCHIVED;
+            default -> STATUS_DRAFT;
+        };
+    }
+
     private static Country resolveCountry(CountryRepository repo, String iso2, String iso3) {
         if (iso2 != null && !iso2.isBlank()) {
             return repo.findByIso2CodeIgnoreCase(iso2.trim()).orElse(null);

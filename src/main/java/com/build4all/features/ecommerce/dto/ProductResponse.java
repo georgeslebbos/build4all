@@ -13,14 +13,18 @@ public class ProductResponse {
     private Long ownerProjectId;
     private Long itemTypeId;
     private Long currencyId;
-    private Long categoryId; // from ItemType.category
+    private Long categoryId;
 
     private String name;
     private String description;
     private BigDecimal price;
     private Integer stock;
-    private String status;
     private String imageUrl;
+
+    // ✅ NEW status fields
+    private Long statusId;
+    private String statusCode;
+    private String statusName;
 
     private String sku;
     private ProductType productType;
@@ -35,23 +39,20 @@ public class ProductResponse {
     private LocalDateTime saleStart;
     private LocalDateTime saleEnd;
 
-    // 🔥 discount info
-    private BigDecimal effectivePrice; // price used in cart / display
-    private boolean onSale;            // true if sale active now
+    private BigDecimal effectivePrice;
+    private boolean onSale;
 
     private List<AttributeValueDTO> attributes;
 
-    // --- TAX ---
     private boolean taxable;
     private TaxClass taxClass;
 
-    // --- SHIPPING ---
     private BigDecimal weightKg;
     private BigDecimal widthCm;
     private BigDecimal heightCm;
     private BigDecimal lengthCm;
 
-    // ===== Getters & Setters =====
+    // ===== Getters =====
 
     public Long getId() {
         return id;
@@ -89,12 +90,20 @@ public class ProductResponse {
         return stock;
     }
 
-    public String getStatus() {
-        return status;
-    }
-
     public String getImageUrl() {
         return imageUrl;
+    }
+
+    public Long getStatusId() {
+        return statusId;
+    }
+
+    public String getStatusCode() {
+        return statusCode;
+    }
+
+    public String getStatusName() {
+        return statusName;
     }
 
     public String getSku() {
@@ -103,14 +112,6 @@ public class ProductResponse {
 
     public ProductType getProductType() {
         return productType;
-    }
-
-    public BigDecimal getEffectivePrice() {
-        return effectivePrice;
-    }
-
-    public boolean isOnSale() {
-        return onSale;
     }
 
     public boolean isVirtualProduct() {
@@ -145,17 +146,43 @@ public class ProductResponse {
         return saleEnd;
     }
 
+    public BigDecimal getEffectivePrice() {
+        return effectivePrice;
+    }
+
+    public boolean isOnSale() {
+        return onSale;
+    }
+
     public List<AttributeValueDTO> getAttributes() {
         return attributes;
     }
 
-    public boolean isTaxable() { return taxable; }
-    public TaxClass getTaxClass() { return taxClass; }
+    public boolean isTaxable() {
+        return taxable;
+    }
 
-    public BigDecimal getWeightKg() { return weightKg; }
-    public BigDecimal getWidthCm() { return widthCm; }
-    public BigDecimal getHeightCm() { return heightCm; }
-    public BigDecimal getLengthCm() { return lengthCm; }
+    public TaxClass getTaxClass() {
+        return taxClass;
+    }
+
+    public BigDecimal getWeightKg() {
+        return weightKg;
+    }
+
+    public BigDecimal getWidthCm() {
+        return widthCm;
+    }
+
+    public BigDecimal getHeightCm() {
+        return heightCm;
+    }
+
+    public BigDecimal getLengthCm() {
+        return lengthCm;
+    }
+
+    // ===== Setters =====
 
     public void setId(Long id) {
         this.id = id;
@@ -193,12 +220,20 @@ public class ProductResponse {
         this.stock = stock;
     }
 
-    public void setStatus(String status) {
-        this.status = status;
-    }
-
     public void setImageUrl(String imageUrl) {
         this.imageUrl = imageUrl;
+    }
+
+    public void setStatusId(Long statusId) {
+        this.statusId = statusId;
+    }
+
+    public void setStatusCode(String statusCode) {
+        this.statusCode = statusCode;
+    }
+
+    public void setStatusName(String statusName) {
+        this.statusName = statusName;
     }
 
     public void setSku(String sku) {
@@ -241,10 +276,6 @@ public class ProductResponse {
         this.saleEnd = saleEnd;
     }
 
-    public void setAttributes(List<AttributeValueDTO> attributes) {
-        this.attributes = attributes;
-    }
-
     public void setEffectivePrice(BigDecimal effectivePrice) {
         this.effectivePrice = effectivePrice;
     }
@@ -253,11 +284,31 @@ public class ProductResponse {
         this.onSale = onSale;
     }
 
-    public void setTaxable(boolean taxable) { this.taxable = taxable; }
-    public void setTaxClass(TaxClass taxClass) { this.taxClass = taxClass; }
+    public void setAttributes(List<AttributeValueDTO> attributes) {
+        this.attributes = attributes;
+    }
 
-    public void setWeightKg(BigDecimal weightKg) { this.weightKg = weightKg; }
-    public void setWidthCm(BigDecimal widthCm) { this.widthCm = widthCm; }
-    public void setHeightCm(BigDecimal heightCm) { this.heightCm = heightCm; }
-    public void setLengthCm(BigDecimal lengthCm) { this.lengthCm = lengthCm; }
+    public void setTaxable(boolean taxable) {
+        this.taxable = taxable;
+    }
+
+    public void setTaxClass(TaxClass taxClass) {
+        this.taxClass = taxClass;
+    }
+
+    public void setWeightKg(BigDecimal weightKg) {
+        this.weightKg = weightKg;
+    }
+
+    public void setWidthCm(BigDecimal widthCm) {
+        this.widthCm = widthCm;
+    }
+
+    public void setHeightCm(BigDecimal heightCm) {
+        this.heightCm = heightCm;
+    }
+
+    public void setLengthCm(BigDecimal lengthCm) {
+        this.lengthCm = lengthCm;
+    }
 }

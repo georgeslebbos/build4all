@@ -8,15 +8,17 @@ import java.util.List;
 
 public class ProductUpdateRequest {
 
-    // 🔴 NEW: allow changing the type/category on update
-    private Long itemTypeId;   // optional
-    private Long categoryId;   // optional
+    private Long itemTypeId;
+    private Long categoryId;
 
     private String name;
     private String description;
     private BigDecimal price;
     private Integer stock;
-    private String status;
+
+    // ✅ NEW: use statusCode instead of raw status text
+    private String statusCode;
+
     private String imageUrl;
 
     private String sku;
@@ -41,13 +43,13 @@ public class ProductUpdateRequest {
     private BigDecimal heightCm;
     private BigDecimal lengthCm;
 
-    // ===== Getters & Setters =====
+    // ===== Getters =====
 
-    public Long getItemTypeId() {          // 🔴 NEW
+    public Long getItemTypeId() {
         return itemTypeId;
     }
 
-    public Long getCategoryId() {          // 🔴 NEW
+    public Long getCategoryId() {
         return categoryId;
     }
 
@@ -67,8 +69,8 @@ public class ProductUpdateRequest {
         return stock;
     }
 
-    public String getStatus() {
-        return status;
+    public String getStatusCode() {
+        return statusCode;
     }
 
     public String getImageUrl() {
@@ -143,11 +145,13 @@ public class ProductUpdateRequest {
         return lengthCm;
     }
 
-    public void setItemTypeId(Long itemTypeId) {   // 🔴 NEW
+    // ===== Setters =====
+
+    public void setItemTypeId(Long itemTypeId) {
         this.itemTypeId = itemTypeId;
     }
 
-    public void setCategoryId(Long categoryId) {   // 🔴 NEW
+    public void setCategoryId(Long categoryId) {
         this.categoryId = categoryId;
     }
 
@@ -167,8 +171,8 @@ public class ProductUpdateRequest {
         this.stock = stock;
     }
 
-    public void setStatus(String status) {
-        this.status = status;
+    public void setStatusCode(String statusCode) {
+        this.statusCode = statusCode;
     }
 
     public void setImageUrl(String imageUrl) {

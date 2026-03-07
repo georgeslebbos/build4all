@@ -3,6 +3,7 @@ package com.build4all.importer.importer;
 import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.catalog.domain.*;
+import com.build4all.catalog.domain.Currency;
 import com.build4all.catalog.repository.*;
 import com.build4all.features.ecommerce.domain.Product;
 import com.build4all.features.ecommerce.domain.ProductType;
@@ -18,7 +19,6 @@ import com.build4all.shipping.domain.ShippingMethodType;
 import com.build4all.shipping.repository.ShippingMethodRepository;
 import com.build4all.tax.domain.TaxRule;
 import com.build4all.tax.repository.TaxRuleRepository;
-import  com.build4all.catalog.domain.Currency;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -27,12 +27,18 @@ import java.util.*;
 @Service
 public class DatasetImporterImpl implements DatasetImporter {
 
+    private static final String STATUS_DRAFT = "DRAFT";
+    private static final String STATUS_UPCOMING = "UPCOMING";
+    private static final String STATUS_PUBLISHED = "PUBLISHED";
+    private static final String STATUS_ARCHIVED = "ARCHIVED";
+
     private final AdminUserProjectRepository aupRepo;
 
     private final CategoryRepository categoryRepo;
     private final ItemTypeRepository itemTypeRepo;
     private final CurrencyRepository currencyRepo;
     private final ProductRepository productRepo;
+    private final ItemStatusRepository itemStatusRepo;
 
     private final TaxRuleRepository taxRuleRepo;
     private final CountryRepository countryRepo;
@@ -47,6 +53,7 @@ public class DatasetImporterImpl implements DatasetImporter {
             ItemTypeRepository itemTypeRepo,
             CurrencyRepository currencyRepo,
             ProductRepository productRepo,
+            ItemStatusRepository itemStatusRepo,
             TaxRuleRepository taxRuleRepo,
             CountryRepository countryRepo,
             RegionRepository regionRepo,
@@ -58,6 +65,7 @@ public class DatasetImporterImpl implements DatasetImporter {
         this.itemTypeRepo = itemTypeRepo;
         this.currencyRepo = currencyRepo;
         this.productRepo = productRepo;
+        this.itemStatusRepo = itemStatusRepo;
         this.taxRuleRepo = taxRuleRepo;
         this.countryRepo = countryRepo;
         this.regionRepo = regionRepo;
@@ -73,10 +81,11 @@ public class DatasetImporterImpl implements DatasetImporter {
 
         ExcelImportResult res = ExcelImportResult.ok("Imported successfully");
 
-        // ✅ Currency: SETUP removed. We must get currency from DB or use a fallback.
         Currency currency = resolveTenantCurrencyOrDefault(aup);
 
-        // 1) Categories (project-scoped)
+        /* =========================================================
+           1) Categories
+           ========================================================= */
         Map<String, Category> categoriesByName = new HashMap<>();
         for (var cs : data.categories) {
             if (cs == null || blank(cs.name)) continue;
@@ -95,26 +104,29 @@ public class DatasetImporterImpl implements DatasetImporter {
             res.insertedCategories++;
         }
 
-        // 2) ItemTypes
+        /* =========================================================
+           2) ItemTypes
+           ========================================================= */
         Map<String, ItemType> itemTypesByName = new HashMap<>();
         for (var its : data.itemTypes) {
             if (its == null || blank(its.name)) continue;
 
             Category cat = categoriesByName.get(its.categoryName.trim().toUpperCase());
-            if (cat == null) throw new IllegalStateException("Missing category for itemType: " + its.name);
+            if (cat == null) {
+                throw new IllegalStateException("Missing category for itemType: " + its.name);
+            }
 
             ItemType t = itemTypeRepo
-            	    .findByNameIgnoreCaseAndCategory_Project_Id(its.name.trim(), aup.getProject().getId())
-            	    .orElseGet(() -> {
-            	        ItemType created = new ItemType();
-            	        created.setName(its.name.trim());
-            	        created.setIcon(its.iconName);
-            	        created.setIconLibrary(its.iconLibrary);
-            	        created.setCategory(cat);
-            	        created.setDefaultForCategory(Boolean.TRUE.equals(its.defaultForCategory));
-            	        return itemTypeRepo.save(created);
-            	    });
-
+                    .findByNameIgnoreCaseAndCategory_Project_Id(its.name.trim(), aup.getProject().getId())
+                    .orElseGet(() -> {
+                        ItemType created = new ItemType();
+                        created.setName(its.name.trim());
+                        created.setIcon(its.iconName);
+                        created.setIconLibrary(its.iconLibrary);
+                        created.setCategory(cat);
+                        created.setDefaultForCategory(Boolean.TRUE.equals(its.defaultForCategory));
+                        return itemTypeRepo.save(created);
+                    });
 
             boolean dirty = false;
             if (t.getCategory() == null || !Objects.equals(t.getCategory().getId(), cat.getId())) {
@@ -125,27 +137,34 @@ public class DatasetImporterImpl implements DatasetImporter {
                 t.setDefaultForCategory(Boolean.TRUE.equals(its.defaultForCategory));
                 dirty = true;
             }
-            if (dirty) itemTypeRepo.save(t);
+            if (dirty) {
+                itemTypeRepo.save(t);
+            }
 
             itemTypesByName.put(its.name.trim().toLowerCase(), t);
             res.insertedItemTypes++;
         }
 
-        // 3) Products (tenant-scoped)
-     // 3) Products (tenant-scoped)
+        /* =========================================================
+           3) Products
+           ========================================================= */
         Set<String> existingSkus = new HashSet<>();
         for (Product p : productRepo.findByOwnerProject_Id(aup.getId())) {
-            if (p.getSku() != null) existingSkus.add(p.getSku().trim().toUpperCase());
+            if (p.getSku() != null) {
+                existingSkus.add(p.getSku().trim().toUpperCase());
+            }
         }
 
         for (var ps : data.products) {
             if (ps == null || blank(ps.name)) continue;
 
             ItemType itemType = itemTypesByName.get(ps.itemTypeName.trim().toLowerCase());
-            if (itemType == null) throw new IllegalStateException("Missing itemType for product: " + ps.name);
+            if (itemType == null) {
+                throw new IllegalStateException("Missing itemType for product: " + ps.name);
+            }
 
-            // ✅ generate SKU + track the GENERATED one (not the raw one)
             String finalSku = ensureUniqueSku(ps.sku, ps.name, existingSkus);
+            ItemStatus status = resolveStatusForImport(ps.status);
 
             Product p = new Product();
             p.setOwnerProject(aup);
@@ -158,11 +177,9 @@ public class DatasetImporterImpl implements DatasetImporter {
             p.setCurrency(currency);
             p.setStock(ps.stock != null ? ps.stock : 0);
 
-            p.setStatus(ps.status != null ? ps.status : "Active");
+            p.setStatus(status);
 
-            // ✅ fallback: many people fill imageRemoteUrl not imageUrl
             p.setImageUrl(!blank(ps.imageUrl) ? ps.imageUrl : ps.imageRemoteUrl);
-
             p.setSku(finalSku);
 
             p.setProductType(ps.productType != null
@@ -175,12 +192,12 @@ public class DatasetImporterImpl implements DatasetImporter {
             productRepo.save(p);
             res.insertedProducts++;
 
-            // ✅ THIS is the key line that prevents duplicate import crashes
             existingSkus.add(finalSku.trim().toUpperCase());
         }
-        
-        
-        // 4) Tax rules
+
+        /* =========================================================
+           4) Tax rules
+           ========================================================= */
         Set<String> existingRuleNames = new HashSet<>();
         for (TaxRule r : taxRuleRepo.findByOwnerProject_Id(aup.getId())) {
             if (r.getName() != null) existingRuleNames.add(r.getName().trim().toLowerCase());
@@ -209,7 +226,9 @@ public class DatasetImporterImpl implements DatasetImporter {
             existingRuleNames.add(key);
         }
 
-        // 5) Shipping methods
+        /* =========================================================
+           5) Shipping methods
+           ========================================================= */
         Set<String> existingShipNames = new HashSet<>();
         for (ShippingMethod m : shippingRepo.findByOwnerProject_Id(aup.getId())) {
             if (m.getName() != null) existingShipNames.add(m.getName().trim().toLowerCase());
@@ -226,7 +245,9 @@ public class DatasetImporterImpl implements DatasetImporter {
             m.setDescription(sm.description);
 
             ShippingMethodType type = ShippingMethodType.FLAT_RATE;
-            if (!blank(sm.type)) type = ShippingMethodType.valueOf(sm.type.trim().toUpperCase());
+            if (!blank(sm.type)) {
+                type = ShippingMethodType.valueOf(sm.type.trim().toUpperCase());
+            }
             m.setType(type);
 
             if (sm.flatRate != null) m.setFlatRate(sm.flatRate);
@@ -246,7 +267,9 @@ public class DatasetImporterImpl implements DatasetImporter {
             existingShipNames.add(key);
         }
 
-        // 6) Coupons
+        /* =========================================================
+           6) Coupons
+           ========================================================= */
         Set<String> existingCouponCodes = new HashSet<>();
         for (Coupon c : couponRepo.findByOwnerProjectId(aup.getId())) {
             if (c.getCode() != null) existingCouponCodes.add(c.getCode().trim().toLowerCase());
@@ -263,14 +286,17 @@ public class DatasetImporterImpl implements DatasetImporter {
             c.setDescription(cs.description);
 
             CouponDiscountType t = CouponDiscountType.PERCENT;
-            if (!blank(cs.type)) t = CouponDiscountType.valueOf(cs.type.trim().toUpperCase());
+            if (!blank(cs.type)) {
+                t = CouponDiscountType.valueOf(cs.type.trim().toUpperCase());
+            }
             c.setType(t);
 
             if (t == CouponDiscountType.FREE_SHIPPING) {
                 c.setValue(BigDecimal.ZERO);
             } else {
                 c.setValue(cs.value != null ? cs.value : BigDecimal.ZERO);
-            };
+            }
+
             c.setGlobalUsageLimit(cs.globalUsageLimit);
             c.setMaxDiscountAmount(cs.maxDiscountAmount);
             c.setMinOrderAmount(cs.minOrderAmount);
@@ -286,15 +312,43 @@ public class DatasetImporterImpl implements DatasetImporter {
         return res;
     }
 
+    /* =========================================================
+       STATUS HELPERS
+       ========================================================= */
+
+    private ItemStatus resolveStatusForImport(String rawStatus) {
+        String code = mapLegacyStatusCode(rawStatus);
+
+        return itemStatusRepo.findByCode(code)
+                .orElseThrow(() -> new IllegalStateException("ItemStatus not found in DB: " + code));
+    }
+
+    private String mapLegacyStatusCode(String rawStatus) {
+        if (blank(rawStatus)) {
+            return STATUS_DRAFT;
+        }
+
+        String v = rawStatus.trim().toUpperCase(Locale.ROOT);
+
+        return switch (v) {
+            case "DRAFT" -> STATUS_DRAFT;
+            case "UPCOMING", "COMING_SOON" -> STATUS_UPCOMING;
+            case "PUBLISHED", "PUBLISH", "ACTIVE", "AVAILABLE", "LIVE" -> STATUS_PUBLISHED;
+            case "ARCHIVED", "ARCHIVE" -> STATUS_ARCHIVED;
+            default -> STATUS_DRAFT;
+        };
+    }
+
     /**
      * Currency resolution strategy:
-     * 1) If you store currency on AUP somewhere => use it here (preferred)
-     * 2) else fallback to USD
+  
+   
      */
     private Currency resolveTenantCurrencyOrDefault(AdminUserProject aup) {
-        // TODO: If you have a field like aup.getCurrencyCode() or aup.getCurrency(), use it.
+        if (aup.getCurrency() != null) {
+            return aup.getCurrency();
+        }
 
-        // Fallback:
         return currencyRepo.findByCodeIgnoreCase("USD")
                 .orElseThrow(() -> new IllegalStateException("Default currency USD not found in DB"));
     }
@@ -310,9 +364,10 @@ public class DatasetImporterImpl implements DatasetImporter {
         return regionRepo.findByCountryAndCodeIgnoreCase(c, regionCode.trim()).orElse(null);
     }
 
-    private static boolean blank(String s) { return s == null || s.trim().isEmpty(); }
-    
-    
+    private static boolean blank(String s) {
+        return s == null || s.trim().isEmpty();
+    }
+
     private String ensureUniqueSku(String rawSku, String name, Set<String> used) {
         String base = (rawSku != null && !rawSku.trim().isEmpty())
                 ? rawSku.trim()
@@ -322,7 +377,7 @@ public class DatasetImporterImpl implements DatasetImporter {
         if (!used.contains(candidate)) return candidate;
 
         int i = 2;
-        while (used.contains((candidate + "-" + i))) i++;
+        while (used.contains(candidate + "-" + i)) i++;
         return candidate + "-" + i;
     }
 
@@ -333,5 +388,4 @@ public class DatasetImporterImpl implements DatasetImporter {
         s = s.replaceAll("(^-+|-+$)", "");
         return s.isBlank() ? "SKU" : s;
     }
-
 }

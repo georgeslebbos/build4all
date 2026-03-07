@@ -65,8 +65,10 @@ public abstract class Item {
     @Column(name = "tax_class", nullable = false)
     private TaxClass taxClass = TaxClass.STANDARD;
 
-    @Column(name = "status", nullable = false)
-    private String status = "Upcoming";
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "status_id", nullable = false)
+    private ItemStatus status;
 
     @Column(name = "stock", nullable = false)
     private Integer stock = 0;
@@ -156,8 +158,13 @@ public abstract class Item {
     public TaxClass getTaxClass() { return taxClass; }
     public void setTaxClass(TaxClass taxClass) { this.taxClass = taxClass; }
 
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
+    public ItemStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(ItemStatus status) {
+        this.status = status;
+    }
 
     public Integer getStock() { return stock; }
     public void setStock(Integer stock) { this.stock = stock; }

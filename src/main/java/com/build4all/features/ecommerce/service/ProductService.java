@@ -7,11 +7,13 @@ import com.build4all.catalog.domain.Currency;
 import com.build4all.catalog.domain.ItemAttribute;
 import com.build4all.catalog.domain.ItemAttributeDataType;
 import com.build4all.catalog.domain.ItemAttributeValue;
+import com.build4all.catalog.domain.ItemStatus;
 import com.build4all.catalog.domain.ItemType;
 import com.build4all.catalog.repository.CategoryRepository;
 import com.build4all.catalog.repository.CurrencyRepository;
 import com.build4all.catalog.repository.ItemAttributeRepository;
 import com.build4all.catalog.repository.ItemAttributeValueRepository;
+import com.build4all.catalog.repository.ItemStatusRepository;
 import com.build4all.catalog.repository.ItemTypeRepository;
 import com.build4all.features.ecommerce.domain.Product;
 import com.build4all.features.ecommerce.dto.AttributeValueDTO;
@@ -23,9 +25,9 @@ import com.build4all.order.repository.OrderItemRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
-
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+
 import java.io.IOException;
 import java.nio.file.*;
 import java.time.LocalDateTime;
@@ -39,6 +41,11 @@ import java.util.stream.Collectors;
 @Transactional
 public class ProductService {
 
+    private static final String STATUS_DRAFT = "DRAFT";
+    private static final String STATUS_UPCOMING = "UPCOMING";
+    private static final String STATUS_PUBLISHED = "PUBLISHED";
+    private static final String STATUS_ARCHIVED = "ARCHIVED";
+
     private final ProductRepository productRepository;
     private final ItemTypeRepository itemTypeRepository;
     private final CurrencyRepository currencyRepository;
@@ -47,6 +54,7 @@ public class ProductService {
     private final ItemAttributeValueRepository itemAttributeValueRepository;
     private final OrderItemRepository orderItemRepository;
     private final CategoryRepository categoryRepository;
+    private final ItemStatusRepository itemStatusRepository;
 
     public ProductService(ProductRepository productRepository,
                           ItemTypeRepository itemTypeRepository,
@@ -55,7 +63,8 @@ public class ProductService {
                           ItemAttributeRepository itemAttributeRepository,
                           ItemAttributeValueRepository itemAttributeValueRepository,
                           OrderItemRepository orderItemRepository,
-                          CategoryRepository categoryRepository) {
+                          CategoryRepository categoryRepository,
+                          ItemStatusRepository itemStatusRepository) {
         this.productRepository = productRepository;
         this.itemTypeRepository = itemTypeRepository;
         this.currencyRepository = currencyRepository;
@@ -64,6 +73,7 @@ public class ProductService {
         this.itemAttributeValueRepository = itemAttributeValueRepository;
         this.orderItemRepository = orderItemRepository;
         this.categoryRepository = categoryRepository;
+        this.itemStatusRepository = itemStatusRepository;
     }
 
     /* =========================================================
@@ -77,6 +87,43 @@ public class ProductService {
 
     public ProductResponse getTenant(Long id, Long ownerProjectId) {
         return toResponse(getTenantProductOrThrow(id, ownerProjectId));
+    }
+
+    /* =========================================================
+       STATUS HELPERS
+       ========================================================= */
+
+   
+    private ItemStatus resolveStatusOrDefault(String rawStatusCode) {
+        String normalized = normalizeStatusCode(rawStatusCode);
+        String finalCode = (normalized == null) ? STATUS_DRAFT : normalized;
+
+        return itemStatusRepository.findByCode(finalCode)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid statusCode: " + finalCode));
+    }
+
+    private String normalizeStatusCode(String raw) {
+        if (raw == null) return null;
+        String s = raw.trim();
+        if (s.isBlank()) return null;
+        return s.toUpperCase(Locale.ROOT);
+    }
+
+    private String getStatusCode(Product p) {
+        if (p == null || p.getStatus() == null || p.getStatus().getCode() == null) {
+            return null;
+        }
+        return p.getStatus().getCode().trim().toUpperCase(Locale.ROOT);
+    }
+
+    private boolean isPublicVisibleStatus(Product p) {
+        String code = getStatusCode(p);
+        return STATUS_PUBLISHED.equals(code) || STATUS_UPCOMING.equals(code);
+    }
+
+    private boolean isPurchasableStatus(Product p) {
+        String code = getStatusCode(p);
+        return STATUS_PUBLISHED.equals(code);
     }
 
     /* =========================================================
@@ -153,7 +200,7 @@ public class ProductService {
 
     private void assertSkuUniquePerTenant(Long ownerProjectId, String rawSku, Long currentProductIdOrNull) {
         String sku = normalizeSku(rawSku);
-        if (sku == null) return; // no sku => allowed
+        if (sku == null) return;
 
         boolean exists = (currentProductIdOrNull == null)
                 ? productRepository.existsByOwnerProject_IdAndSkuIgnoreCase(ownerProjectId, sku)
@@ -162,9 +209,6 @@ public class ProductService {
         if (exists) {
             throw new IllegalArgumentException("SKU already exists in this app");
         }
-    
-
-     
     }
 
     /* =========================================================
@@ -184,20 +228,21 @@ public class ProductService {
 
         Currency currency = resolveCurrencyOrDefault(request.getCurrencyId());
 
-        // ✅ SKU tenant-safe uniqueness
         String normalizedSku = normalizeSku(request.getSku());
         assertSkuUniquePerTenant(ownerProject.getId(), normalizedSku, null);
+
+        ItemStatus status = resolveStatusOrDefault(request.getStatusCode());
 
         Product p = new Product();
 
         p.setOwnerProject(ownerProject);
         p.setItemType(itemType);
         p.setCurrency(currency);
+        p.setStatus(status);
 
         p.setItemName(request.getName());
         p.setDescription(request.getDescription());
         p.setPrice(request.getPrice());
-        p.setStatus(request.getStatus() != null ? request.getStatus() : "Available");
         p.setImageUrl(request.getImageUrl());
         if (request.getStock() != null) p.setStock(request.getStock());
 
@@ -254,13 +299,16 @@ public class ProductService {
         if (request.getSku() != null) {
             String normalizedSku = normalizeSku(request.getSku());
             assertSkuUniquePerTenant(ownerProjectId, normalizedSku, id);
-            p.setSku(normalizedSku); // if blank => null (clears sku)
+            p.setSku(normalizedSku);
         }
-        
+
+        if (request.getStatusCode() != null && !request.getStatusCode().isBlank()) {
+            p.setStatus(resolveStatusOrDefault(request.getStatusCode()));
+        }
+
         if (request.getName() != null) p.setItemName(request.getName());
         if (request.getDescription() != null) p.setDescription(request.getDescription());
         if (request.getPrice() != null) p.setPrice(request.getPrice());
-        if (request.getStatus() != null) p.setStatus(request.getStatus());
         if (request.getStock() != null) p.setStock(request.getStock());
 
         if (request.getTaxable() != null) p.setTaxable(request.getTaxable());
@@ -282,7 +330,6 @@ public class ProductService {
         if (request.getSaleStart() != null) p.setSaleStart(parseDateTimeOrNull(request.getSaleStart()));
         if (request.getSaleEnd() != null) p.setSaleEnd(parseDateTimeOrNull(request.getSaleEnd()));
 
-        // ✅ image rules
         if (imageFile != null && !imageFile.isEmpty()) {
             deleteLocalImageIfManaged(p.getImageUrl());
             p.setImageUrl(saveProductImage(imageFile));
@@ -319,9 +366,6 @@ public class ProductService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * ✅ FIXED: New arrivals should not show Upcoming/Draft.
-     */
     public List<ProductResponse> listNewArrivals(Long ownerProjectId, Integer daysBack) {
         if (ownerProjectId == null) throw new IllegalArgumentException("ownerProjectId is required");
 
@@ -331,10 +375,7 @@ public class ProductService {
         return productRepository
                 .findByOwnerProject_IdAndCreatedAtAfterOrderByCreatedAtDesc(ownerProjectId, from)
                 .stream()
-                .filter(p -> p.getStatus() != null && (
-                	    p.getStatus().equalsIgnoreCase("Published")
-                	    || p.getStatus().equalsIgnoreCase("Available")
-                	))
+                .filter(this::isPurchasableStatus)
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
@@ -344,7 +385,6 @@ public class ProductService {
         if (ownerProjectId == null) throw new IllegalArgumentException("ownerProjectId is required");
         int max = (limit == null || limit <= 0) ? 10 : limit;
 
-        // ✅ now correct because repository query filters COMPLETED + Product + Published
         List<Object[]> rows = orderItemRepository.findBestSellingItemsByOwnerProject(ownerProjectId);
         if (rows.isEmpty()) return List.of();
 
@@ -427,11 +467,8 @@ public class ProductService {
     private boolean isRealActiveFlashSale(Product p) {
         if (p == null) return false;
 
-        String status = p.getStatus() == null ? "" : p.getStatus().trim();
-        boolean statusOk = status.equalsIgnoreCase("Published")
-                || status.equalsIgnoreCase("Available")
-                || status.equalsIgnoreCase("Active")
-                || status.equalsIgnoreCase("Upcoming"); // ✅ add this if you want
+        String statusCode = getStatusCode(p);
+        boolean statusOk = STATUS_PUBLISHED.equals(statusCode) || STATUS_UPCOMING.equals(statusCode);
         if (!statusOk) return false;
 
         if (p.getPrice() == null || p.getSalePrice() == null) return false;
@@ -446,6 +483,7 @@ public class ProductService {
 
         return true;
     }
+
     /* =========================================================
        DELETE (TENANT SAFE)
        ========================================================= */
@@ -453,16 +491,14 @@ public class ProductService {
     public void deleteTenant(Long id, Long ownerProjectId) {
         Product p = getTenantProductOrThrow(id, ownerProjectId);
 
-        // ✅ FIX: check by ITEM id, not OrderItem primary key
         if (orderItemRepository.existsByItem_Id(id)) {
             throw new IllegalStateException(
-                    "You can’t delete this product because it’s referenced by orders or present in carts. Archive/Deactivate it instead"
+                    "You can’t delete this product because it’s referenced by orders or present in carts. Archive it instead"
             );
         }
 
         final String imageUrl = p.getImageUrl();
 
-        // delete dependent attribute values first
         itemAttributeValueRepository.deleteAllByItem_Id(id);
 
         productRepository.delete(p);
@@ -568,8 +604,11 @@ public class ProductService {
         r.setDescription(p.getDescription());
         r.setPrice(p.getPrice());
         r.setStock(p.getStock());
-        r.setStatus(p.getStatus());
         r.setImageUrl(p.getImageUrl());
+
+        r.setStatusId(p.getStatus() != null ? p.getStatus().getId() : null);
+        r.setStatusCode(p.getStatus() != null ? p.getStatus().getCode() : null);
+        r.setStatusName(p.getStatus() != null ? p.getStatus().getName() : null);
 
         r.setSku(p.getSku());
         r.setProductType(p.getProductType());
@@ -608,12 +647,6 @@ public class ProductService {
         return r;
     }
 
-    /**
-     * ✅ FIX: supports ISO strings like:
-     * - 2026-02-20T10:00:00
-     * - 2026-02-20T10:00:00Z
-     * - 2026-02-20T10:00:00+02:00
-     */
     private LocalDateTime parseDateTimeOrNull(String value) {
         if (value == null || value.isBlank()) return null;
 
@@ -634,11 +667,11 @@ public class ProductService {
         if (s == null || s.isBlank()) return s;
         return s.substring(0, 1).toUpperCase() + s.substring(1);
     }
-    
+
     private String normalizeSku(String raw) {
         if (raw == null) return null;
         String s = raw.trim();
-        if (s.isBlank()) return null; // treat empty as no sku
-        return s.toUpperCase();       // optional but recommended
+        if (s.isBlank()) return null;
+        return s.toUpperCase();
     }
 }
