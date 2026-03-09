@@ -30,7 +30,12 @@ public class NotificationTypeSeeder {
                 Map.entry("FRIEND_REQUEST_REJECTED", "Friend Request Rejected"),
                 Map.entry("FRIEND_REMOVED", "Friend Removed"),
                 Map.entry("FRIEND_REQUEST_CANCELLED", "Friend Request Cancelled"),
-                Map.entry("FRIEND_BLOCKED", "Friend Blocked")
+                Map.entry("FRIEND_BLOCKED", "Friend Blocked"),
+
+                // Publish request notifications
+                Map.entry("OWNER_PUBLISH_REQUEST_SUBMITTED", "Owner Publish Request Submitted"),
+                Map.entry("SUPER_ADMIN_PUBLISH_REQUEST_APPROVED", "Super Admin Publish Request Approved"),
+                Map.entry("SUPER_ADMIN_PUBLISH_REQUEST_REJECTED", "Super Admin Publish Request Rejected")
             );
 
             for (Map.Entry<String, String> entry : types.entrySet()) {
