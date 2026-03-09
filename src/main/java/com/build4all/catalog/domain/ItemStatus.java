@@ -10,11 +10,10 @@ public class ItemStatus {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // code ثابت يستعمله النظام
     @Column(nullable = false, unique = true, length = 50)
     private String code;
 
-    // الاسم المعروض
+    
     @Column(nullable = false, length = 100)
     private String name;
 
