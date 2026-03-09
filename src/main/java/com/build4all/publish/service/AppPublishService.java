@@ -4,6 +4,7 @@ import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.admin.repository.AdminUsersRepository;
+import com.build4all.notifications.service.NotificationsService;
 import com.build4all.publish.domain.*;
 import com.build4all.publish.dto.AppPublishAdminMapper;
 import com.build4all.publish.dto.AppPublishRequestAdminDto;
@@ -27,6 +28,7 @@ public class AppPublishService {
     private final AdminUserProjectRepository aupRepo;
     private final AdminUsersRepository adminRepo;
     private final FileStorageService storage;
+    private final NotificationsService notificationsService;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AppPublishService(
@@ -34,13 +36,15 @@ public class AppPublishService {
             StorePublisherProfileRepository profileRepo,
             AdminUserProjectRepository aupRepo,
             AdminUsersRepository adminRepo,
-            FileStorageService storage
+            FileStorageService storage,
+            NotificationsService notificationsService
     ) {
         this.publishRepo = publishRepo;
         this.profileRepo = profileRepo;
         this.aupRepo = aupRepo;
         this.adminRepo = adminRepo;
         this.storage = storage;
+        this.notificationsService = notificationsService;
     }
     // =========================
     // OWNER: get or create DRAFT
@@ -136,6 +140,7 @@ public class AppPublishService {
     // =========================
     // OWNER: submit for review (strict validation)
     // =========================
+    
     @Transactional
     public AppPublishRequest submitForReview(Long requestId, Long ownerAdminId) {
         AppPublishRequest req = mustBeOwnerDraft(requestId, ownerAdminId);
@@ -164,9 +169,29 @@ public class AppPublishService {
 
         req.setStatus(PublishStatus.SUBMITTED);
         req.setRequestedAt(LocalDateTime.now());
-        return publishRepo.save(req);
-    }
 
+        AppPublishRequest saved = publishRepo.save(req);
+
+        // Notify all super admins
+        List<AdminUser> superAdmins = adminRepo.findByRole_NameIgnoreCase("SUPER_ADMIN");
+
+        String appName = saved.getAdminUserProject() != null && saved.getAdminUserProject().getAppName() != null
+                ? saved.getAdminUserProject().getAppName()
+                : saved.getApplicationName();
+
+        String message = "New publish request submitted for " + appName
+                + " (" + saved.getPlatform() + " / " + saved.getStore() + ").";
+
+        for (AdminUser superAdmin : superAdmins) {
+            notificationsService.notifyAdmin(
+                    superAdmin,
+                    message,
+                    "OWNER_PUBLISH_REQUEST_SUBMITTED"
+            );
+        }
+
+        return saved;
+    }
     // =========================
     // SUPER ADMIN: approve/reject
     // =========================
@@ -181,28 +206,47 @@ public class AppPublishService {
         AdminUser admin = adminRepo.findByAdminId(superAdminId)
                 .orElseThrow(() -> new RuntimeException("Admin not found"));
 
-        // ✅ 1) approve request
+        // Approve request
         req.setStatus(PublishStatus.APPROVED);
         req.setReviewedBy(admin);
         req.setReviewedAt(LocalDateTime.now());
         req.setAdminNotes(notes);
 
-        // ✅ 2) flip app status to PRODUCTION
+        // Flip app status to PRODUCTION
         AdminUserProject aup = req.getAdminUserProject();
         if (aup == null || aup.getId() == null) {
             throw new RuntimeException("AdminUserProject missing on publish request");
         }
 
-        // optional: only flip if currently TEST
         String current = (aup.getStatus() == null) ? "" : aup.getStatus().trim().toUpperCase();
         if (!"PRODUCTION".equals(current)) {
             aup.setStatus("PRODUCTION");
             aupRepo.save(aup);
         }
 
-        return publishRepo.save(req);
-    }
+        AppPublishRequest saved = publishRepo.save(req);
 
+        // Notify owner
+        AdminUser owner = saved.getRequestedBy();
+        String appName = saved.getAdminUserProject() != null && saved.getAdminUserProject().getAppName() != null
+                ? saved.getAdminUserProject().getAppName()
+                : saved.getApplicationName();
+
+        String message = "Your publish request for " + appName
+                + " (" + saved.getPlatform() + " / " + saved.getStore() + ") has been approved.";
+
+        if (notes != null && !notes.isBlank()) {
+            message += " Notes: " + notes;
+        }
+
+        notificationsService.notifyAdmin(
+                owner,
+                message,
+                "SUPER_ADMIN_PUBLISH_REQUEST_APPROVED"
+        );
+
+        return saved;
+    }
 
     @Transactional
     public AppPublishRequest uploadAssets(
@@ -274,9 +318,29 @@ public class AppPublishService {
         req.setReviewedAt(LocalDateTime.now());
         req.setAdminNotes(notes);
 
-        return publishRepo.save(req);
-    }
+        AppPublishRequest saved = publishRepo.save(req);
 
+        // Notify owner
+        AdminUser owner = saved.getRequestedBy();
+        String appName = saved.getAdminUserProject() != null && saved.getAdminUserProject().getAppName() != null
+                ? saved.getAdminUserProject().getAppName()
+                : saved.getApplicationName();
+
+        String message = "Your publish request for " + appName
+                + " (" + saved.getPlatform() + " / " + saved.getStore() + ") has been rejected.";
+
+        if (notes != null && !notes.isBlank()) {
+            message += " Notes: " + notes;
+        }
+
+        notificationsService.notifyAdmin(
+                owner,
+                message,
+                "SUPER_ADMIN_PUBLISH_REQUEST_REJECTED"
+        );
+
+        return saved;
+    }
     // =========================
     // SUPER ADMIN: list by status
     // =========================

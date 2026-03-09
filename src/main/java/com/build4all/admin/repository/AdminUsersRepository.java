@@ -75,6 +75,8 @@ public interface AdminUsersRepository extends JpaRepository<AdminUser, Long> {
     boolean existsByUsernameIgnoreCaseAndAdminIdNot(String username, Long adminId);
   
     
+    List<AdminUser> findByRole_NameIgnoreCase(String roleName);
+    
     
 
 }
