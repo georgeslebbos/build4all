@@ -4,3 +4,6 @@ target/
 .env
 uploads/apk/ 
 *.apk 
+src/main/resources/firebase/build4all-manager-firebase-adminsdk-fbsvc-9a2da6c820.json
+
+src/main/resources/firebase/*.json

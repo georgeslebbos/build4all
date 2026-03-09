@@ -561,4 +561,25 @@ public class AdminUserService {
             throw new RuntimeException("newPassword must be at least " + PASSWORD_MIN_LEN + " characters");
         }
     }
+    
+    @Transactional(readOnly = true)
+    public AdminUserProfileDTO getProfileDTOById(Long adminId) {
+        AdminUser a = adminUserRepository.findById(adminId)
+                .orElseThrow(() -> new NoSuchElementException("Admin user not found: " + adminId));
+
+        return new AdminUserProfileDTO(
+                a.getAdminId(),
+                a.getUsername(),
+                a.getFirstName(),
+                a.getLastName(),
+                a.getEmail(),
+                a.getPhoneNumber(),
+                a.getRole() != null ? a.getRole().getName() : null,
+                a.getBusiness() != null ? a.getBusiness().getId() : null,
+                a.getNotifyItemUpdates(),
+                a.getNotifyUserFeedback(),
+                a.getCreatedAt(),
+                a.getUpdatedAt()
+        );
+    }
 }

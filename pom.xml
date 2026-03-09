@@ -34,11 +34,11 @@
 	<dependencies>
 	   <!-- Spring Boot Dependencies -->
 	   
-        <dependency>
-            <groupId>org.springdoc</groupId>
-            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-            <version>2.0.4</version>
-        </dependency>
+      <dependency>
+    <groupId>org.springdoc</groupId>
+    <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+    <version>2.8.16</version>
+</dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
@@ -107,8 +107,8 @@
 
 
 <dependency>
-  <groupId>org.springframework</groupId>
-  <artifactId>spring-messaging</artifactId>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-webflux</artifactId>
 </dependency>
 		<dependency>
   <groupId>org.springframework.boot</groupId>
@@ -186,11 +186,7 @@
             <version>2.6.0</version> <!-- Update to a stable version -->
         </dependency>
         
-         <dependency>
-        <groupId>com.fasterxml.jackson.core</groupId>
-        <artifactId>jackson-databind</artifactId>
-        <version>2.15.0</version> <!-- Use the latest stable version -->
-    </dependency>
+        
    
         <!-- Google HTTP Client Library -->
         <dependency>
@@ -206,12 +202,7 @@
             <version>1.43.3</version>
         </dependency>
 
-        <!-- Jackson for JSON handling (already used in your code) -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <version>2.15.0</version> <!-- Make sure you have a compatible version -->
-        </dependency>
+       
 
         <!-- Spring Security Test (Optional, only needed if you're running tests) -->
         <dependency>
@@ -229,12 +220,7 @@
 
 
 
-        <!-- Spring WebFlux (Optional, depending on your use case) -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webflux</artifactId>
-        </dependency>
-
+      
         <!-- Reactor Test (for testing reactive applications, optional) -->
         <dependency>
             <groupId>io.projectreactor</groupId>
