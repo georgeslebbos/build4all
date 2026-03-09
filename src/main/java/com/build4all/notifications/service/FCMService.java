@@ -1,38 +1,49 @@
 package com.build4all.notifications.service;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.messaging.AndroidConfig;
+import com.google.firebase.messaging.AndroidNotification;
+import com.google.firebase.messaging.FirebaseMessaging;
+import com.google.firebase.messaging.Message;
+import com.google.firebase.messaging.Notification;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-
-import java.util.HashMap;
-import java.util.Map;
+import org.springframework.util.StringUtils;
 
 @Service
 public class FCMService {
 
-    private final String FCM_API_URL = "https://fcm.googleapis.com/fcm/send";
+    private final FirebaseMessaging firebaseMessaging;
 
-    @Value("${fcm.server.key}")
-    private String serverKey;
+    public FCMService(FirebaseApp firebaseApp) {
+        this.firebaseMessaging = FirebaseMessaging.getInstance(firebaseApp);
+    }
 
-    public void sendNotification(String targetToken, String title, String body) {
-        RestTemplate restTemplate = new RestTemplate();
+    public String sendNotification(String targetToken, String title, String body) throws Exception {
+        if (!StringUtils.hasText(targetToken)) {
+            throw new IllegalArgumentException("FCM target token is required");
+        }
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("Authorization", "key=" + serverKey);
+        String safeTitle = title == null ? "" : title;
+        String safeBody = body == null ? "" : body;
 
-        Map<String, Object> notification = new HashMap<>();
-        notification.put("title", title);
-        notification.put("body", body);
+        Message message = Message.builder()
+                .setToken(targetToken)
+                .setNotification(Notification.builder()
+                        .setTitle(safeTitle)
+                        .setBody(safeBody)
+                        .build())
+                .putData("title", safeTitle)
+                .putData("body", safeBody)
+                .setAndroidConfig(AndroidConfig.builder()
+                        .setPriority(AndroidConfig.Priority.HIGH)
+                        .setNotification(AndroidNotification.builder()
+                                .setSound("default")
+                                .build())
+                        .build())
+                .build();
 
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("to", targetToken);
-        payload.put("notification", notification);
-
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(payload, headers);
-
-        restTemplate.postForEntity(FCM_API_URL, request, String.class);
+        String response = firebaseMessaging.send(message);
+        System.out.println("Firebase message id => " + response);
+        return response;
     }
 }

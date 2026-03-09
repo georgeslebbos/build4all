@@ -6,12 +6,7 @@ import com.build4all.admin.domain.AdminUserProject;
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.authentication.dto.AdminLoginRequest;
 import com.build4all.admin.dto.AdminRegisterRequest;
-import javax.naming.Context;
-import javax.naming.directory.Attribute;
-import javax.naming.directory.Attributes;
-import javax.naming.directory.DirContext;
-import javax.naming.directory.InitialDirContext;
-import java.util.Hashtable;
+
 import java.util.Locale;
 import java.util.regex.Pattern;
 
@@ -1651,34 +1646,44 @@ public class AuthController {
     );
 
     private void validateEmailBeforeSendingOrThrow(String email) {
-        if (email == null || email.isBlank()) return;
+        if (email == null || email.isBlank()) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "EMAIL_REQUIRED",
+                    "Email is required",
+                    Map.of("field", "email")
+            );
+        }
 
         String e = email.trim().toLowerCase(Locale.ROOT);
 
         // 1) strict format
         if (!EMAIL_PATTERN.matcher(e).matches()) {
-            throw new IllegalArgumentException("Invalid email format");
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "INVALID_EMAIL_FORMAT",
+                    "Invalid email format",
+                    Map.of("field", "email")
+            );
         }
 
         String domain = e.substring(e.lastIndexOf('@') + 1);
 
-        // 2) typo-domain block
+        // 2) typo-domain block only
         if (EMAIL_DOMAIN_TYPOS.containsKey(domain)) {
-            throw new IllegalArgumentException(
-                    "Invalid email domain. Did you mean " + EMAIL_DOMAIN_TYPOS.get(domain) + " ?"
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "INVALID_EMAIL_DOMAIN",
+                    "Invalid email domain. Did you mean " + EMAIL_DOMAIN_TYPOS.get(domain) + "?",
+                    Map.of(
+                            "field", "email",
+                            "suggestedDomain", EMAIL_DOMAIN_TYPOS.get(domain)
+                    )
             );
         }
 
-        // 3) DNS check (must have MX OR A/AAAA)
-     
-        Boolean dnsOk = hasMxOrARecordSafe(domain);
-        if (dnsOk != null && !dnsOk) {
-            throw new IllegalArgumentException("Email domain does not exist: " + domain);
-        }
-
-
+        // ✅ NO DNS BLOCKING HERE
     }
-    
     
     @PostMapping("/user/resend-code")
     public ResponseEntity<?> resendUserCode(@RequestBody Map<String, String> req) {
@@ -1734,26 +1739,7 @@ public class AuthController {
         }
     }
 
-    private Boolean hasMxOrARecordSafe(String domain) {
-        try {
-            Hashtable<String, String> env = new Hashtable<>();
-            env.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.dns.DnsContextFactory");
-
-            DirContext ctx = new InitialDirContext(env);
-            Attributes attrs = ctx.getAttributes(domain, new String[]{"MX", "A", "AAAA"});
-
-            Attribute mx = attrs.get("MX");
-            Attribute a = attrs.get("A");
-            Attribute aaaa = attrs.get("AAAA");
-
-            return (mx != null && mx.size() > 0)
-                    || (a != null && a.size() > 0)
-                    || (aaaa != null && aaaa.size() > 0);
-
-        } catch (Exception ex) {
-            return null; // ✅ don't block if DNS lookup isn't supported
-        }
-    }
+   
 
     private ResponseEntity<?> authError(HttpStatus status, String code, String message) {
         return ResponseEntity.status(status).body(Map.of(

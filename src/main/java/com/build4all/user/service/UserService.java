@@ -460,15 +460,25 @@ public class UserService {
         if (emailProvided) {
             validateEmailOrThrow(email);
 
-            if (userRepository.existsByEmailAndOwnerProject_Id(email, ownerProjectLinkId)) {
-                throw new IllegalArgumentException("Email already in use in this app");
+            if (userRepository.findByEmailIgnoreCaseAndOwnerProject_Id(email, ownerProjectLinkId).isPresent()) {
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        "EMAIL_ALREADY_USED",
+                        "Email already in use in this app",
+                        Map.of("field", "email")
+                );
             }
         }
 
         if (phoneProvided) {
-            if (userRepository.existsByPhoneNumberAndOwnerProject_Id(phone, ownerProjectLinkId)) {
-                throw new IllegalArgumentException("Phone already in use in this app");
-            }
+        	if (userRepository.existsByPhoneNumberAndOwnerProject_Id(phone, ownerProjectLinkId)) {
+        	    throw new ApiException(
+        	            HttpStatus.CONFLICT,
+        	            "PHONE_ALREADY_USED",
+        	            "Phone already in use in this app",
+        	            Map.of("field", "phoneNumber")
+        	    );
+        	}
         }
 
         String statusStr = Optional.ofNullable(userData.get("status")).orElse("PENDING");

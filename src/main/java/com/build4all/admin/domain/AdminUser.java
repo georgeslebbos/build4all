@@ -68,6 +68,8 @@ public class AdminUser implements UserDetails {
     @Column(name = "phone_number",nullable = true)
     private String phoneNumber;
 
+    @Column(name = "fcm_token", length = 1000)
+    private String fcmToken;
 
     /**
      * Role of the admin user (e.g., SUPER_ADMIN, OWNER, MANAGER).
@@ -136,6 +138,14 @@ public class AdminUser implements UserDetails {
 
     public Long getAdminId() { return adminId; }
     public void setAdminId(Long adminId) { this.adminId = adminId; }
+    
+    public String getFcmToken() {
+        return fcmToken;
+    }
+
+    public void setFcmToken(String fcmToken) {
+        this.fcmToken = fcmToken;
+    }
 
     // You have only a setter here; the "getter" used by Spring Security is getUsername() below.
     public void setUsername(String username) { this.username = username; }
