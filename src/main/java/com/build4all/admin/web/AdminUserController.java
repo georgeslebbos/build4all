@@ -345,6 +345,61 @@ public class AdminUserController {
     }
     
     
+    @PostMapping("/me/request-phone-change")
+    public ResponseEntity<?> requestPhoneChange(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader,
+            @RequestBody Map<String, String> body
+    ) {
+        try {
+            String token = requireAdminOrOwner(authHeader);
+            Long myId = requireBackofficeId(token);
+
+            String newPhone = body.get("newPhone");
+            adminUserService.requestAdminPhoneChange(myId, newPhone);
+
+            return ok("Verification code sent to new phone number");
+        } catch (RuntimeException re) {
+            return err(HttpStatus.BAD_REQUEST, re.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    }
+
+    @PostMapping("/me/verify-phone-change")
+    public ResponseEntity<?> verifyPhoneChange(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader,
+            @RequestBody Map<String, String> body
+    ) {
+        try {
+            String token = requireAdminOrOwner(authHeader);
+            Long myId = requireBackofficeId(token);
+
+            adminUserService.verifyAdminPhoneChange(myId, body.get("code"));
+            return ok("Phone number updated successfully");
+        } catch (RuntimeException re) {
+            return err(HttpStatus.BAD_REQUEST, re.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    }
+
+    @PostMapping("/me/resend-phone-change")
+    public ResponseEntity<?> resendPhoneChange(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authHeader
+    ) {
+        try {
+            String token = requireAdminOrOwner(authHeader);
+            Long myId = requireBackofficeId(token);
+
+            adminUserService.resendAdminPhoneChangeCode(myId);
+            return ok("Verification code resent");
+        } catch (RuntimeException re) {
+            return err(HttpStatus.BAD_REQUEST, re.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    }
+    
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException ex) {
         String msg = ex.getBindingResult().getAllErrors().isEmpty()

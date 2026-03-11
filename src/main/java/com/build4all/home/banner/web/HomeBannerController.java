@@ -35,15 +35,11 @@ public class HomeBannerController {
         this.ownerSubscriptionGuard = ownerSubscriptionGuard;
     }
 
-    /* ------------------------ helpers ------------------------ */
-
     private String strip(String auth) {
         return auth == null ? "" : auth.replaceFirst("(?i)^Bearer\\s+", "").trim();
     }
 
     private Long requireTenantFromToken(String authHeader) {
-        // JwtUtil already normalizes bearer in requireOwnerProjectId
-        // and validates token.
         return jwtUtil.requireOwnerProjectId(authHeader);
     }
 
@@ -52,10 +48,8 @@ public class HomeBannerController {
         if (!jwtUtil.validateToken(token)) {
             throw new RuntimeException("Invalid token");
         }
-        return jwtUtil.extractId(token); // adminId for OWNER tokens (per your JwtUtil)
+        return jwtUtil.extractId(token);
     }
-
-    /* ------------------------ USER / OWNER: list active banners (slider) ------------------------ */
 
     @GetMapping
     @PreAuthorize("hasAnyRole('USER','OWNER')")
@@ -69,14 +63,11 @@ public class HomeBannerController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
         } catch (RuntimeException e) {
-            // token / tenant missing / invalid
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
         }
     }
-
-    /* ------------------------ OWNER: list all banners of his app (admin view) ------------------------ */
 
     @GetMapping("/app")
     @PreAuthorize("hasRole('OWNER')")
@@ -100,8 +91,6 @@ public class HomeBannerController {
         }
     }
 
-    /* ------------------------ OWNER: create ------------------------ */
-
     @PostMapping(value = "/with-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasRole('OWNER')")
     @Operation(summary = "Create home banner with image (tenant from token, flat form-data)")
@@ -118,21 +107,17 @@ public class HomeBannerController {
             @RequestParam(required = false) String startAt,
             @RequestParam(required = false) String endAt,
 
-            @RequestParam(value = "image") MultipartFile image
+            @RequestParam(value = "image", required = false) MultipartFile image
     ) {
         try {
             Long ownerId = requireOwnerIdFromToken(auth);
             Long tokenOwnerProjectId = requireTenantFromToken(auth);
 
-            // ✅ subscription guard per tenant
             ResponseEntity<?> blocked = ownerSubscriptionGuard.blockIfWriteNotAllowed(tokenOwnerProjectId);
             if (blocked != null) return blocked;
 
             HomeBannerRequest req = new HomeBannerRequest();
-
-            // ✅ trust token tenant only
             req.setOwnerProjectId(tokenOwnerProjectId);
-
             req.setTitle(title);
             req.setSubtitle(subtitle);
             req.setTargetType(targetType);
@@ -156,8 +141,6 @@ public class HomeBannerController {
         }
     }
 
-    /* ------------------------ OWNER: update ------------------------ */
-
     @PutMapping(value = "/{id}/with-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasRole('OWNER')")
     @Operation(summary = "Update home banner with optional image (tenant from token, flat form-data)")
@@ -180,11 +163,8 @@ public class HomeBannerController {
     ) {
         try {
             Long ownerId = requireOwnerIdFromToken(auth);
-
-            // ✅ tenant extracted from token (no request param)
             Long tokenOwnerProjectId = requireTenantFromToken(auth);
 
-            // ✅ subscription guard per tenant
             ResponseEntity<?> blocked = ownerSubscriptionGuard.blockIfWriteNotAllowed(tokenOwnerProjectId);
             if (blocked != null) return blocked;
 
@@ -212,8 +192,6 @@ public class HomeBannerController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
         }
     }
-
-    /* ------------------------ OWNER: delete ------------------------ */
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('OWNER')")

@@ -13,6 +13,7 @@ import java.util.regex.Pattern;
 
 import com.build4all.admin.service.AdminUserService;
 import com.build4all.authentication.service.GoogleAuthService;
+import com.build4all.authentication.service.LoginAttemptService;
 import com.build4all.authentication.service.OwnerOtpService;
 
 import com.build4all.business.domain.BusinessStatus;
@@ -89,7 +90,7 @@ public class AuthController {
     @Autowired private UsersRepository userRepository;
     @Autowired private AuthTokenRevocationService tokenRevocationService;
     @Autowired private AuthRefreshTokenService refreshTokenService;
-
+    @Autowired private LoginAttemptService loginAttemptService;
     @Autowired private RoleRepository roleRepository;
 
     @Autowired private JwtUtil jwtUtil;
@@ -113,6 +114,16 @@ public class AuthController {
     @Autowired private LicensingService licensingService;
 
 
+    
+    private ResponseEntity<?> lockedLoginResponse(LoginAttemptService.LockStatus lock) {
+        return ResponseEntity.status(HttpStatus.LOCKED).body(Map.of(
+                "error", "Too many failed login attempts. Try again in " + lock.retryAfterSeconds() + " seconds.",
+                "code", "LOGIN_LOCKED",
+                "failedAttempts", lock.failedAttempts(),
+                "retryAfterSeconds", lock.retryAfterSeconds(),
+                "lockedUntil", lock.lockedUntil() != null ? lock.lockedUntil().toString() : ""
+        ));
+    }
     
     public static class RefreshRequest { public String refreshToken; }
     public static class LogoutRequest { public String refreshToken; }
@@ -237,8 +248,16 @@ public class AuthController {
                     accessToken = jwtUtil.generateToken(b);
                 }
                 case "ADMIN" -> {
-                    AdminUser a = adminUserService.findById(id).orElseThrow(() -> new RuntimeException("Admin not found"));
-                    accessToken = jwtUtil.generateToken(a, ownerProjectId);
+                    AdminUser a = adminUserService.findById(id)
+                            .orElseThrow(() -> new RuntimeException("Admin not found"));
+
+                    String roleName = (a.getRole() != null) ? a.getRole().getName() : null;
+
+                    if ("OWNER".equalsIgnoreCase(roleName) && ownerProjectId == null) {
+                        accessToken = jwtUtil.generateOwnerBootstrapToken(a);
+                    } else {
+                        accessToken = jwtUtil.generateToken(a, ownerProjectId);
+                    }
                 }
                 default -> {
                     return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid refresh subject"));
@@ -373,96 +392,125 @@ public class AuthController {
         Long ownerProjectLinkId = toLongOrNull(body.get("ownerProjectLinkId"));
 
         if (email == null || password == null || ownerProjectLinkId == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "email, password and ownerProjectLinkId are required"));
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "email, password and ownerProjectLinkId are required"));
         }
 
-        Users existingUser = userService.findByEmail(email, ownerProjectLinkId);
-        if (existingUser == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "User not found"));
-        }
+        try {
+        	email = email.trim().toLowerCase(Locale.ROOT);
 
-        if (!passwordEncoder.matches(password, existingUser.getPasswordHash())) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Incorrect password"));
-        }
+        	// ✅ validate format before DB lookup
+        	validateEmailBeforeSendingOrThrow(email);
 
-        String status = existingUser.getStatus().getName();
-        if ("DELETED".equalsIgnoreCase(status)) {
-        	if ("DELETED".equalsIgnoreCase(status)) {
-        	    String tempToken = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
-
-        	    Map<String, Object> deletedUserData = new HashMap<>();
-        	    deletedUserData.put("id", existingUser.getId());
-        	    deletedUserData.put("username", existingUser.getUsername());
-        	    deletedUserData.put("firstName", existingUser.getFirstName());
-        	    deletedUserData.put("lastName", existingUser.getLastName());
-        	    deletedUserData.put("email", existingUser.getEmail());
-        	    deletedUserData.put("profilePictureUrl", existingUser.getProfilePictureUrl());
-        	    deletedUserData.put("ownerProjectLinkId", ownerProjectLinkId);
-
-        	    return ResponseEntity.ok(Map.of(
-        	            "wasDeleted", true,
-        	            "canRestoreDeleted", true, // always true now
-        	            "message", "This account was deleted. Confirm reactivation.",
-        	            "token", tempToken,
-        	            "user", deletedUserData,
-        	            "userType", "user",
-        	            "ownerProjectLinkId", ownerProjectLinkId
-        	    ));
+        	// ✅ IMPORTANT: block must be checked BEFORE lookup/password check
+        	var preLock = loginAttemptService.checkBlocked(ownerProjectLinkId, "USER_EMAIL", email);
+        	if (preLock.blocked()) {
+        	    return lockedLoginResponse(preLock);
         	}
 
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "This account has been deleted and the restore period has expired."));
-        }
-        if ("INACTIVE".equalsIgnoreCase(status)) {
-            // ✅ IMPORTANT: with strict JwtUtil, USER token MUST include tenant
-            String tempToken = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
+        	Users existingUser = userService.findByEmail(email, ownerProjectLinkId);
+        	if (existingUser == null) {
+        	    var lock = loginAttemptService.recordFailure(ownerProjectLinkId, "USER_EMAIL", email);
 
-            Map<String, Object> inactiveUserData = new HashMap<>();
-            inactiveUserData.put("id", existingUser.getId());
-            inactiveUserData.put("username", existingUser.getUsername());
-            inactiveUserData.put("firstName", existingUser.getFirstName());
-            inactiveUserData.put("lastName", existingUser.getLastName());
-            inactiveUserData.put("email", existingUser.getEmail());
-            inactiveUserData.put("profilePictureUrl", existingUser.getProfilePictureUrl());
-            inactiveUserData.put("ownerProjectLinkId", ownerProjectLinkId);
+        	    if (lock.blocked()) {
+        	        return lockedLoginResponse(lock);
+        	    }
+
+        	    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+        	            .body(Map.of("error", "Invalid email or password"));
+        	}
+
+        	if (!passwordEncoder.matches(password, existingUser.getPasswordHash())) {
+        	    var lock = loginAttemptService.recordFailure(ownerProjectLinkId, "USER_EMAIL", email);
+
+        	    if (lock.blocked()) {
+        	        return lockedLoginResponse(lock);
+        	    }
+
+        	    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+        	            .body(Map.of("error", "Invalid email or password"));
+        	}
+
+            // ✅ success => clear failures
+            loginAttemptService.recordSuccess(ownerProjectLinkId, "USER_EMAIL", email);
+
+            String status = existingUser.getStatus().getName();
+            if ("DELETED".equalsIgnoreCase(status)) {
+                String tempToken = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
+
+                Map<String, Object> deletedUserData = new HashMap<>();
+                deletedUserData.put("id", existingUser.getId());
+                deletedUserData.put("username", existingUser.getUsername());
+                deletedUserData.put("firstName", existingUser.getFirstName());
+                deletedUserData.put("lastName", existingUser.getLastName());
+                deletedUserData.put("email", existingUser.getEmail());
+                deletedUserData.put("profilePictureUrl", existingUser.getProfilePictureUrl());
+                deletedUserData.put("ownerProjectLinkId", ownerProjectLinkId);
+
+                return ResponseEntity.ok(Map.of(
+                        "wasDeleted", true,
+                        "canRestoreDeleted", true,
+                        "message", "This account was deleted. Confirm reactivation.",
+                        "token", tempToken,
+                        "user", deletedUserData,
+                        "userType", "user",
+                        "ownerProjectLinkId", ownerProjectLinkId
+                ));
+            }
+
+            if ("INACTIVE".equalsIgnoreCase(status)) {
+                String tempToken = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
+
+                Map<String, Object> inactiveUserData = new HashMap<>();
+                inactiveUserData.put("id", existingUser.getId());
+                inactiveUserData.put("username", existingUser.getUsername());
+                inactiveUserData.put("firstName", existingUser.getFirstName());
+                inactiveUserData.put("lastName", existingUser.getLastName());
+                inactiveUserData.put("email", existingUser.getEmail());
+                inactiveUserData.put("profilePictureUrl", existingUser.getProfilePictureUrl());
+                inactiveUserData.put("ownerProjectLinkId", ownerProjectLinkId);
+
+                return ResponseEntity.ok(Map.of(
+                        "wasInactive", true,
+                        "message", "Your account is inactive. Confirm reactivation.",
+                        "token", tempToken,
+                        "user", inactiveUserData,
+                        "userType", "user",
+                        "ownerProjectLinkId", ownerProjectLinkId
+                ));
+            }
+
+            existingUser.setLastLogin(LocalDateTime.now());
+            userService.save(existingUser);
+
+            String token = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
+            String refreshToken = refreshTokenService.issue("USER", existingUser.getId(), ownerProjectLinkId);
+
+            Map<String, Object> userData = new HashMap<>();
+            userData.put("id", existingUser.getId());
+            userData.put("username", existingUser.getUsername());
+            userData.put("firstName", existingUser.getFirstName());
+            userData.put("lastName", existingUser.getLastName());
+            userData.put("email", existingUser.getEmail());
+            userData.put("profilePictureUrl", existingUser.getProfilePictureUrl());
+            userData.put("ownerProjectLinkId", ownerProjectLinkId);
 
             return ResponseEntity.ok(Map.of(
-                    "wasInactive", true,
-                    "message", "Your account is inactive. Confirm reactivation.",
-                    "token", tempToken,
-                    "user", inactiveUserData,
-                    "userType", "user",
-                    "ownerProjectLinkId", ownerProjectLinkId
+                    "message", "User login successful",
+                    "token", token,
+                    "refreshToken", refreshToken,
+                    "user", userData,
+                    "wasInactive", false
             ));
+        } catch (ApiException e) {
+            return ResponseEntity.status(e.getStatus())
+                    .body(Map.of(
+                            "error", e.getMessage(),
+                            "code", e.getCode()
+                    ));
         }
-
-        existingUser.setLastLogin(LocalDateTime.now());
-        userService.save(existingUser);
-
-        // ✅ IMPORTANT: with strict JwtUtil, USER token MUST include tenant
-        String token = jwtUtil.generateToken(existingUser, ownerProjectLinkId);
-        String refreshToken = refreshTokenService.issue("USER", existingUser.getId(), ownerProjectLinkId);
-
-     
-
-        Map<String, Object> userData = new HashMap<>();
-        userData.put("id", existingUser.getId());
-        userData.put("username", existingUser.getUsername());
-        userData.put("firstName", existingUser.getFirstName());
-        userData.put("lastName", existingUser.getLastName());
-        userData.put("email", existingUser.getEmail());
-        userData.put("profilePictureUrl", existingUser.getProfilePictureUrl());
-        userData.put("ownerProjectLinkId", ownerProjectLinkId);
-
-        return ResponseEntity.ok(Map.of(
-                "message", "User login successful",
-                "token", token,
-                "refreshToken", refreshToken,
-                "user", userData,
-                "wasInactive", false
-        ));
     }
-
+    
     @PostMapping("/user/login-phone")
     public ResponseEntity<?> userLoginWithPhone(@RequestBody Map<String, String> body) {
         String phone = body.get("phoneNumber");
@@ -473,17 +521,38 @@ public class AuthController {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "phoneNumber, password and ownerProjectLinkId are required"));
         }
+        phone = phone.trim();
 
-        Users existingUser = userService.findByPhoneNumber(phone, ownerProjectLinkId);
-        if (existingUser == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "User not found with this phone number"));
-        }
+     // ✅ IMPORTANT: check active lock BEFORE lookup/password check
+     var preLock = loginAttemptService.checkBlocked(ownerProjectLinkId, "USER_PHONE", phone);
+     if (preLock.blocked()) {
+         return lockedLoginResponse(preLock);
+     }
 
-        if (!passwordEncoder.matches(rawPassword, existingUser.getPasswordHash())) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Incorrect password"));
-        }
+     Users existingUser = userService.findByPhoneNumber(phone, ownerProjectLinkId);
+     if (existingUser == null) {
+    	    var lock = loginAttemptService.recordFailure(ownerProjectLinkId, "USER_PHONE", phone);
+
+    	    if (lock.blocked()) {
+    	        return lockedLoginResponse(lock);
+    	    }
+
+    	    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+    	            .body(Map.of("error", "Invalid phone number or password"));
+    	}
+
+    	if (!passwordEncoder.matches(rawPassword, existingUser.getPasswordHash())) {
+    	    var lock = loginAttemptService.recordFailure(ownerProjectLinkId, "USER_PHONE", phone);
+
+    	    if (lock.blocked()) {
+    	        return lockedLoginResponse(lock);
+    	    }
+
+    	    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+    	            .body(Map.of("error", "Invalid phone number or password"));
+    	}
+        // ✅ success => clear failures
+        loginAttemptService.recordSuccess(ownerProjectLinkId, "USER_PHONE", phone);
 
         String status = existingUser.getStatus() != null ? existingUser.getStatus().getName() : "";
 
@@ -1077,6 +1146,7 @@ public class AuthController {
     }
 
     /* ---------- UNIFIED ADMIN LOGIN (SUPER_ADMIN / OWNER / MANAGER) ---------- */
+  
     @Operation(summary = "Unified Admin Login (SUPER_ADMIN / OWNER)")
     @PostMapping("/admin/login/front")
     public ResponseEntity<?> adminLoginFront(@RequestBody AdminLoginRequest request) {
@@ -1087,20 +1157,43 @@ public class AuthController {
                     .body(Map.of("error", "usernameOrEmail and password are required"));
         }
 
+        String identifier = request.getUsernameOrEmail().trim().toLowerCase(Locale.ROOT);
+
+        // ✅ check active lock BEFORE lookup/password check
+        var preLock = loginAttemptService.checkBlocked(null, "ADMIN_FRONT_LOGIN", identifier);
+        if (preLock.blocked()) {
+            return lockedLoginResponse(preLock);
+        }
+
         var opt = adminUserService.findByUsernameOrEmail(request.getUsernameOrEmail().trim());
         if (opt.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid credentials"));
+            var lock = loginAttemptService.recordFailure(null, "ADMIN_FRONT_LOGIN", identifier);
+
+            if (lock.blocked()) {
+                return lockedLoginResponse(lock);
+            }
+
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Invalid credentials"));
         }
 
         AdminUser admin = opt.get();
 
         if (!passwordEncoder.matches(request.getPassword(), admin.getPasswordHash())) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid credentials"));
+            var lock = loginAttemptService.recordFailure(null, "ADMIN_FRONT_LOGIN", identifier);
+
+            if (lock.blocked()) {
+                return lockedLoginResponse(lock);
+            }
+
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Invalid credentials"));
         }
 
         String role = (admin.getRole() != null) ? admin.getRole().getName() : null;
         if (role == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Access denied for this role"));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Access denied for this role"));
         }
 
         boolean isSuperAdmin = "SUPER_ADMIN".equalsIgnoreCase(role);
@@ -1138,6 +1231,9 @@ public class AuthController {
             }
         }
 
+        // ✅ success => clear failures
+        loginAttemptService.recordSuccess(null, "ADMIN_FRONT_LOGIN", identifier);
+
         // ✅ SUPER_ADMIN is global -> ownerProjectId stays null
         String token = jwtUtil.generateToken(admin, ownerProjectId);
         String refreshToken = refreshTokenService.issue("ADMIN", admin.getAdminId(), ownerProjectId);
@@ -1159,7 +1255,7 @@ public class AuthController {
                 "admin", adminData
         ));
     }
-
+    
     @Operation(summary = "Unified Admin Login (SUPER_ADMIN / OWNER / MANAGER)")
     @PostMapping("/admin/login")
     public ResponseEntity<?> adminLogin(@RequestBody AdminLoginRequest request) {
@@ -1169,17 +1265,37 @@ public class AuthController {
                     "Email/Username and password are required");
         }
 
-        var opt = adminUserService.findByUsernameOrEmail(request.getUsernameOrEmail().trim());
-        if (opt.isEmpty()) {
-            return authError(HttpStatus.UNAUTHORIZED, "ACCOUNT_NOT_FOUND",
-                    "No account found for this email/username");
+        String identifier = request.getUsernameOrEmail().trim().toLowerCase(Locale.ROOT);
+
+        // ✅ KEEP PRELOCK EXACTLY
+        var preLock = loginAttemptService.checkBlocked(null, "ADMIN_LOGIN", identifier);
+        if (preLock.blocked()) {
+            return lockedLoginResponse(preLock);
         }
 
-        var admin = opt.get();
+        var opt = adminUserService.findByUsernameOrEmail(request.getUsernameOrEmail().trim());
+        if (opt.isEmpty()) {
+            var lock = loginAttemptService.recordFailure(null, "ADMIN_LOGIN", identifier);
+
+            if (lock.blocked()) {
+                return lockedLoginResponse(lock);
+            }
+
+            return authError(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS",
+                    "Invalid credentials");
+        }
+
+        AdminUser admin = opt.get();
 
         if (!passwordEncoder.matches(request.getPassword(), admin.getPasswordHash())) {
-            return authError(HttpStatus.UNAUTHORIZED, "INCORRECT_PASSWORD",
-                    "Incorrect password");
+            var lock = loginAttemptService.recordFailure(null, "ADMIN_LOGIN", identifier);
+
+            if (lock.blocked()) {
+                return lockedLoginResponse(lock);
+            }
+
+            return authError(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS",
+                    "Invalid credentials");
         }
 
         String role = admin.getRole() != null ? admin.getRole().getName() : null;
@@ -1188,21 +1304,73 @@ public class AuthController {
                     "Access denied for this role");
         }
 
-        boolean allowed = role.equalsIgnoreCase("SUPER_ADMIN")
-                || role.equalsIgnoreCase("OWNER")
-                || role.equalsIgnoreCase("MANAGER");
+        boolean isSuperAdmin = "SUPER_ADMIN".equalsIgnoreCase(role);
+        boolean isOwner = "OWNER".equalsIgnoreCase(role);
+        boolean isManager = "MANAGER".equalsIgnoreCase(role);
 
-        if (!allowed) {
+        if (!isSuperAdmin && !isOwner && !isManager) {
             return authError(HttpStatus.FORBIDDEN, "ROLE_NOT_ALLOWED",
                     "Access denied for this role");
         }
 
-       
-        // SUPER_ADMIN stays null
-        String token = jwtUtil.generateToken(admin);
-        String refreshToken = refreshTokenService.issueWO("ADMIN", admin.getAdminId());
+        Long ownerProjectId = null;
+        boolean needsAppSetup = false;
 
-       
+        // ✅ OWNER logic
+        if (isOwner) {
+            List<AdminUserProject> links = adminUserProjectRepo.findByAdmin_AdminId(admin.getAdminId());
+
+            if (links == null || links.isEmpty()) {
+                // owner exists, but has no app yet
+                needsAppSetup = true;
+            } else {
+                Long requestedOwnerProjectId = request.getOwnerProjectId();
+
+                if (requestedOwnerProjectId != null) {
+                    boolean ok = links.stream().anyMatch(l -> requestedOwnerProjectId.equals(l.getId()));
+                    if (!ok) {
+                        return authError(HttpStatus.FORBIDDEN, "INVALID_OWNER_PROJECT",
+                                "Invalid ownerProjectId for this owner");
+                    }
+                    ownerProjectId = requestedOwnerProjectId;
+                } else {
+                    ownerProjectId = links.get(0).getId();
+                }
+            }
+        }
+
+        // ✅ MANAGER logic (same safety as /manager/login)
+        if (isManager) {
+            if (admin.getBusiness() != null) {
+                Businesses business = admin.getBusiness();
+                String status = (business.getStatus() != null) ? business.getStatus().getName().toUpperCase() : "";
+
+                if ("INACTIVE".equals(status)
+                        || "INACTIVEBYADMIN".equals(status)
+                        || "INACTIVEBYBUSINESS".equals(status)
+                        || "DELETED".equals(status)) {
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                            .body(Map.of("error", "Cannot log in: This business account is disabled or deleted. Please contact support."));
+                }
+
+                if (business.getOwnerProjectLink() != null) {
+                    ownerProjectId = business.getOwnerProjectLink().getId();
+                }
+            }
+        }
+
+        // ✅ success => clear failures ONLY after all checks passed
+        loginAttemptService.recordSuccess(null, "ADMIN_LOGIN", identifier);
+
+        String token;
+        String refreshToken = refreshTokenService.issue("ADMIN", admin.getAdminId(), ownerProjectId);
+
+        if (isOwner && ownerProjectId == null) {
+            // bootstrap owner session (no app yet)
+            token = jwtUtil.generateOwnerBootstrapToken(admin);
+        } else {
+            token = jwtUtil.generateToken(admin, ownerProjectId);
+        }
 
         Map<String, Object> adminData = new HashMap<>();
         adminData.put("id", admin.getAdminId());
@@ -1212,18 +1380,17 @@ public class AuthController {
         adminData.put("email", admin.getEmail());
         adminData.put("role", role);
 
-        return ResponseEntity.ok(Map.of(
-                "message", "Login successful",
-                "token", token,
-                "refreshToken", refreshToken,
-                "role", role,
-              
-                "admin", adminData
-        ));
-        
-        
-    }
+        Map<String, Object> resp = new HashMap<>();
+        resp.put("message", "Login successful");
+        resp.put("token", token);
+        resp.put("refreshToken", refreshToken);
+        resp.put("role", role);
+        resp.put("admin", adminData);
+        resp.put("ownerProjectId", ownerProjectId);
+        resp.put("needsAppSetup", needsAppSetup);
 
+        return ResponseEntity.ok(resp);
+    }
     /* =====================================================================================
      *  OWNER EMAIL-OTP SIGNUP (REAL OTP)
      * ===================================================================================== */

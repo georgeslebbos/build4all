@@ -2,11 +2,14 @@ package com.build4all.admin.service;
 
 import com.build4all.admin.domain.AdminUser;
 import com.build4all.admin.domain.PendingAdminEmailChange;
+import com.build4all.admin.domain.PendingAdminPhoneChange;
 import com.build4all.admin.dto.AdminUserProfileDTO;
 import com.build4all.admin.dto.AdminUserUpdateProfileRequest;
 import com.build4all.admin.repository.AdminUsersRepository;
 import com.build4all.admin.repository.PendingAdminEmailChangeRepository;
+import com.build4all.admin.repository.PendingAdminPhoneChangeRepository;
 import com.build4all.business.domain.Businesses;
+import com.build4all.common.util.PhoneNumberValidator;
 import com.build4all.notifications.service.EmailService;
 import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.review.repository.ReviewRepository;
@@ -66,11 +69,18 @@ public class AdminUserService {
 
     @Autowired
     private EmailService emailService;
+    
+    @Autowired
+    private PendingAdminPhoneChangeRepository pendingAdminPhoneRepo;
 
     private static final int ADMIN_EMAIL_CHANGE_TTL_MIN = 15;
     private static final int ADMIN_EMAIL_CHANGE_MAX_ATTEMPTS = 5;
     private static final int ADMIN_EMAIL_CHANGE_RESEND_COOLDOWN_SEC = 60;
     private static final int PASSWORD_MIN_LEN = 6;
+    
+    private static final int ADMIN_PHONE_CHANGE_TTL_MIN = 15;
+    private static final int ADMIN_PHONE_CHANGE_MAX_ATTEMPTS = 5;
+    private static final int ADMIN_PHONE_CHANGE_RESEND_COOLDOWN_SEC = 60;
 
     private final SecureRandom secureRandom = new SecureRandom();
 
@@ -85,6 +95,56 @@ public class AdminUserService {
         } catch (Exception ex) {
             throw new RuntimeException("Invalid email format");
         }
+    }
+    
+    private String normalizePhoneOrThrow(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new RuntimeException("New phone number is required");
+        }
+
+        String value = raw.trim()
+                .replace(" ", "")
+                .replace("-", "")
+                .replace("(", "")
+                .replace(")", "")
+                .replace(".", "");
+
+        if (value.startsWith("00")) {
+            value = "+" + value.substring(2);
+        }
+
+        // Lebanese local format -> normalize to +961
+        if (!value.startsWith("+")) {
+            if (value.matches("^(3|70|71|76|78|79|81)\\d{6}$")) {
+                value = "+961" + value;
+            } else {
+                throw new RuntimeException("Invalid phone number format");
+            }
+        }
+
+        if (value.startsWith("+961")) {
+            String national = value.substring(4);
+            if (national.startsWith("0")) {
+                national = national.substring(1);
+            }
+
+            if (!national.matches("^(3|70|71|76|78|79|81)\\d{6}$")) {
+                throw new RuntimeException("Invalid Lebanese phone number");
+            }
+
+            return "+961" + national;
+        }
+
+        if (!value.matches("^\\+[1-9]\\d{7,14}$")) {
+            throw new RuntimeException("Invalid phone number format");
+        }
+
+        return value;
+    }
+
+    private void sendAdminPhoneChangeOtp(String to, String code) {
+        // Dev path for now. Replace with real SMS provider later.
+        System.out.println("📱 Admin phone change OTP to " + to + ": code " + code);
     }
 
     private void sendAdminEmailChangeOtp(String to, String code) {
@@ -197,6 +257,100 @@ public class AdminUserService {
 
         pendingAdminEmailRepo.save(pending);
         sendAdminEmailChangeOtp(pending.getNewEmail(), code);
+    }
+    
+    @Transactional
+    public void requestAdminPhoneChange(Long adminId, String newPhone) {
+        String normalized = normalizePhoneOrThrow(newPhone);
+
+        AdminUser admin = requireById(adminId);
+
+        // same phone? nothing to do
+        if (admin.getPhoneNumber() != null && admin.getPhoneNumber().trim().equals(normalized)) {
+            return;
+        }
+
+        // unique across admins (excluding self)
+        if (adminUserRepository.existsByPhoneNumberAndAdminIdNot(normalized, adminId)) {
+            throw new RuntimeException("Phone number already in use");
+        }
+
+        PendingAdminPhoneChange pending = pendingAdminPhoneRepo.findByAdmin_AdminId(adminId)
+                .orElseGet(PendingAdminPhoneChange::new);
+
+        String code = otp6();
+        LocalDateTime now = LocalDateTime.now();
+
+        pending.setAdmin(admin);
+        pending.setNewPhone(normalized);
+        pending.setCodeHash(passwordEncoder.encode(code));
+        pending.setAttempts(0);
+        pending.setCreatedAt(now);
+        pending.setExpiresAt(now.plusMinutes(ADMIN_PHONE_CHANGE_TTL_MIN));
+        pending.setLastSentAt(now);
+
+        pendingAdminPhoneRepo.save(pending);
+        sendAdminPhoneChangeOtp(normalized, code);
+    }
+
+    @Transactional
+    public void verifyAdminPhoneChange(Long adminId, String code) {
+        code = code == null ? null : code.trim();
+
+        if (code == null || code.isEmpty()) {
+            throw new RuntimeException("Verification code is required");
+        }
+
+        PendingAdminPhoneChange pending = pendingAdminPhoneRepo.findByAdmin_AdminId(adminId)
+                .orElseThrow(() -> new RuntimeException("No pending phone change request"));
+
+        LocalDateTime now = LocalDateTime.now();
+
+        if (pending.getExpiresAt() != null && pending.getExpiresAt().isBefore(now)) {
+            pendingAdminPhoneRepo.delete(pending);
+            throw new RuntimeException("Verification code expired. Request again.");
+        }
+
+        pending.setAttempts(pending.getAttempts() + 1);
+
+        if (pending.getAttempts() > ADMIN_PHONE_CHANGE_MAX_ATTEMPTS) {
+            pendingAdminPhoneRepo.delete(pending);
+            throw new RuntimeException("Too many attempts. Request a new code.");
+        }
+
+        if (!passwordEncoder.matches(code, pending.getCodeHash())) {
+            pendingAdminPhoneRepo.save(pending);
+            throw new RuntimeException("Invalid verification code");
+        }
+
+        AdminUser admin = requireById(adminId);
+        admin.setPhoneNumber(pending.getNewPhone());
+        adminUserRepository.save(admin);
+
+        pendingAdminPhoneRepo.delete(pending);
+    }
+
+    @Transactional
+    public void resendAdminPhoneChangeCode(Long adminId) {
+        PendingAdminPhoneChange pending = pendingAdminPhoneRepo.findByAdmin_AdminId(adminId)
+                .orElseThrow(() -> new RuntimeException("No pending phone change request"));
+
+        LocalDateTime now = LocalDateTime.now();
+
+        if (pending.getLastSentAt() != null
+                && pending.getLastSentAt().plusSeconds(ADMIN_PHONE_CHANGE_RESEND_COOLDOWN_SEC).isAfter(now)) {
+            throw new RuntimeException("Please wait before resending the code");
+        }
+
+        String code = otp6();
+        pending.setCodeHash(passwordEncoder.encode(code));
+        pending.setAttempts(0);
+        pending.setCreatedAt(now);
+        pending.setExpiresAt(now.plusMinutes(ADMIN_PHONE_CHANGE_TTL_MIN));
+        pending.setLastSentAt(now);
+
+        pendingAdminPhoneRepo.save(pending);
+        sendAdminPhoneChangeOtp(pending.getNewPhone(), code);
     }
 
     /**
@@ -511,13 +665,17 @@ public class AdminUserService {
                 throw new RuntimeException("Email change requires verification. Use request-email-change.");
             }
         }
-
-        // --- phone (allow clearing by sending empty string) ---
+     // --- phone --- (NO direct change anymore)
         if (req.getPhoneNumber() != null) {
-            String p = req.getPhoneNumber().trim();
-            admin.setPhoneNumber(p.isEmpty() ? null : p);
-        }
+            String requested = req.getPhoneNumber().trim();
+            String current = admin.getPhoneNumber() == null ? "" : admin.getPhoneNumber().trim();
 
+            // same value coming back from frontend -> ignore
+            if (!requested.equals(current)) {
+                throw new RuntimeException("Phone change requires verification. Use request-phone-change.");
+            }
+        }
+        
         // --- notification toggles ---
         if (req.getNotifyItemUpdates() != null) {
             admin.setNotifyItemUpdates(req.getNotifyItemUpdates());

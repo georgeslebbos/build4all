@@ -120,19 +120,20 @@ public interface AdminUserProjectRepository extends JpaRepository<AdminUserProje
     Optional<AdminUserProject> findByIdAndAdmin_AdminId(Long id, Long ownerId);
 
     @Query("""
-        select new com.build4all.project.dto.ProjectOwnerSummaryDTO(
-            a.admin.adminId,
-            concat(a.admin.firstName, ' ', a.admin.lastName),
-            a.admin.email,
-            count(a.id)
-        )
-        from AdminUserProject a
-        where a.project.id = :projectId
-        group by a.admin.adminId, a.admin.firstName, a.admin.lastName, a.admin.email
-        order by count(a.id) desc
-    """)
-    List<ProjectOwnerSummaryDTO> findOwnersByProject(@Param("projectId") Long projectId);
-
+    	    select new com.build4all.project.dto.ProjectOwnerSummaryDTO(
+    	        a.admin.adminId,
+    	        concat(a.admin.firstName, ' ', a.admin.lastName),
+    	        a.admin.email,
+    	        count(a.id)
+    	    )
+    	    from AdminUserProject a
+    	    where a.project.id = :projectId
+    	      and upper(coalesce(a.status, 'ACTIVE')) <> 'DELETED'
+    	    group by a.admin.adminId, a.admin.firstName, a.admin.lastName, a.admin.email
+    	    order by count(a.id) desc
+    	""")
+    	List<ProjectOwnerSummaryDTO> findOwnersByProject(@Param("projectId") Long projectId);
+    
     List<AdminUserProject> findByProject_IdAndAdmin_AdminId(Long projectId, Long adminId);
     
     @Query("""

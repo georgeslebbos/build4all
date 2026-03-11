@@ -2,6 +2,7 @@ package com.build4all.app.web;
 
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.app.dto.AppSupportInfoDto;
+import com.build4all.common.util.PhoneNumberValidator;
 import com.build4all.security.JwtUtil;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -41,12 +42,16 @@ public class AppSupportController {
             AppSupportInfoDto dto = linkRepo.findSupportInfoByLinkId(linkId)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "App not found: " + linkId));
 
+            String safePhone = PhoneNumberValidator.isValid(dto.getPhoneNumber())
+                    ? PhoneNumberValidator.normalize(dto.getPhoneNumber())
+                    : "";
+
             return ResponseEntity.ok(Map.of(
                     "linkId", dto.getLinkId(),
                     "ownerId", dto.getOwnerId(),
                     "ownerName", dto.getOwnerName() == null ? "" : dto.getOwnerName(),
                     "email", dto.getEmail() == null ? "" : dto.getEmail(),
-                    "phoneNumber", dto.getPhoneNumber() == null ? "" : dto.getPhoneNumber()
+                    "phoneNumber", safePhone
             ));
 
         } catch (ResponseStatusException ex) {
