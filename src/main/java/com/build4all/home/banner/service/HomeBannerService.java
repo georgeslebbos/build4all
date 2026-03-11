@@ -1,12 +1,6 @@
 package com.build4all.home.banner.service;
 
 import com.build4all.admin.domain.AdminUserProject;
-import org.springframework.web.multipart.MultipartFile;
-
-import java.io.IOException;
-import java.nio.file.*;
-import java.util.UUID;
-
 import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.home.banner.domain.HomeBanner;
 import com.build4all.home.banner.dto.HomeBannerRequest;
@@ -14,9 +8,13 @@ import com.build4all.home.banner.dto.HomeBannerResponse;
 import com.build4all.home.banner.repository.HomeBannerRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.*;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @Transactional
@@ -31,8 +29,6 @@ public class HomeBannerService {
         this.aupRepo = aupRepo;
     }
 
-    // -------- PUBLIC (for app) --------
-
     @Transactional(Transactional.TxType.SUPPORTS)
     public List<HomeBannerResponse> listActivePublic(Long ownerProjectId) {
         LocalDateTime now = LocalDateTime.now();
@@ -41,8 +37,6 @@ public class HomeBannerService {
                 .map(this::toResponse)
                 .toList();
     }
-
-    // -------- ADMIN (JWT) --------
 
     @Transactional(Transactional.TxType.SUPPORTS)
     public List<HomeBannerResponse> listByOwnerProjectForAdmin(Long ownerProjectId, Long adminId) {
@@ -54,12 +48,7 @@ public class HomeBannerService {
     }
 
     public HomeBannerResponse create(Long adminId, HomeBannerRequest req) {
-        if (req.getOwnerProjectId() == null) {
-            throw new IllegalArgumentException("ownerProjectId is required");
-        }
-        if (req.getImageUrl() == null || req.getImageUrl().isBlank()) {
-            throw new IllegalArgumentException("imageUrl is required");
-        }
+        validateForCreate(req, null);
 
         AdminUserProject app = requireOwnedProject(req.getOwnerProjectId(), adminId);
 
@@ -71,7 +60,7 @@ public class HomeBannerService {
         b.setTargetType(req.getTargetType());
         b.setTargetId(req.getTargetId());
         b.setTargetUrl(req.getTargetUrl());
-        b.setSortOrder(req.getSortOrder() != null ? req.getSortOrder() : 0);
+        b.setSortOrder(req.getSortOrder());
         b.setActive(req.getActive() == null || req.getActive());
         b.setStartAt(req.getStartAt());
         b.setEndAt(req.getEndAt());
@@ -79,93 +68,170 @@ public class HomeBannerService {
         b = bannerRepo.save(b);
         return toResponse(b);
     }
-    
+
     public HomeBannerResponse createWithImage(Long adminId, HomeBannerRequest req, MultipartFile image) throws IOException {
-        if (req.getOwnerProjectId() == null) {
-            throw new IllegalArgumentException("ownerProjectId is required");
-        }
+        validateForCreate(req, image);
 
         AdminUserProject app = requireOwnedProject(req.getOwnerProjectId(), adminId);
 
         String url = saveBannerImage(image);
-        if (url == null || url.isBlank()) {
-            throw new IllegalArgumentException("image file is required");
-        }
 
         HomeBanner b = new HomeBanner();
         b.setOwnerProject(app);
         b.setImageUrl(url);
+        b.setTitle(req.getTitle());
+        b.setSubtitle(req.getSubtitle());
+        b.setTargetType(req.getTargetType());
+        b.setTargetId(req.getTargetId());
+        b.setTargetUrl(req.getTargetUrl());
+        b.setSortOrder(req.getSortOrder());
+        b.setActive(req.getActive() == null || req.getActive());
+        b.setStartAt(req.getStartAt());
+        b.setEndAt(req.getEndAt());
+
+        b = bannerRepo.save(b);
+        return toResponse(b);
+    }
+
+    public HomeBannerResponse update(Long adminId, Long id, HomeBannerRequest req) {
+        validateForUpdate(req);
+
+        HomeBanner b = requireOwnedBanner(id, adminId);
 
         b.setTitle(req.getTitle());
         b.setSubtitle(req.getSubtitle());
         b.setTargetType(req.getTargetType());
         b.setTargetId(req.getTargetId());
         b.setTargetUrl(req.getTargetUrl());
-        b.setSortOrder(req.getSortOrder() != null ? req.getSortOrder() : 0);
+        b.setSortOrder(req.getSortOrder());
         b.setActive(req.getActive() == null || req.getActive());
         b.setStartAt(req.getStartAt());
         b.setEndAt(req.getEndAt());
 
-        b = bannerRepo.save(b);
-        return toResponse(b);
-    }
-
-
-    public HomeBannerResponse update(Long adminId, Long id, HomeBannerRequest req) {
-        HomeBanner b = requireOwnedBanner(id, adminId);
-
-        if (req.getImageUrl() != null) b.setImageUrl(req.getImageUrl());
-        if (req.getTitle() != null) b.setTitle(req.getTitle());
-        if (req.getSubtitle() != null) b.setSubtitle(req.getSubtitle());
-        if (req.getTargetType() != null) b.setTargetType(req.getTargetType());
-        if (req.getTargetId() != null) b.setTargetId(req.getTargetId());
-        if (req.getTargetUrl() != null) b.setTargetUrl(req.getTargetUrl());
-        if (req.getSortOrder() != null) b.setSortOrder(req.getSortOrder());
-        if (req.getActive() != null) b.setActive(req.getActive());
-        if (req.getStartAt() != null) b.setStartAt(req.getStartAt());
-        if (req.getEndAt() != null) b.setEndAt(req.getEndAt());
-
-        b = bannerRepo.save(b);
-        return toResponse(b);
-    }
-    
-    public HomeBannerResponse updateWithImage(Long adminId, Long id, HomeBannerRequest req, MultipartFile image) throws IOException {
-        HomeBanner b = requireOwnedBanner(id, adminId);
-
-        if (req.getTitle() != null) b.setTitle(req.getTitle());
-        if (req.getSubtitle() != null) b.setSubtitle(req.getSubtitle());
-        if (req.getTargetType() != null) b.setTargetType(req.getTargetType());
-        if (req.getTargetId() != null) b.setTargetId(req.getTargetId());
-        if (req.getTargetUrl() != null) b.setTargetUrl(req.getTargetUrl());
-        if (req.getSortOrder() != null) b.setSortOrder(req.getSortOrder());
-        if (req.getActive() != null) b.setActive(req.getActive());
-        if (req.getStartAt() != null) b.setStartAt(req.getStartAt());
-        if (req.getEndAt() != null) b.setEndAt(req.getEndAt());
-
-        // ✅ image rules:
-        // 1) if image provided => replace local image
-        // 2) else if req.imageUrl provided => allow manual override (optional)
-        if (image != null && !image.isEmpty()) {
-            deleteLocalImageIfManaged(b.getImageUrl());
-            b.setImageUrl(saveBannerImage(image));
-        } else if (req.getImageUrl() != null) {
-            b.setImageUrl(req.getImageUrl());
+        if (req.getImageUrl() != null && !req.getImageUrl().isBlank()) {
+            b.setImageUrl(req.getImageUrl().trim());
         }
 
         b = bannerRepo.save(b);
         return toResponse(b);
     }
 
+    public HomeBannerResponse updateWithImage(Long adminId, Long id, HomeBannerRequest req, MultipartFile image) throws IOException {
+        validateForUpdate(req);
+
+        HomeBanner b = requireOwnedBanner(id, adminId);
+
+        b.setTitle(req.getTitle());
+        b.setSubtitle(req.getSubtitle());
+        b.setTargetType(req.getTargetType());
+        b.setTargetId(req.getTargetId());
+        b.setTargetUrl(req.getTargetUrl());
+        b.setSortOrder(req.getSortOrder());
+        b.setActive(req.getActive() == null || req.getActive());
+        b.setStartAt(req.getStartAt());
+        b.setEndAt(req.getEndAt());
+
+        if (image != null && !image.isEmpty()) {
+            deleteLocalImageIfManaged(b.getImageUrl());
+            b.setImageUrl(saveBannerImage(image));
+        } else if (req.getImageUrl() != null && !req.getImageUrl().isBlank()) {
+            b.setImageUrl(req.getImageUrl().trim());
+        }
+
+        b = bannerRepo.save(b);
+        return toResponse(b);
+    }
 
     public void delete(Long adminId, Long id) {
         HomeBanner b = requireOwnedBanner(id, adminId);
+        deleteLocalImageIfManaged(b.getImageUrl());
         bannerRepo.delete(b);
     }
 
-    // -------- helpers --------
-    
+    private void validateForCreate(HomeBannerRequest req, MultipartFile image) {
+        if (req.getOwnerProjectId() == null) {
+            throw new IllegalArgumentException("ownerProjectId is required");
+        }
+
+        validateCommonFields(req);
+
+        if ((req.getImageUrl() == null || req.getImageUrl().isBlank()) &&
+                (image == null || image.isEmpty())) {
+            throw new IllegalArgumentException("image is required");
+        }
+    }
+
+    private void validateForUpdate(HomeBannerRequest req) {
+        validateCommonFields(req);
+    }
+
+    private void validateCommonFields(HomeBannerRequest req) {
+        req.setTitle(trimToNull(req.getTitle()));
+        req.setSubtitle(trimToNull(req.getSubtitle())); // optional
+        req.setTargetUrl(trimToNull(req.getTargetUrl()));
+        req.setTargetType(normalizeTargetType(req.getTargetType()));
+
+        if (req.getTitle() == null) {
+            throw new IllegalArgumentException("title is required");
+        }
+
+        if (req.getSortOrder() == null) {
+            throw new IllegalArgumentException("sortOrder is required");
+        }
+
+        if (req.getSortOrder() < 0) {
+            throw new IllegalArgumentException("sortOrder must be 0 or more");
+        }
+
+        if (req.getStartAt() != null && req.getEndAt() != null
+                && req.getEndAt().isBefore(req.getStartAt())) {
+            throw new IllegalArgumentException("endAt must be after startAt");
+        }
+
+        // target صار optional
+        if (req.getTargetType() == null) {
+            req.setTargetId(null);
+            req.setTargetUrl(null);
+            return;
+        }
+
+        switch (req.getTargetType()) {
+            case "URL" -> {
+                if (req.getTargetUrl() == null || req.getTargetUrl().isBlank()) {
+                    throw new IllegalArgumentException("targetUrl is required when targetType is URL");
+                }
+                req.setTargetId(null);
+            }
+            case "CATEGORY", "PRODUCT" -> {
+                if (req.getTargetId() == null) {
+                    throw new IllegalArgumentException(
+                            "targetId is required when targetType is " + req.getTargetType()
+                    );
+                }
+                req.setTargetUrl(null);
+            }
+            default -> throw new IllegalArgumentException("Invalid targetType");
+        }
+    }
+
+    private String normalizeTargetType(String targetType) {
+        String t = trimToNull(targetType);
+        if (t == null) return null;
+        t = t.toUpperCase();
+        if ("NONE".equals(t)) return null;
+        return t;
+    }
+
+    private String trimToNull(String s) {
+        if (s == null) return null;
+        String trimmed = s.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
     private String saveBannerImage(MultipartFile file) throws IOException {
-        if (file == null || file.isEmpty()) return null;
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("image is required");
+        }
 
         String original = file.getOriginalFilename() == null ? "banner" : file.getOriginalFilename();
         String filename = UUID.randomUUID() + "_" + original.replaceAll("\\s+", "_");
@@ -191,10 +257,8 @@ public class HomeBannerService {
 
             Files.deleteIfExists(filePath);
         } catch (Exception ignored) {
-            // don't fail request
         }
     }
-
 
     private AdminUserProject requireOwnedProject(Long ownerProjectId, Long adminId) {
         return aupRepo.findById(ownerProjectId)

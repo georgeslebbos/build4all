@@ -27,21 +27,8 @@ public class OwnerPublishController {
     }
 
     private String token(HttpServletRequest request) {
-        // You already have this helper, keep it
         return jwtUtil.extractTokenFromRequest(request);
     }
-
-    /**
-     * Optional security hardening:
-     * If your JWT contains tenant/aup claim, enforce it here
-     * so owner cannot draft publish for someone else’s aupId.
-     *
-     * Uncomment + adapt based on your JwtUtil API.
-     */
-    // private void requireAupScope(HttpServletRequest request, Long aupId) {
-    //     String t = token(request);
-    //     jwtUtil.requireTenantMatch(t, aupId); // example (adapt)
-    // }
 
     @PostMapping("/draft")
     @PreAuthorize("hasRole('OWNER')")
@@ -50,9 +37,10 @@ public class OwnerPublishController {
             @Valid @RequestBody CreatePublishDraftDto dto
     ) {
         String t = token(request);
-        Long ownerAdminId = jwtUtil.extractId(t);
+        Long ownerAdminId = jwtUtil.extractAdminId(t);
 
-        // requireAupScope(request, dto.getAupId()); // optional strict tenant lock
+        // strict tenant lock: owner cannot open/create draft for another owner's app
+        jwtUtil.requireTenantMatch(t, dto.getAupId());
 
         var draft = publishService.getOrCreateDraft(
                 dto.getAupId(),
@@ -75,7 +63,7 @@ public class OwnerPublishController {
             @RequestBody PublishDraftUpdateDto dto
     ) {
         String t = token(request);
-        Long ownerAdminId = jwtUtil.extractId(t);
+        Long ownerAdminId = jwtUtil.extractAdminId(t);
 
         var updated = publishService.patchDraft(requestId, dto, ownerAdminId);
 
@@ -94,7 +82,7 @@ public class OwnerPublishController {
             @RequestPart(value = "screenshots", required = false) MultipartFile[] screenshots
     ) {
         String t = token(request);
-        Long ownerAdminId = jwtUtil.extractId(t);
+        Long ownerAdminId = jwtUtil.extractAdminId(t);
 
         if (screenshots == null) screenshots = new MultipartFile[0];
 
@@ -113,7 +101,7 @@ public class OwnerPublishController {
             @PathVariable Long requestId
     ) {
         String t = token(request);
-        Long ownerAdminId = jwtUtil.extractId(t);
+        Long ownerAdminId = jwtUtil.extractAdminId(t);
 
         var submitted = publishService.submitForReview(requestId, ownerAdminId);
 

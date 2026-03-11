@@ -1,15 +1,15 @@
-// src/main/java/com/build4all/security/JwtUtil.java
 package com.build4all.security;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
-
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 import com.build4all.admin.domain.AdminUser;
 import com.build4all.business.domain.Businesses;
+import com.build4all.common.errors.ApiException;
 import com.build4all.user.domain.Users;
 
 import java.security.Key;
@@ -29,23 +29,11 @@ import java.util.Map;
  * - For BUSINESS login: ownerProjectId is REQUIRED
  * - For OWNER login: ownerProjectId is REQUIRED (owner is tenant-scoped by AUP)
  * - For SUPER_ADMIN: ownerProjectId is optional (can be global)
- *
- * ✅ CRITICAL SECURITY RULES:
- * 1) NEVER issue a USER token without ownerProjectId.
- * 2) NEVER issue a BUSINESS token without ownerProjectId.
- * 3) NEVER issue an OWNER token without ownerProjectId.
- * 4) If a controller/service passes a wrong tenant id, JwtUtil MUST block cross-tenant minting.
- *
- * Why enforce here?
- * - Even if a controller has a bug, JwtUtil is the last line of defense before token minting.
  */
 @Component
 public class JwtUtil {
 
-    /** HMAC signing key used to sign and verify JWTs (symmetric key). */
     private final Key key;
-
-    /** Standard access token TTL in milliseconds (configured in JwtProperties). */
     private final long expirationTime;
 
     public JwtUtil(JwtProperties jwtProperties) {
@@ -55,99 +43,87 @@ public class JwtUtil {
 
     /* ======================== LOGIN TOKENS ======================== */
 
-    /**
-     * ⚠️ LEGACY / BACKWARD COMPATIBILITY ONLY.
-     *
-     * Previously this could mint a USER token without ownerProjectId.
-     * In a strict multi-tenant system, that is unsafe.
-     *
-     * ✅ NOW ENFORCED:
-     * - USER token MUST contain ownerProjectId.
-     * - We derive it ONLY from DB (user.ownerProject.id).
-     * - If DB tenant is missing -> throw.
-     *
-     * Recommendation:
-     * - Prefer generateToken(user, ownerProjectId) everywhere.
-     */
     public String generateToken(Users user) {
-        if (user == null) throw new RuntimeException("User cannot be null");
+        if (user == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "USER_REQUIRED", "User cannot be null");
+        }
 
         Long dbTenantId = (user.getOwnerProject() != null) ? user.getOwnerProject().getId() : null;
         if (dbTenantId == null) {
-            throw new RuntimeException("Cannot generate USER token: ownerProjectId is missing on the user record");
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "USER_TENANT_MISSING",
+                    "Cannot generate USER token: ownerProjectId is missing on the user record"
+            );
         }
 
         return generateToken(user, dbTenantId);
     }
 
-    
     /**
-     * ✅ Best-practice tenant extraction:
-     * - Works for USER / BUSINESS / OWNER / SUPER_ADMIN tokens
-     * - Enforces that ownerProjectId MUST exist for tenant-scoped endpoints
-     *
-     * Usage:
-     *   Long tenantId = jwtUtil.requireOwnerProjectId(authHeader);
+     * Works for USER / BUSINESS / OWNER / SUPER_ADMIN tokens.
+     * Enforces that ownerProjectId MUST exist for tenant-scoped endpoints.
      */
     public Long requireOwnerProjectId(String tokenOrBearer) {
-        String jwt = normalize(tokenOrBearer);
+        String jwt = stripBearer(tokenOrBearer);
 
         if (jwt == null || jwt.isBlank()) {
-            throw new RuntimeException("Authorization token missing or invalid");
-        }
-
-        if (!validateToken(jwt)) {
-            throw new RuntimeException("Invalid token");
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "Missing token");
         }
 
         Long ownerProjectId = extractOwnerProjectIdClaim(jwt);
 
-        // ✅ Enforce tenant presence for tenant-scoped endpoints
         if (ownerProjectId == null) {
-            throw new RuntimeException("Token missing ownerProjectId claim");
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "TENANT_SCOPE_MISSING",
+                    "Token missing ownerProjectId claim"
+            );
         }
 
         return ownerProjectId;
     }
 
-    /**
-     * ✅ Optional: if you KEEP ownerProjectId in path/query (not ideal),
-     * enforce that request tenant == token tenant.
-     */
     public void requireTenantMatch(String tokenOrBearer, Long requestedOwnerProjectId) {
         Long tokenTenant = requireOwnerProjectId(tokenOrBearer);
-        if (requestedOwnerProjectId == null || !tokenTenant.equals(requestedOwnerProjectId)) {
-            // use 404 behavior in controllers to avoid leaking existence
-            throw new RuntimeException("Tenant mismatch");
+
+        if (requestedOwnerProjectId == null) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "AUP_ID_REQUIRED",
+                    "aupId is required"
+            );
+        }
+
+        if (!tokenTenant.equals(requestedOwnerProjectId)) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "TENANT_MISMATCH",
+                    "You are not allowed to access this app"
+            );
         }
     }
 
-    /**
-     * ✅ STRICT (Recommended):
-     * Generates a USER token while forcing tenant scope.
-     *
-     * Policy:
-     * - ownerProjectId is REQUIRED for USER login.
-     * - If user.ownerProject (DB) exists, it MUST equal ownerProjectId.
-     * - No fallback. No silent behavior.
-     *
-     * Why strict?
-     * - Prevents cross-tenant token minting even if user is loaded incorrectly.
-     */
     public String generateToken(Users user, Long ownerProjectId) {
-
         if (user == null) {
-            throw new RuntimeException("User cannot be null");
+            throw new ApiException(HttpStatus.BAD_REQUEST, "USER_REQUIRED", "User cannot be null");
         }
 
         if (ownerProjectId == null) {
-            throw new RuntimeException("ownerProjectId is required for USER token");
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "OWNER_PROJECT_ID_REQUIRED",
+                    "ownerProjectId is required for USER token"
+            );
         }
 
-        // ✅ HARD TENANCY CHECK (anti cross-tenant token minting)
         Long dbTenantId = (user.getOwnerProject() != null) ? user.getOwnerProject().getId() : null;
         if (dbTenantId != null && !ownerProjectId.equals(dbTenantId)) {
-            throw new RuntimeException("Invalid tenancy: user does not belong to this ownerProjectId");
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "INVALID_TENANCY",
+                    "Invalid tenancy: user does not belong to this ownerProjectId"
+            );
         }
 
         return Jwts.builder()
@@ -155,31 +131,18 @@ public class JwtUtil {
                 .claim("id", user.getId())
                 .claim("username", user.getUsername())
                 .claim("role", "USER")
-                .claim("ownerProjectId", ownerProjectId) // ✅ always embed tenant
+                .claim("ownerProjectId", ownerProjectId)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
                 .signWith(key, SignatureAlgorithm.HS256)
                 .compact();
     }
 
-    /**
-     * Generates a JWT for a business account.
-     *
-     * Token content:
-     * - subject: businessId as string
-     * - claims : id, username, role, ownerProjectId
-     *
-     * Tenant:
-     * - ownerProjectId = business.getOwnerProjectLink().id (AUP id)
-     *
-     * ✅ ENFORCED:
-     * - BUSINESS token MUST include ownerProjectId.
-     * - If missing -> throw (never mint an unscoped business token).
-     */
     public String generateToken(Businesses business) {
-        if (business == null) throw new RuntimeException("Business cannot be null");
+        if (business == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "BUSINESS_REQUIRED", "Business cannot be null");
+        }
 
-        // role from DB, default to BUSINESS if null
         String roleName = "BUSINESS";
         if (business.getRole() != null && business.getRole().getName() != null) {
             roleName = business.getRole().getName();
@@ -187,7 +150,11 @@ public class JwtUtil {
 
         Long tenantId = (business.getOwnerProjectLink() != null) ? business.getOwnerProjectLink().getId() : null;
         if (tenantId == null) {
-            throw new RuntimeException("Cannot generate BUSINESS token: ownerProjectId (AUP id) is missing on business record");
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "BUSINESS_TENANT_MISSING",
+                    "Cannot generate BUSINESS token: ownerProjectId (AUP id) is missing on business record"
+            );
         }
 
         return Jwts.builder()
@@ -195,40 +162,29 @@ public class JwtUtil {
                 .claim("id", business.getId())
                 .claim("username", business.getUsername())
                 .claim("role", roleName)
-                .claim("ownerProjectId", tenantId) // ✅ always embed tenant
+                .claim("ownerProjectId", tenantId)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
                 .signWith(key, SignatureAlgorithm.HS256)
                 .compact();
     }
 
-    /**
-     * Generates a JWT for an admin user (SUPER_ADMIN / OWNER).
-     *
-     * Token content:
-     * - subject: admin email
-     * - claims : id (adminId), username, role, ownerProjectId?
-     *
-     * Tenant:
-     * - OWNER must include ownerProjectId (tenant-scoped).
-     * - SUPER_ADMIN may include it (optional).
-     *
-     * ✅ ENFORCED:
-     * - If role == OWNER -> ownerProjectId is REQUIRED, otherwise throw.
-     * - If role == SUPER_ADMIN -> ownerProjectId optional.
-     */
     public String generateToken(AdminUser adminUser, Long ownerProjectId) {
-
-        if (adminUser == null) throw new RuntimeException("AdminUser cannot be null");
+        if (adminUser == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "ADMIN_REQUIRED", "AdminUser cannot be null");
+        }
 
         String roleName = "USER";
         if (adminUser.getRole() != null && adminUser.getRole().getName() != null) {
             roleName = adminUser.getRole().getName();
         }
 
-        // ✅ OWNER must ALWAYS be tenant-scoped
         if ("OWNER".equalsIgnoreCase(roleName) && ownerProjectId == null) {
-            throw new RuntimeException("Cannot generate OWNER token: ownerProjectId is required");
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "OWNER_TENANT_MISSING",
+                    "Cannot generate OWNER token: ownerProjectId is required"
+            );
         }
 
         var builder = Jwts.builder()
@@ -237,7 +193,6 @@ public class JwtUtil {
                 .claim("username", adminUser.getUsername())
                 .claim("role", roleName);
 
-        // SUPER_ADMIN may be global; OWNER is required above
         if (ownerProjectId != null) {
             builder.claim("ownerProjectId", ownerProjectId);
         }
@@ -250,8 +205,9 @@ public class JwtUtil {
     }
 
     public String generateToken(AdminUser adminUser) {
-
-        if (adminUser == null) throw new RuntimeException("AdminUser cannot be null");
+        if (adminUser == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "ADMIN_REQUIRED", "AdminUser cannot be null");
+        }
 
         String roleName = "USER";
         if (adminUser.getRole() != null && adminUser.getRole().getName() != null) {
@@ -263,7 +219,6 @@ public class JwtUtil {
                 .claim("id", adminUser.getAdminId())
                 .claim("username", adminUser.getUsername())
                 .claim("role", roleName);
-
 
         return builder
                 .setIssuedAt(new Date())
@@ -361,10 +316,6 @@ public class JwtUtil {
         }
     }
 
-    /**
-     * Admin token here means SUPER_ADMIN (global admin).
-     * OWNER is checked via isOwnerToken().
-     */
     public boolean isAdminToken(String token) {
         try {
             String role = extractRole(token);
@@ -396,23 +347,25 @@ public class JwtUtil {
     public Long extractBusinessId(String token) {
         String jwt = normalize(token);
         if (!isBusinessToken(jwt)) {
-            throw new RuntimeException("Invalid token: Not a business token");
+            throw new ApiException(HttpStatus.FORBIDDEN, "INVALID_BUSINESS_TOKEN", "Invalid token: Not a business token");
         }
         return extractId(jwt);
     }
 
     /**
      * Extract tenant scope for OWNER/SUPER_ADMIN tokens.
-     *
-     * ✅ IMPORTANT:
-     * - OWNER token MUST have ownerProjectId, otherwise exception.
-     * - SUPER_ADMIN token MAY be missing ownerProjectId (global access).
+     * - OWNER token MUST have ownerProjectId
+     * - SUPER_ADMIN token may be global
      */
     public Long extractOwnerProjectId(String token) {
         String jwt = normalize(token);
 
         if (!(isOwnerToken(jwt) || isAdminToken(jwt))) {
-            throw new RuntimeException("Invalid token: Not an OWNER/SUPER_ADMIN token");
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "INVALID_OWNER_ADMIN_TOKEN",
+                    "Invalid token: Not an OWNER/SUPER_ADMIN token"
+            );
         }
 
         try {
@@ -423,16 +376,23 @@ public class JwtUtil {
                     .getBody()
                     .get("ownerProjectId", Long.class);
 
-            // OWNER must have it; SUPER_ADMIN may not.
             if (ownerProjectId == null && isOwnerToken(jwt)) {
-                throw new RuntimeException("OWNER token missing ownerProjectId claim");
+                throw new ApiException(
+                        HttpStatus.FORBIDDEN,
+                        "OWNER_TENANT_MISSING",
+                        "OWNER token missing ownerProjectId claim"
+                );
             }
 
-            return ownerProjectId; // may be null only for SUPER_ADMIN
-        } catch (RuntimeException e) {
+            return ownerProjectId;
+        } catch (ApiException e) {
             throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Invalid token: cannot extract ownerProjectId");
+            throw new ApiException(
+                    HttpStatus.UNAUTHORIZED,
+                    "INVALID_TOKEN",
+                    "Invalid token: cannot extract ownerProjectId"
+            );
         }
     }
 
@@ -440,7 +400,7 @@ public class JwtUtil {
         String jwt = normalize(token);
 
         if (!isUserToken(jwt)) {
-            throw new RuntimeException("Invalid token: Not a USER token");
+            throw new ApiException(HttpStatus.FORBIDDEN, "INVALID_USER_TOKEN", "Invalid token: Not a USER token");
         }
 
         try {
@@ -452,15 +412,22 @@ public class JwtUtil {
                     .get("ownerProjectId", Long.class);
 
             if (ownerProjectId == null) {
-                // ✅ USER tokens are ALWAYS tenant-scoped
-                throw new RuntimeException("USER token missing ownerProjectId claim");
+                throw new ApiException(
+                        HttpStatus.FORBIDDEN,
+                        "USER_TENANT_MISSING",
+                        "USER token missing ownerProjectId claim"
+                );
             }
 
             return ownerProjectId;
-        } catch (RuntimeException e) {
+        } catch (ApiException e) {
             throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Invalid token: cannot extract ownerProjectId");
+            throw new ApiException(
+                    HttpStatus.UNAUTHORIZED,
+                    "INVALID_TOKEN",
+                    "Invalid token: cannot extract ownerProjectId"
+            );
         }
     }
 
@@ -483,15 +450,11 @@ public class JwtUtil {
         }
     }
 
-    /**
-     * (Optional utility) Extract tenant scope for BUSINESS tokens.
-     * Useful for business-scoped endpoints.
-     */
     public Long extractOwnerProjectIdForBusiness(String token) {
         String jwt = normalize(token);
 
         if (!isBusinessToken(jwt)) {
-            throw new RuntimeException("Invalid token: Not a BUSINESS token");
+            throw new ApiException(HttpStatus.FORBIDDEN, "INVALID_BUSINESS_TOKEN", "Invalid token: Not a BUSINESS token");
         }
 
         try {
@@ -503,15 +466,22 @@ public class JwtUtil {
                     .get("ownerProjectId", Long.class);
 
             if (ownerProjectId == null) {
-                // ✅ BUSINESS tokens are ALWAYS tenant-scoped
-                throw new RuntimeException("BUSINESS token missing ownerProjectId claim");
+                throw new ApiException(
+                        HttpStatus.FORBIDDEN,
+                        "BUSINESS_TENANT_MISSING",
+                        "BUSINESS token missing ownerProjectId claim"
+                );
             }
 
             return ownerProjectId;
-        } catch (RuntimeException e) {
+        } catch (ApiException e) {
             throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Invalid token: cannot extract ownerProjectId");
+            throw new ApiException(
+                    HttpStatus.UNAUTHORIZED,
+                    "INVALID_TOKEN",
+                    "Invalid token: cannot extract ownerProjectId"
+            );
         }
     }
 
@@ -520,19 +490,27 @@ public class JwtUtil {
         if (bearerToken != null && bearerToken.toLowerCase().startsWith("bearer ")) {
             return bearerToken.substring(7).trim();
         }
-        throw new RuntimeException("Authorization token missing or invalid");
+        throw new ApiException(
+                HttpStatus.UNAUTHORIZED,
+                "AUTH_TOKEN_MISSING",
+                "Authorization token missing or invalid"
+        );
     }
 
     public void validateUserToken(String token, Long userId) {
         if (!isUserToken(token)) {
-            throw new RuntimeException("Invalid token for user");
-        }
-        Long tokenUserId = extractId(token);
-        if (!tokenUserId.equals(userId)) {
-            throw new RuntimeException("Token user ID does not match request user ID");
+            throw new ApiException(HttpStatus.FORBIDDEN, "INVALID_USER_TOKEN", "Invalid token for user");
         }
 
-        // ✅ Ensure tenant exists in USER token (enforced at minting + re-checked here)
+        Long tokenUserId = extractId(token);
+        if (!tokenUserId.equals(userId)) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "USER_ID_MISMATCH",
+                    "Token user ID does not match request user ID"
+            );
+        }
+
         extractOwnerProjectIdForUser(token);
     }
 
@@ -552,33 +530,72 @@ public class JwtUtil {
     }
 
     public Map<String, Object> parseOwnerRegistrationToken(String token) {
-        var claims = Jwts.parserBuilder()
-                .setSigningKey(key)
-                .build()
-                .parseClaimsJws(token)
-                .getBody();
+        try {
+            var claims = Jwts.parserBuilder()
+                    .setSigningKey(key)
+                    .build()
+                    .parseClaimsJws(token)
+                    .getBody();
 
-        String type = (String) claims.get("type");
-        if (!"OWNER_REG".equals(type)) {
-            throw new RuntimeException("Invalid registration token type");
+            String type = (String) claims.get("type");
+            if (!"OWNER_REG".equals(type)) {
+                throw new ApiException(
+                        HttpStatus.BAD_REQUEST,
+                        "INVALID_REGISTRATION_TOKEN_TYPE",
+                        "Invalid registration token type"
+                );
+            }
+
+            Map<String, Object> out = new HashMap<>();
+            out.put("email", claims.get("email"));
+            out.put("passwordHash", claims.get("passwordHash"));
+            out.put("subject", claims.getSubject());
+            return out;
+        } catch (ApiException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ApiException(
+                    HttpStatus.UNAUTHORIZED,
+                    "INVALID_REGISTRATION_TOKEN",
+                    "Invalid or expired registration token"
+            );
         }
-
-        Map<String, Object> out = new HashMap<>();
-        out.put("email", claims.get("email"));
-        out.put("passwordHash", claims.get("passwordHash"));
-        out.put("subject", claims.getSubject());
-        return out;
     }
 
+    public String generateOwnerBootstrapToken(AdminUser adminUser) {
+        if (adminUser == null) {
+            throw new RuntimeException("AdminUser cannot be null");
+        }
+
+        String roleName = "OWNER";
+        if (adminUser.getRole() != null && adminUser.getRole().getName() != null) {
+            roleName = adminUser.getRole().getName();
+        }
+
+        if (!"OWNER".equalsIgnoreCase(roleName)) {
+            throw new RuntimeException("Bootstrap token is allowed only for OWNER");
+        }
+
+        return Jwts.builder()
+                .setSubject(adminUser.getEmail())
+                .claim("id", adminUser.getAdminId())
+                .claim("username", adminUser.getUsername())
+                .claim("role", "OWNER")
+                .claim("setupMode", true)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
+                .signWith(key, SignatureAlgorithm.HS256)
+                .compact();
+    }
+    
     /* ==================== internal ==================== */
 
-    /**
-     * Normalizes token string:
-     * - Accepts either raw JWT or "Bearer <JWT>"
-     * - Trims spaces
-     */
     private String normalize(String token) {
         if (token == null) return null;
         return token.replaceFirst("(?i)^Bearer\\s+", "").trim();
+    }
+
+    private String stripBearer(String token) {
+        return normalize(token);
     }
 }

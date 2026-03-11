@@ -454,6 +454,96 @@ public class UsersController {
             return err(HttpStatus.INTERNAL_SERVER_ERROR, "Server error");
         }
     }
+    
+    
+    @PreAuthorize("hasRole('USER')")
+    @PostMapping("/{id}/phone-change/request")
+    public ResponseEntity<?> requestPhoneChange(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> body,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
+    ) {
+        try {
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
+
+            Long ownerProjectLinkId = jwtUtil.requireOwnerProjectId(authHeader);
+
+            String role = roleOf(jwt);
+            requireSelfIfUser(jwt, role, id);
+
+            Long tokenUserId = jwtUtil.extractId(jwt);
+            String newPhone = body.get("newPhone");
+
+            userService.requestPhoneChange(id, ownerProjectLinkId, tokenUserId, newPhone);
+
+            return ok("Verification code sent to new phone number");
+
+        } catch (ApiException e) {
+            return asResponse(e);
+        } catch (IllegalArgumentException e) {
+            return err(HttpStatus.UNAUTHORIZED, e.getMessage() == null ? "Unauthorized" : e.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Server error");
+        }
+    }
+
+    @PreAuthorize("hasRole('USER')")
+    @PostMapping("/{id}/phone-change/verify")
+    public ResponseEntity<?> verifyPhoneChange(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> body,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
+    ) {
+        try {
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
+
+            Long ownerProjectLinkId = jwtUtil.requireOwnerProjectId(authHeader);
+
+            String role = roleOf(jwt);
+            requireSelfIfUser(jwt, role, id);
+
+            String code = body.get("code");
+            userService.verifyPhoneChange(id, ownerProjectLinkId, jwtUtil.extractId(jwt), code);
+
+            return ok("Phone number updated successfully");
+
+        } catch (ApiException e) {
+            return asResponse(e);
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Server error");
+        }
+    }
+
+    @PreAuthorize("hasRole('USER')")
+    @PostMapping("/{id}/phone-change/resend")
+    public ResponseEntity<?> resendPhoneChange(
+            @PathVariable Long id,
+            @RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader
+    ) {
+        try {
+            String jwt = requireBearer(authHeader);
+            requireValidJwt(jwt);
+
+            Long ownerProjectLinkId = jwtUtil.requireOwnerProjectId(authHeader);
+
+            String role = roleOf(jwt);
+            requireSelfIfUser(jwt, role, id);
+
+            Long tokenUserId = jwtUtil.extractId(jwt);
+            userService.resendPhoneChangeCode(id, ownerProjectLinkId, tokenUserId);
+
+            return ok("Verification code resent");
+
+        } catch (ApiException e) {
+            return asResponse(e);
+        } catch (IllegalArgumentException e) {
+            return err(HttpStatus.UNAUTHORIZED, e.getMessage() == null ? "Unauthorized" : e.getMessage());
+        } catch (Exception e) {
+            return err(HttpStatus.INTERNAL_SERVER_ERROR, "Server error");
+        }
+    }
 
     /* =====================================================
        7) SELF STATUS UPDATE (self)

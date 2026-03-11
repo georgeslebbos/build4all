@@ -9,12 +9,14 @@ import com.build4all.notifications.service.EmailService;
 import com.build4all.role.domain.Role;
 import com.build4all.role.repository.RoleRepository;
 import com.build4all.user.domain.PendingEmailChange;
+import com.build4all.user.domain.PendingPhoneChange;
 import com.build4all.user.domain.PendingUser;
 import com.build4all.user.domain.UserCategories;
 import com.build4all.user.domain.UserStatus;
 import com.build4all.user.domain.Users;
 import com.build4all.user.dto.UserDto;
 import com.build4all.user.repository.PendingEmailChangeRepository;
+import com.build4all.user.repository.PendingPhoneChangeRepository;
 import com.build4all.user.repository.PendingUserRepository;
 import com.build4all.user.repository.UserCategoriesRepository;
 import com.build4all.user.repository.UserStatusRepository;
@@ -65,7 +67,7 @@ public class UserService {
     @Autowired private UserStatusRepository userStatusRepository;
     @Autowired private RoleRepository roleRepository;
     @Autowired private PendingEmailChangeRepository pendingEmailChangeRepository;
-
+    @Autowired private PendingPhoneChangeRepository pendingPhoneChangeRepository;
     /** Tenant link repository: AdminUserProject table (often called admin_user_project / aup). */
     @Autowired private AdminUserProjectRepository aupRepo;
     
@@ -74,6 +76,10 @@ public class UserService {
     private static final int EMAIL_CHANGE_MAX_ATTEMPTS = 5;
     private static final int EMAIL_CHANGE_RESEND_COOLDOWN_SEC = 60;
 
+    private static final int PHONE_CHANGE_TTL_MIN = 15;
+    private static final int PHONE_CHANGE_MAX_ATTEMPTS = 5;
+    private static final int PHONE_CHANGE_RESEND_COOLDOWN_SEC = 60;
+    
     private String generateOtp6() {
         return String.format("%06d", secureRandom.nextInt(1_000_000));
     }
@@ -168,6 +174,78 @@ public class UserService {
         pending.setLockedUntil(null);
         pending.setLastVerificationSentAt(now);
         pending.setCreatedAt(now);
+    }
+    
+    private String normalizePhoneOrThrow(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "PHONE_REQUIRED",
+                    "New phone number is required",
+                    Map.of("field", "phoneNumber")
+            );
+        }
+
+        String value = raw.trim()
+                .replace(" ", "")
+                .replace("-", "")
+                .replace("(", "")
+                .replace(")", "")
+                .replace(".", "");
+
+        if (value.startsWith("00")) {
+            value = "+" + value.substring(2);
+        }
+
+        // Lebanese local format -> normalize to +961
+        if (!value.startsWith("+")) {
+            if (value.matches("^(3|70|71|76|78|79|81)\\d{6}$")) {
+                value = "+961" + value;
+            } else {
+                throw new ApiException(
+                        HttpStatus.BAD_REQUEST,
+                        "INVALID_PHONE",
+                        "Invalid phone number format",
+                        Map.of("field", "phoneNumber")
+                );
+            }
+        }
+
+        // Strict Lebanon handling if +961
+        if (value.startsWith("+961")) {
+            String national = value.substring(4);
+            if (national.startsWith("0")) {
+                national = national.substring(1);
+            }
+
+            if (!national.matches("^(3|70|71|76|78|79|81)\\d{6}$")) {
+                throw new ApiException(
+                        HttpStatus.BAD_REQUEST,
+                        "INVALID_PHONE",
+                        "Invalid Lebanese phone number",
+                        Map.of("field", "phoneNumber")
+                );
+            }
+
+            return "+961" + national;
+        }
+
+        // Generic international fallback
+        if (!value.matches("^\\+[1-9]\\d{7,14}$")) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "INVALID_PHONE",
+                    "Invalid phone number format",
+                    Map.of("field", "phoneNumber")
+            );
+        }
+
+        return value;
+    }
+
+    private void sendPhoneChangeOtp(String to, String code) {
+        // Dev path for now. Replace with real SMS provider later.
+        System.out.println("📱 Phone change OTP to " + to + ": code " + code);
     }
     /**
      * Resolve a UserStatus by name (throws if missing).
@@ -367,6 +445,180 @@ public class UserService {
         pendingEmailChangeRepository.save(pending);
 
         sendEmailChangeOtp(pending.getNewEmail(), code);
+    }
+    
+    
+    @Transactional
+    public void requestPhoneChange(
+            Long userId,
+            Long ownerProjectLinkId,
+            Long tokenUserId,
+            String newPhone
+    ) {
+        if (userId == null || ownerProjectLinkId == null) {
+            throw new IllegalArgumentException("userId and ownerProjectLinkId are required");
+        }
+
+        if (tokenUserId == null || !userId.equals(tokenUserId)) {
+            throw new RuntimeException("Access denied");
+        }
+
+        String normalized = normalizePhoneOrThrow(newPhone);
+
+        Users user = getUserById(userId, ownerProjectLinkId); // tenant-safe
+        AdminUserProject link = linkById(ownerProjectLinkId);
+
+        // same phone? nothing to do
+        if (user.getPhoneNumber() != null && user.getPhoneNumber().trim().equals(normalized)) {
+            return;
+        }
+
+        // tenant-safe uniqueness: allow if it's THIS user, reject if another user
+        Users existing = userRepository.findByPhoneNumberAndOwnerProject_Id(normalized, ownerProjectLinkId);
+        if (existing != null && !Objects.equals(existing.getId(), userId)) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "PHONE_ALREADY_USED",
+                    "Phone number already in use in this app.",
+                    Map.of("field", "phoneNumber")
+            );
+        }
+
+        PendingPhoneChange pending = pendingPhoneChangeRepository
+                .findByUser_IdAndOwnerProject_Id(userId, ownerProjectLinkId)
+                .orElseGet(PendingPhoneChange::new);
+
+        String code = generateOtp6();
+        LocalDateTime now = LocalDateTime.now();
+
+        pending.setUser(user);
+        pending.setOwnerProject(link);
+        pending.setNewPhone(normalized);
+        pending.setCodeHash(passwordEncoder.encode(code));
+        pending.setAttempts(0);
+        pending.setCreatedAt(now);
+        pending.setExpiresAt(now.plusMinutes(PHONE_CHANGE_TTL_MIN));
+        pending.setLastSentAt(now);
+
+        pendingPhoneChangeRepository.save(pending);
+        sendPhoneChangeOtp(normalized, code);
+    }
+
+    @Transactional
+    public void verifyPhoneChange(
+            Long userId,
+            Long ownerProjectLinkId,
+            Long tokenUserId,
+            String code
+    ) {
+        if (userId == null || ownerProjectLinkId == null) {
+            throw new IllegalArgumentException("userId and ownerProjectLinkId are required");
+        }
+
+        if (tokenUserId == null || !userId.equals(tokenUserId)) {
+            throw new RuntimeException("Access denied");
+        }
+
+        if (code == null || code.isBlank()) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "CODE_REQUIRED",
+                    "Verification code is required",
+                    Map.of("field", "code")
+            );
+        }
+
+        PendingPhoneChange pending = pendingPhoneChangeRepository
+                .findByUser_IdAndOwnerProject_Id(userId, ownerProjectLinkId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        "NO_PENDING_PHONE_CHANGE",
+                        "No pending phone change request found.",
+                        Map.of()
+                ));
+
+        LocalDateTime now = LocalDateTime.now();
+
+        if (pending.getExpiresAt() != null && pending.getExpiresAt().isBefore(now)) {
+            pendingPhoneChangeRepository.delete(pending);
+            throw new ApiException(
+                    HttpStatus.GONE,
+                    "CODE_EXPIRED",
+                    "Verification code expired. Request again.",
+                    Map.of()
+            );
+        }
+
+        pending.setAttempts(pending.getAttempts() + 1);
+
+        if (pending.getAttempts() > PHONE_CHANGE_MAX_ATTEMPTS) {
+            pendingPhoneChangeRepository.delete(pending);
+            throw new ApiException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "TOO_MANY_ATTEMPTS",
+                    "Too many attempts. Request a new code.",
+                    Map.of()
+            );
+        }
+
+        if (!passwordEncoder.matches(code.trim(), pending.getCodeHash())) {
+            pendingPhoneChangeRepository.save(pending);
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "INVALID_CODE",
+                    "Invalid verification code.",
+                    Map.of("field", "code")
+            );
+        }
+
+        Users user = getUserById(userId, ownerProjectLinkId);
+        user.setPhoneNumber(pending.getNewPhone());
+        user.setUpdatedAt(now);
+        userRepository.save(user);
+
+        pendingPhoneChangeRepository.delete(pending);
+    }
+
+    @Transactional
+    public void resendPhoneChangeCode(
+            Long userId,
+            Long ownerProjectLinkId,
+            Long tokenUserId
+    ) {
+        if (tokenUserId == null || !userId.equals(tokenUserId)) {
+            throw new RuntimeException("Access denied");
+        }
+
+        PendingPhoneChange pending = pendingPhoneChangeRepository
+                .findByUser_IdAndOwnerProject_Id(userId, ownerProjectLinkId)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        "NO_PENDING_PHONE_CHANGE",
+                        "No pending phone change request found.",
+                        Map.of()
+                ));
+
+        LocalDateTime now = LocalDateTime.now();
+
+        if (pending.getLastSentAt() != null &&
+                pending.getLastSentAt().plusSeconds(PHONE_CHANGE_RESEND_COOLDOWN_SEC).isAfter(now)) {
+            throw new ApiException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "RESEND_COOLDOWN",
+                    "Please wait before resending the code.",
+                    Map.of("cooldownSeconds", PHONE_CHANGE_RESEND_COOLDOWN_SEC)
+            );
+        }
+
+        String code = generateOtp6();
+        pending.setCodeHash(passwordEncoder.encode(code));
+        pending.setAttempts(0);
+        pending.setCreatedAt(now);
+        pending.setExpiresAt(now.plusMinutes(PHONE_CHANGE_TTL_MIN));
+        pending.setLastSentAt(now);
+
+        pendingPhoneChangeRepository.save(pending);
+        sendPhoneChangeOtp(pending.getNewPhone(), code);
     }
 
     /* ====================== LOGIN (tenant-safe OPTIONAL) ===================== */
