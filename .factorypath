@@ -1,14 +1,13 @@
 <factorypath>
-    <factorypathentry kind="VARJAR" id="M2_REPO/org/springdoc/springdoc-openapi-starter-webmvc-ui/2.0.4/springdoc-openapi-starter-webmvc-ui-2.0.4.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/org/springdoc/springdoc-openapi-starter-webmvc-api/2.0.4/springdoc-openapi-starter-webmvc-api-2.0.4.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/org/springdoc/springdoc-openapi-starter-common/2.0.4/springdoc-openapi-starter-common-2.0.4.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/io/swagger/core/v3/swagger-core-jakarta/2.2.8/swagger-core-jakarta-2.2.8.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/io/swagger/core/v3/swagger-annotations-jakarta/2.2.8/swagger-annotations-jakarta-2.2.8.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/io/swagger/core/v3/swagger-models-jakarta/2.2.8/swagger-models-jakarta-2.2.8.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/org/springdoc/springdoc-openapi-starter-webmvc-ui/2.8.16/springdoc-openapi-starter-webmvc-ui-2.8.16.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/org/springdoc/springdoc-openapi-starter-webmvc-api/2.8.16/springdoc-openapi-starter-webmvc-api-2.8.16.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/org/springdoc/springdoc-openapi-starter-common/2.8.16/springdoc-openapi-starter-common-2.8.16.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/io/swagger/core/v3/swagger-core-jakarta/2.2.43/swagger-core-jakarta-2.2.43.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/io/swagger/core/v3/swagger-annotations-jakarta/2.2.43/swagger-annotations-jakarta-2.2.43.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/io/swagger/core/v3/swagger-models-jakarta/2.2.43/swagger-models-jakarta-2.2.43.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/com/fasterxml/jackson/dataformat/jackson-dataformat-yaml/2.19.2/jackson-dataformat-yaml-2.19.2.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/org/webjars/swagger-ui/4.18.1/swagger-ui-4.18.1.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/org/webjars/webjars-locator-core/0.59/webjars-locator-core-0.59.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/io/github/classgraph/classgraph/4.8.149/classgraph-4.8.149.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/org/webjars/swagger-ui/5.32.0/swagger-ui-5.32.0.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/org/webjars/webjars-locator-lite/1.1.0/webjars-locator-lite-1.1.0.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/boot/spring-boot-starter-data-jpa/3.5.6/spring-boot-starter-data-jpa-3.5.6.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/boot/spring-boot-starter/3.5.6/spring-boot-starter-3.5.6.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/boot/spring-boot-starter-logging/3.5.6/spring-boot-starter-logging-3.5.6.jar" enabled="true" runInBatchMode="false"/>
@@ -39,6 +38,7 @@
     <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/spring-orm/6.2.11/spring-orm-6.2.11.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/spring-context/6.2.11/spring-context-6.2.11.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/spring-tx/6.2.11/spring-tx-6.2.11.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/spring-beans/6.2.11/spring-beans-6.2.11.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/spring-aspects/6.2.11/spring-aspects-6.2.11.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/aspectj/aspectjweaver/1.9.24/aspectjweaver-1.9.24.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/me/paulschwarz/spring-dotenv/3.0.0/spring-dotenv-3.0.0.jar" enabled="true" runInBatchMode="false"/>
@@ -60,6 +60,7 @@
     <factorypathentry kind="VARJAR" id="M2_REPO/com/fasterxml/jackson/dataformat/jackson-dataformat-xml/2.19.2/jackson-dataformat-xml-2.19.2.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/codehaus/woodstox/stax2-api/4.2.2/stax2-api-4.2.2.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/com/fasterxml/woodstox/woodstox-core/7.0.0/woodstox-core-7.0.0.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/com/fasterxml/jackson/core/jackson-annotations/2.19.2/jackson-annotations-2.19.2.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/com/google/guava/failureaccess/1.0.3/failureaccess-1.0.3.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/com/google/guava/listenablefuture/9999.0-empty-to-avoid-conflict-with-guava/listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/io/grpc/grpc-context/1.76.2/grpc-context-1.76.2.jar" enabled="true" runInBatchMode="false"/>
@@ -142,6 +143,7 @@
     <factorypathentry kind="VARJAR" id="M2_REPO/com/google/genai/google-genai/1.35.0/google-genai-1.35.0.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/apache/httpcomponents/httpclient/4.5.14/httpclient-4.5.14.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/commons-logging/commons-logging/1.2/commons-logging-1.2.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/com/fasterxml/jackson/core/jackson-databind/2.19.2/jackson-databind-2.19.2.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/com/fasterxml/jackson/datatype/jackson-datatype-jdk8/2.19.2/jackson-datatype-jdk8-2.19.2.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/com/fasterxml/jackson/datatype/jackson-datatype-jsr310/2.19.2/jackson-datatype-jsr310-2.19.2.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/java-websocket/Java-WebSocket/1.6.0/Java-WebSocket-1.6.0.jar" enabled="true" runInBatchMode="false"/>
@@ -183,11 +185,22 @@
     <factorypathentry kind="VARJAR" id="M2_REPO/org/apache/logging/log4j/log4j-api/2.24.3/log4j-api-2.24.3.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/apache/commons/commons-collections4/4.4/commons-collections4-4.4.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/com/bucket4j/bucket4j-core/8.7.0/bucket4j-core-8.7.0.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/spring-messaging/6.2.11/spring-messaging-6.2.11.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/spring-beans/6.2.11/spring-beans-6.2.11.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/spring-core/6.2.11/spring-core-6.2.11.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/spring-jcl/6.2.11/spring-jcl-6.2.11.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/boot/spring-boot-starter-webflux/3.5.6/spring-boot-starter-webflux-3.5.6.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/boot/spring-boot-starter-reactor-netty/3.5.6/spring-boot-starter-reactor-netty-3.5.6.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/io/projectreactor/netty/reactor-netty-http/1.2.10/reactor-netty-http-1.2.10.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-codec-http2/4.1.127.Final/netty-codec-http2-4.1.127.Final.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-resolver-dns/4.1.127.Final/netty-resolver-dns-4.1.127.Final.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-codec-dns/4.1.127.Final/netty-codec-dns-4.1.127.Final.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-resolver-dns-native-macos/4.1.127.Final/netty-resolver-dns-native-macos-4.1.127.Final-osx-x86_64.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-resolver-dns-classes-macos/4.1.127.Final/netty-resolver-dns-classes-macos-4.1.127.Final.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-transport-native-epoll/4.1.127.Final/netty-transport-native-epoll-4.1.127.Final-linux-x86_64.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-transport-classes-epoll/4.1.127.Final/netty-transport-classes-epoll-4.1.127.Final.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/io/projectreactor/netty/reactor-netty-core/1.2.10/reactor-netty-core-1.2.10.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-handler-proxy/4.1.127.Final/netty-handler-proxy-4.1.127.Final.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-codec-socks/4.1.127.Final/netty-codec-socks-4.1.127.Final.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/spring-webflux/6.2.11/spring-webflux-6.2.11.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/boot/spring-boot-starter-websocket/3.5.6/spring-boot-starter-websocket-3.5.6.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/spring-messaging/6.2.11/spring-messaging-6.2.11.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/spring-websocket/6.2.11/spring-websocket-6.2.11.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/boot/spring-boot-starter-oauth2-client/3.5.6/spring-boot-starter-oauth2-client-3.5.6.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/security/spring-security-core/6.5.5/spring-security-core-6.5.5.jar" enabled="true" runInBatchMode="false"/>
@@ -212,6 +225,8 @@
     <factorypathentry kind="VARJAR" id="M2_REPO/net/minidev/json-smart/2.5.2/json-smart-2.5.2.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/net/minidev/accessors-smart/2.5.2/accessors-smart-2.5.2.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/ow2/asm/asm/9.7.1/asm-9.7.1.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/spring-core/6.2.11/spring-core-6.2.11.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/spring-jcl/6.2.11/spring-jcl-6.2.11.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/flywaydb/flyway-core/11.7.2/flyway-core-11.7.2.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/com/fasterxml/jackson/dataformat/jackson-dataformat-toml/2.19.2/jackson-dataformat-toml-2.19.2.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/io/jsonwebtoken/jjwt-api/0.11.5/jjwt-api-0.11.5.jar" enabled="true" runInBatchMode="false"/>
@@ -223,31 +238,15 @@
     <factorypathentry kind="VARJAR" id="M2_REPO/com/google/oauth-client/google-oauth-client/1.36.0/google-oauth-client-1.36.0.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/com/google/http-client/google-http-client-apache-v2/1.44.2/google-http-client-apache-v2-1.44.2.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/apache/httpcomponents/httpcore/4.4.16/httpcore-4.4.16.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/com/fasterxml/jackson/core/jackson-databind/2.15.0/jackson-databind-2.15.0.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/com/fasterxml/jackson/core/jackson-annotations/2.19.2/jackson-annotations-2.19.2.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/com/fasterxml/jackson/core/jackson-core/2.19.2/jackson-core-2.19.2.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/com/google/http-client/google-http-client/1.43.3/google-http-client-1.43.3.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/com/google/j2objc/j2objc-annotations/2.8/j2objc-annotations-2.8.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/io/opencensus/opencensus-api/0.31.1/opencensus-api-0.31.1.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/io/opencensus/opencensus-contrib-http-util/0.31.1/opencensus-contrib-http-util-0.31.1.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/com/google/http-client/google-http-client-gson/1.43.3/google-http-client-gson-1.43.3.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/boot/spring-boot-configuration-processor/3.5.6/spring-boot-configuration-processor-3.5.6.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/boot/spring-boot-starter-webflux/3.5.6/spring-boot-starter-webflux-3.5.6.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/boot/spring-boot-starter-reactor-netty/3.5.6/spring-boot-starter-reactor-netty-3.5.6.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/io/projectreactor/netty/reactor-netty-http/1.2.10/reactor-netty-http-1.2.10.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-codec-http2/4.1.127.Final/netty-codec-http2-4.1.127.Final.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-resolver-dns/4.1.127.Final/netty-resolver-dns-4.1.127.Final.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-codec-dns/4.1.127.Final/netty-codec-dns-4.1.127.Final.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-resolver-dns-native-macos/4.1.127.Final/netty-resolver-dns-native-macos-4.1.127.Final-osx-x86_64.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-resolver-dns-classes-macos/4.1.127.Final/netty-resolver-dns-classes-macos-4.1.127.Final.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-transport-native-epoll/4.1.127.Final/netty-transport-native-epoll-4.1.127.Final-linux-x86_64.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-transport-classes-epoll/4.1.127.Final/netty-transport-classes-epoll-4.1.127.Final.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/io/projectreactor/netty/reactor-netty-core/1.2.10/reactor-netty-core-1.2.10.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-handler-proxy/4.1.127.Final/netty-handler-proxy-4.1.127.Final.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/io/netty/netty-codec-socks/4.1.127.Final/netty-codec-socks-4.1.127.Final.jar" enabled="true" runInBatchMode="false"/>
-    <factorypathentry kind="VARJAR" id="M2_REPO/org/springframework/spring-webflux/6.2.11/spring-webflux-6.2.11.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/io/projectreactor/reactor-core/3.7.11/reactor-core-3.7.11.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/org/reactivestreams/reactive-streams/1.0.4/reactive-streams-1.0.4.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="VARJAR" id="M2_REPO/com/google/http-client/google-http-client-jackson2/1.43.3/google-http-client-jackson2-1.43.3.jar" enabled="true" runInBatchMode="false"/>
+    <factorypathentry kind="VARJAR" id="M2_REPO/com/fasterxml/jackson/core/jackson-core/2.19.2/jackson-core-2.19.2.jar" enabled="true" runInBatchMode="false"/>
     <factorypathentry kind="PLUGIN" id="org.eclipse.jst.ws.annotations.core" enabled="false" runInBatchMode="false"/>
 </factorypath>

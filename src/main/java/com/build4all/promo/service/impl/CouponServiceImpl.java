@@ -1,5 +1,6 @@
 package com.build4all.promo.service.impl;
 
+import com.build4all.common.errors.ApiException;
 import com.build4all.promo.domain.Coupon;
 import com.build4all.promo.domain.CouponDiscountType;
 import com.build4all.promo.dto.CouponRequest;
@@ -7,6 +8,8 @@ import com.build4all.promo.dto.CouponResponse;
 import com.build4all.promo.repository.CouponRepository;
 import com.build4all.promo.service.CouponService;
 import jakarta.transaction.Transactional;
+
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -224,35 +227,65 @@ public class CouponServiceImpl implements CouponService {
             throw new IllegalArgumentException("ownerProjectId is required");
         }
         if (code == null || code.isBlank()) {
-            throw new IllegalArgumentException("coupon code is required");
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "COUPON_INVALID",
+                    "Coupon code is required"
+            );
         }
 
         Coupon coupon = couponRepository
                 .findByOwnerProjectIdAndCodeIgnoreCase(ownerProjectId, code.trim())
-                .orElseThrow(() -> new IllegalArgumentException("Coupon not found"));
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.BAD_REQUEST,
+                        "COUPON_INVALID",
+                        "Coupon not found"
+                ));
 
         if (!coupon.isActive()) {
-            return null;
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "COUPON_INVALID",
+                    "Coupon is inactive"
+            );
         }
 
         LocalDateTime now = LocalDateTime.now();
+
         if (coupon.getValidFrom() != null && now.isBefore(coupon.getValidFrom())) {
-            return null;
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "COUPON_INVALID",
+                    "Coupon is not active yet"
+            );
         }
+
         if (coupon.getValidTo() != null && now.isAfter(coupon.getValidTo())) {
-            return null;
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "COUPON_EXPIRED",
+                    "Coupon is expired"
+            );
         }
 
         if (coupon.getMinOrderAmount() != null
                 && itemsSubtotal != null
                 && itemsSubtotal.compareTo(coupon.getMinOrderAmount()) < 0) {
-            return null;
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "COUPON_MINIMUM_NOT_REACHED",
+                    "Order minimum was not reached"
+            );
         }
 
         if (coupon.getGlobalUsageLimit() != null
                 && coupon.getUsedCount() != null
                 && coupon.getUsedCount() >= coupon.getGlobalUsageLimit()) {
-            return null;
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "COUPON_USAGE_LIMIT_REACHED",
+                    "Coupon usage limit reached"
+            );
         }
 
         return coupon;
