@@ -15,6 +15,7 @@ import com.build4all.catalog.domain.Currency;
 import com.build4all.catalog.repository.CurrencyRepository;
 import com.build4all.licensing.service.LicensingService;
 import com.build4all.project.domain.Project;
+import com.build4all.project.domain.ProjectType;
 import com.build4all.project.repository.ProjectRepository;
 import com.build4all.theme.domain.Theme;
 import com.build4all.theme.repository.ThemeRepository;
@@ -53,6 +54,8 @@ public class AppRequestService {
 
     // ✅ last-step: track jobs
     private final AppBuildJobService buildJobService;
+    
+    private final AppRuntimeConfigPolicyValidator runtimePolicyValidator;
 
     // ✅ env suffix from application.properties (test/dev/prod...)
     @Value("${build4all.envSuffix:test}")
@@ -62,28 +65,30 @@ public class AppRequestService {
     private final AppEnvCounterRepository envCounterRepo;
 
     public AppRequestService(AppRequestRepository appRequestRepo,
-                             AdminUserProjectRepository aupRepo,
-                             AdminUsersRepository adminRepo,
-                             ProjectRepository projectRepo,
-                             ThemeRepository themeRepo,
-                             CiBuildService ciBuildService,
-                             CurrencyRepository currencyRepo,
-                             AppRuntimeConfigRepository runtimeRepo,
-                             LicensingService licensingService,
-                             AppBuildJobService buildJobService,
-                             AppEnvCounterRepository envCounterRepo) {
-        this.appRequestRepo = appRequestRepo;
-        this.aupRepo = aupRepo;
-        this.adminRepo = adminRepo;
-        this.projectRepo = projectRepo;
-        this.themeRepo = themeRepo;
-        this.ciBuildService = ciBuildService;
-        this.currencyRepo = currencyRepo;
-        this.runtimeRepo = runtimeRepo;
-        this.licensingService = licensingService;
-        this.buildJobService = buildJobService;
-        this.envCounterRepo = envCounterRepo;
-    }
+            AdminUserProjectRepository aupRepo,
+            AdminUsersRepository adminRepo,
+            ProjectRepository projectRepo,
+            ThemeRepository themeRepo,
+            CiBuildService ciBuildService,
+            CurrencyRepository currencyRepo,
+            AppRuntimeConfigRepository runtimeRepo,
+            LicensingService licensingService,
+            AppBuildJobService buildJobService,
+            AppEnvCounterRepository envCounterRepo,
+            AppRuntimeConfigPolicyValidator runtimePolicyValidator) {
+this.appRequestRepo = appRequestRepo;
+this.aupRepo = aupRepo;
+this.adminRepo = adminRepo;
+this.projectRepo = projectRepo;
+this.themeRepo = themeRepo;
+this.ciBuildService = ciBuildService;
+this.currencyRepo = currencyRepo;
+this.runtimeRepo = runtimeRepo;
+this.licensingService = licensingService;
+this.buildJobService = buildJobService;
+this.envCounterRepo = envCounterRepo;
+this.runtimePolicyValidator = runtimePolicyValidator;
+}
 
     // ------------------------------------------------------------------
     // ✅ ENV + COUNTER HELPERS
@@ -282,19 +287,15 @@ public class AppRequestService {
             String homeJson,
             String enabledFeaturesJson,
             String brandingJson,
-            String apiBaseUrlOverride,
-            String ownerEmail,
-            String ownerName
+            String apiBaseUrlOverride
     ) throws IOException {
-
+    	
         String base = (slug != null && !slug.isBlank()) ? slugify(slug) : slugify(appName);
         String uniqueSlug = ensureUniqueSlug(ownerId, projectId, base);
 
         String logoUrl = null;
-        byte[] logoBytes = null;
         if (logoFile != null && !logoFile.isEmpty()) {
             logoUrl = saveOwnerAppLogoToUploads(ownerId, projectId, uniqueSlug, logoFile);
-            logoBytes = logoFile.getBytes();
         }
 
         Long chosenThemeId = resolveThemeIdFromRaw(themeId);
@@ -312,18 +313,14 @@ public class AppRequestService {
         r.setCurrencyId(currencyId);
         r = appRequestRepo.save(r);
 
-        AdminUserProject link = provisionAndTrigger(
-                r, logoBytes,
-                navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride
+        return provisionOnly(
+                r,
+                navJson,
+                homeJson,
+                enabledFeaturesJson,
+                brandingJson,
+                apiBaseUrlOverride
         );
-
-        triggerIosForExistingLink(
-                link, r, logoBytes,
-                navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride,
-                ownerEmail, ownerName
-        );
-
-        return link;
     }
 
     @Transactional
@@ -521,6 +518,82 @@ public class AppRequestService {
     private void enforceLicenseForBuild(AdminUserProject link) {
         licensingService.ensureSubscriptionExists(link);
         licensingService.requireBuildAllowed(link.getId());
+    }
+    
+    
+    private AdminUserProject provisionOnly(
+            AppRequest req,
+            String navJson,
+            String homeJson,
+            String enabledFeaturesJson,
+            String brandingJson,
+            String apiBaseUrlOverride
+    ) {
+        AdminUser owner = adminRepo.findById(req.getOwnerId())
+                .orElseThrow(() -> new IllegalArgumentException("Owner(admin) not found"));
+
+        Project project = projectRepo.findById(req.getProjectId())
+                .orElseThrow(() -> new IllegalArgumentException("Project not found"));
+
+        Long chosenThemeId = resolveThemeId(req);
+
+        String desiredSlug = (req.getSlug() != null && !req.getSlug().isBlank())
+                ? req.getSlug().trim().toLowerCase()
+                : slugify(req.getAppName());
+
+        String uniqueSlug = ensureUniqueSlug(owner.getAdminId(), project.getId(), desiredSlug);
+
+        LocalDate now = LocalDate.now();
+        LocalDate end = now.plusMonths(1);
+
+        AdminUserProject link = aupRepo
+                .findByAdmin_AdminIdAndProject_IdAndSlug(owner.getAdminId(), project.getId(), uniqueSlug)
+                .orElseGet(() -> {
+                    AdminUserProject n = new AdminUserProject(owner, project, null, now, end);
+                    n.setSlug(uniqueSlug);
+                    return n;
+                });
+
+        link.setStatus("TEST");
+        link.setAppName(req.getAppName());
+        link.setLogoUrl(req.getLogoUrl());
+        link.setValidFrom(now);
+        link.setEndTo(end);
+        link.setThemeId(chosenThemeId);
+
+        Long currencyId = req.getCurrencyId();
+        if (currencyId != null) {
+            Currency c = currencyRepo.findById(currencyId)
+                    .orElseThrow(() -> new IllegalArgumentException("Currency not found: " + currencyId));
+            link.setCurrency(c);
+        }
+
+        if (link.getLicenseId() == null || link.getLicenseId().isBlank()) {
+            link.setLicenseId("LIC-" + owner.getAdminId() + "-" + project.getId() + "-" + now + "-" + uniqueSlug);
+        }
+
+        // reset artifacts
+        link.setApkUrl(null);
+        link.setBundleUrl(null);
+        link.setIpaUrl(null);
+
+        // prepare initial versions / ids
+        link.bumpAndroidVersion();
+        link.bumpIosVersion();
+
+        link = aupRepo.save(link);
+
+        ensureEnvAndNumber(link);
+        link.ensureAndroidPackageName();
+        link.ensureIosBundleId();
+
+        link = aupRepo.save(link);
+
+        enforceLicenseForBuild(link);
+
+        upsertRuntimeConfig(link, navJson, homeJson, enabledFeaturesJson, brandingJson, apiBaseUrlOverride);
+
+        return link;
     }
 
     private void triggerIosForExistingLink(
@@ -829,35 +902,81 @@ public class AppRequestService {
     }
 
     private void upsertRuntimeConfig(AdminUserProject link,
-                                     String navJson,
-                                     String homeJson,
-                                     String enabledFeaturesJson,
-                                     String brandingJson,
-                                     String apiBaseUrlOverride) {
+            String navJson,
+            String homeJson,
+            String enabledFeaturesJson,
+            String brandingJson,
+            String apiBaseUrlOverride) {
 
-        boolean hasAny =
-                (navJson != null && !navJson.isBlank()) ||
-                        (homeJson != null && !homeJson.isBlank()) ||
-                        (enabledFeaturesJson != null && !enabledFeaturesJson.isBlank()) ||
-                        (brandingJson != null && !brandingJson.isBlank()) ||
-                        (apiBaseUrlOverride != null && !apiBaseUrlOverride.isBlank());
+			boolean hasAny =
+			hasText(navJson) ||
+			hasText(homeJson) ||
+			hasText(enabledFeaturesJson) ||
+			hasText(brandingJson) ||
+			hasText(apiBaseUrlOverride) ||
+			navJson != null ||
+			homeJson != null ||
+			enabledFeaturesJson != null ||
+			brandingJson != null ||
+			apiBaseUrlOverride != null;
+			
+			if (!hasAny) return;
+			
+			AppRuntimeConfig cfg = runtimeRepo.findByApp_Id(link.getId()).orElseGet(() -> {
+			AppRuntimeConfig c = new AppRuntimeConfig();
+			c.setApp(link);
+			return c;
+			});
+			
+			String mergedNavJson = navJson != null ? navJson : cfg.getNavJson();
+			String mergedHomeJson = homeJson != null ? homeJson : cfg.getHomeJson();
+			String mergedEnabledFeaturesJson = enabledFeaturesJson != null
+			? enabledFeaturesJson
+			: cfg.getEnabledFeaturesJson();
+			String mergedBrandingJson = brandingJson != null ? brandingJson : cfg.getBrandingJson();
+			
+			boolean hasRuntimePayload =
+			hasText(mergedNavJson) ||
+			hasText(mergedHomeJson) ||
+			hasText(mergedEnabledFeaturesJson) ||
+			hasText(mergedBrandingJson);
+			
+			if (hasRuntimePayload) {
+			ProjectType projectType = ProjectType.ECOMMERCE;
+			if (link.getProject() != null && link.getProject().getProjectType() != null) {
+			projectType = link.getProject().getProjectType();
+			}
+			
+			AppRuntimeConfigPolicyValidator.ValidatedRuntimeConfig validated =
+			runtimePolicyValidator.validate(
+			   projectType,
+			   mergedNavJson,
+			   mergedHomeJson,
+			   mergedEnabledFeaturesJson,
+			   mergedBrandingJson
+			);
+			
+			cfg.setNavJson(validated.navJson());
+			cfg.setHomeJson(validated.homeJson());
+			cfg.setEnabledFeaturesJson(validated.enabledFeaturesJson());
+			cfg.setBrandingJson(validated.brandingJson());
+			} else {
+			if (navJson != null) cfg.setNavJson(navJson);
+			if (homeJson != null) cfg.setHomeJson(homeJson);
+			if (enabledFeaturesJson != null) cfg.setEnabledFeaturesJson(enabledFeaturesJson);
+			if (brandingJson != null) cfg.setBrandingJson(brandingJson);
+			}
+			
+			if (apiBaseUrlOverride != null) {
+			cfg.setApiBaseUrlOverride(apiBaseUrlOverride);
+			}
+			
+			runtimeRepo.save(cfg);
+			}
 
-        if (!hasAny) return;
-
-        AppRuntimeConfig cfg = runtimeRepo.findByApp_Id(link.getId()).orElseGet(() -> {
-            AppRuntimeConfig c = new AppRuntimeConfig();
-            c.setApp(link);
-            return c;
-        });
-
-        if (navJson != null) cfg.setNavJson(navJson);
-        if (homeJson != null) cfg.setHomeJson(homeJson);
-        if (enabledFeaturesJson != null) cfg.setEnabledFeaturesJson(enabledFeaturesJson);
-        if (brandingJson != null) cfg.setBrandingJson(brandingJson);
-        if (apiBaseUrlOverride != null) cfg.setApiBaseUrlOverride(apiBaseUrlOverride);
-
-        runtimeRepo.save(cfg);
-    }
+private boolean hasText(String value) {
+return value != null && !value.isBlank();
+}
 
     private Long resolveThemeId(AppRequest req) {
         Long requested = req.getThemeId();

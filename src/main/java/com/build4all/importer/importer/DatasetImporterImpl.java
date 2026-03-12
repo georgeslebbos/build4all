@@ -298,7 +298,11 @@ public class DatasetImporterImpl implements DatasetImporter {
             }
 
             c.setGlobalUsageLimit(cs.globalUsageLimit);
-            c.setMaxDiscountAmount(cs.maxDiscountAmount);
+            if (t == CouponDiscountType.PERCENT) {
+                c.setMaxDiscountAmount(cs.maxDiscountAmount);
+            } else {
+                c.setMaxDiscountAmount(null);
+            }
             c.setMinOrderAmount(cs.minOrderAmount);
             c.setValidFrom(cs.validFrom);
             c.setValidTo(cs.validTo);

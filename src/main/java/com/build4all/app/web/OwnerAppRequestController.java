@@ -10,6 +10,7 @@ import com.build4all.app.dto.CreateAppRequestDto;
 import com.build4all.app.repository.AppBuildJobRepository;
 import com.build4all.app.repository.AppRequestRepository;
 import com.build4all.app.service.AppRequestService;
+import com.build4all.app.service.OwnerQueuedBuildAsyncService;
 import com.build4all.app.service.ThemeJsonBuilder;
 import com.build4all.security.JwtUtil;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,6 +38,7 @@ public class OwnerAppRequestController {
     private final JwtUtil jwtUtil;
     private final AdminUsersRepository adminRepo;
     private final AppBuildJobRepository buildJobRepo;
+    private final OwnerQueuedBuildAsyncService queuedBuildAsyncService;
 
     @Value("${ci.callbackUrl:}")
     private String callbackBase;
@@ -47,7 +49,8 @@ public class OwnerAppRequestController {
             AdminUserProjectRepository aupRepo,
             JwtUtil jwtUtil,
             AdminUsersRepository adminRepo,
-            AppBuildJobRepository buildJobRepo
+            AppBuildJobRepository buildJobRepo,
+            OwnerQueuedBuildAsyncService queuedBuildAsyncService
     ) {
         this.service = service;
         this.appRequestRepo = appRequestRepo;
@@ -55,6 +58,7 @@ public class OwnerAppRequestController {
         this.jwtUtil = jwtUtil;
         this.adminRepo = adminRepo;
         this.buildJobRepo = buildJobRepo;
+        this.queuedBuildAsyncService = queuedBuildAsyncService;
     }
 
     private String rootCauseMessage(Throwable ex) {
@@ -464,15 +468,28 @@ public class OwnerAppRequestController {
                     homeJson,
                     enabledFeaturesJson,
                     brandingJson,
-                    apiBaseUrlOverride,
-                    ownerEmail,
-                    ownerName
+                    apiBaseUrlOverride
             );
 
             link = aupRepo.findById(link.getId()).orElse(link);
 
             Map<String, Object> body = new HashMap<>();
-            body.put("message", "Android + iOS builds started");
+            queuedBuildAsyncService.dispatchBoth(
+                    link.getId(),
+                    apiBaseUrlOverride,
+                    navJson,
+                    homeJson,
+                    enabledFeaturesJson,
+                    brandingJson,
+                    ownerEmail,
+                    ownerName
+            );
+
+            body.put("message", "Android + iOS builds queued");
+            body.put("buildStatusUrl", "/api/owner/apps/" + link.getId() + "/build-status");
+            body.put("buildJobsUrl", "/api/owner/apps/" + link.getId() + "/build-jobs/latest");
+
+          
             body.put("adminId", ownerId);
             body.put("projectId", projectId);
             body.put("ownerProjectLinkId", link.getId());
@@ -509,7 +526,7 @@ public class OwnerAppRequestController {
                             + "&projectId=" + projectId
                             + "&slug=" + link.getSlug());
 
-            return ResponseEntity.ok(body);
+            return ResponseEntity.accepted().body(body);
 
         } catch (ResponseStatusException ex) {
             return ResponseEntity.status(ex.getStatusCode()).body(Map.of("error", ex.getReason()));
