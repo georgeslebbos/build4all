@@ -78,7 +78,11 @@ public class CouponServiceImpl implements CouponService {
         coupon.setValue(value);
         coupon.setGlobalUsageLimit(req.getMaxUses());
         coupon.setMinOrderAmount(req.getMinOrderAmount());
-        coupon.setMaxDiscountAmount(req.getMaxDiscountAmount());
+        if (type == CouponDiscountType.PERCENT) {
+            coupon.setMaxDiscountAmount(req.getMaxDiscountAmount());
+        } else {
+            coupon.setMaxDiscountAmount(null);
+        }
         coupon.setValidFrom(req.getStartsAt());
         coupon.setValidTo(req.getExpiresAt());
 
@@ -172,7 +176,14 @@ public class CouponServiceImpl implements CouponService {
 
         if (req.getMaxUses() != null) existing.setGlobalUsageLimit(req.getMaxUses());
         if (req.getMinOrderAmount() != null) existing.setMinOrderAmount(req.getMinOrderAmount());
-        if (req.getMaxDiscountAmount() != null) existing.setMaxDiscountAmount(req.getMaxDiscountAmount());
+        if (existing.getType() == CouponDiscountType.PERCENT) {
+            if (req.getMaxDiscountAmount() != null) {
+                existing.setMaxDiscountAmount(req.getMaxDiscountAmount());
+            }
+        } else {
+            // ✅ For FIXED / FREE_SHIPPING ignore max discount
+            existing.setMaxDiscountAmount(null);
+        }
         if (req.getStartsAt() != null) existing.setValidFrom(req.getStartsAt());
         if (req.getExpiresAt() != null) existing.setValidTo(req.getExpiresAt());
 
@@ -181,6 +192,21 @@ public class CouponServiceImpl implements CouponService {
             existing.setActive(req.getActive());
         }
 
+        
+        if (req.getDiscountType() != null && !req.getDiscountType().isBlank()) {
+            CouponDiscountType type = CouponDiscountType.valueOf(req.getDiscountType().toUpperCase());
+            existing.setType(type);
+
+            if (type == CouponDiscountType.FREE_SHIPPING) {
+                existing.setValue(BigDecimal.ZERO);
+            }
+
+            // ✅ only percentage coupons may keep maxDiscountAmount
+            if (type != CouponDiscountType.PERCENT) {
+                existing.setMaxDiscountAmount(null);
+            }
+        }
+        
         return couponRepository.save(existing);
     }
 
@@ -300,7 +326,7 @@ public class CouponServiceImpl implements CouponService {
 
         BigDecimal base = itemsSubtotal;
 
-        // FREE_SHIPPING is handled in shipping logic
+        // FREE_SHIPPING handled elsewhere
         if (coupon.getType() == CouponDiscountType.FREE_SHIPPING) {
             return BigDecimal.ZERO;
         }
@@ -315,25 +341,32 @@ public class CouponServiceImpl implements CouponService {
         if (coupon.getType() == CouponDiscountType.PERCENT) {
             discount = base.multiply(value)
                     .divide(BigDecimal.valueOf(100));
-        } else if (coupon.getType() == CouponDiscountType.FIXED) {
-            discount = value;
-        }
 
-        if (coupon.getMaxDiscountAmount() != null
-                && discount.compareTo(coupon.getMaxDiscountAmount()) > 0) {
-            discount = coupon.getMaxDiscountAmount();
+            // ✅ maxDiscountAmount applies ONLY to percentage coupons
+            if (coupon.getMaxDiscountAmount() != null
+                    && coupon.getMaxDiscountAmount().compareTo(BigDecimal.ZERO) > 0
+                    && discount.compareTo(coupon.getMaxDiscountAmount()) > 0) {
+                discount = coupon.getMaxDiscountAmount();
+            }
+
+        } else if (coupon.getType() == CouponDiscountType.FIXED) {
+            // ✅ FIXED must always apply exact fixed value
+            // ignore maxDiscountAmount completely
+            discount = value;
         }
 
         if (discount.compareTo(BigDecimal.ZERO) < 0) {
             discount = BigDecimal.ZERO;
         }
+
+        // never discount more than subtotal
         if (discount.compareTo(base) > 0) {
             discount = base;
         }
 
         return discount;
     }
-
+    
     /* ============================
        MAPPER
        ============================ */
