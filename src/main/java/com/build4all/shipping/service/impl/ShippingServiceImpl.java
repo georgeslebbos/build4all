@@ -40,7 +40,7 @@ public class ShippingServiceImpl implements ShippingService {
                 total = total.add(lineSubtotal);
             } else if (line.getUnitPrice() != null) {
                 BigDecimal unit = safe(line.getUnitPrice());
-                BigDecimal qty  = BigDecimal.valueOf(line.getQuantity());
+                BigDecimal qty = BigDecimal.valueOf(line.getQuantity());
                 total = total.add(unit.multiply(qty));
             }
         }
@@ -61,8 +61,72 @@ public class ShippingServiceImpl implements ShippingService {
         return total;
     }
 
+    private boolean matchesAddress(ShippingMethod method, ShippingAddressDTO addr) {
+        if (method == null) return false;
+
+        Long methodCountryId = method.getCountry() != null ? method.getCountry().getId() : null;
+        Long methodRegionId = method.getRegion() != null ? method.getRegion().getId() : null;
+
+        Long addrCountryId = addr != null ? addr.getCountryId() : null;
+        Long addrRegionId = addr != null ? addr.getRegionId() : null;
+
+        // If method is restricted by country, address must match it
+        if (methodCountryId != null) {
+            if (addrCountryId == null || !methodCountryId.equals(addrCountryId)) {
+                return false;
+            }
+        }
+
+        // If method is restricted by region, address must match it
+        if (methodRegionId != null) {
+            if (addrRegionId == null || !methodRegionId.equals(addrRegionId)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /**
-     * Core pricing logic based on ShippingMethodType.
+     * Decide if this method should appear at checkout.
+     * Filter first, then calculate.
+     */
+    private boolean isEligible(ShippingMethod method,
+                               ShippingAddressDTO addr,
+                               BigDecimal itemsSubtotal,
+                               BigDecimal totalWeight) {
+
+        if (method == null || !method.isEnabled()) return false;
+
+        if (!matchesAddress(method, addr)) {
+            return false;
+        }
+
+        ShippingMethodType type = method.getType();
+        if (type == null) type = ShippingMethodType.FLAT_RATE;
+
+        switch (type) {
+            case FREE:
+            case LOCAL_PICKUP:
+            case FLAT_RATE:
+            case PRICE_BASED:
+                return true;
+
+            case WEIGHT_BASED:
+            case PRICE_PER_KG:
+                return totalWeight.compareTo(BigDecimal.ZERO) > 0;
+
+            case FREE_OVER_THRESHOLD:
+                BigDecimal threshold = method.getFreeShippingThreshold();
+                return threshold != null && itemsSubtotal.compareTo(threshold) >= 0;
+
+            default:
+                return true;
+        }
+    }
+
+    /**
+     * Core pricing logic after eligibility passed.
      */
     private BigDecimal computePrice(ShippingMethod method,
                                     BigDecimal itemsSubtotal,
@@ -73,51 +137,60 @@ public class ShippingServiceImpl implements ShippingService {
         ShippingMethodType type = method.getType();
         if (type == null) type = ShippingMethodType.FLAT_RATE;
 
-        BigDecimal flat       = safe(method.getFlatRate());
-        BigDecimal perKg      = safe(method.getPricePerKg());
-        BigDecimal threshold  = method.getFreeShippingThreshold();
+        BigDecimal flat = safe(method.getFlatRate());
+        BigDecimal perKg = safe(method.getPricePerKg());
+        BigDecimal threshold = method.getFreeShippingThreshold();
 
         switch (type) {
             case FREE:
-                // Always free
                 return BigDecimal.ZERO;
 
             case LOCAL_PICKUP:
-                // Customer picks up → no shipping cost
                 return BigDecimal.ZERO;
 
             case FLAT_RATE:
-                // Fixed cost
                 return flat;
 
             case WEIGHT_BASED:
             case PRICE_PER_KG:
-                // Cost based solely on weight
                 return perKg.multiply(safe(totalWeight));
 
             case PRICE_BASED:
-                // For now: same as flat rate.
-                // You can change later to: flat + (itemsSubtotal * percentage) etc.
                 return flat;
 
             case FREE_OVER_THRESHOLD:
-                // If subtotal >= threshold → free
                 if (threshold != null && itemsSubtotal.compareTo(threshold) >= 0) {
                     return BigDecimal.ZERO;
                 }
-                // Otherwise: fallback to flat, then per-kg, then 0
-                if (flat.compareTo(BigDecimal.ZERO) > 0) {
-                    return flat;
-                }
-                if (perKg.compareTo(BigDecimal.ZERO) > 0) {
-                    return perKg.multiply(safe(totalWeight));
-                }
+                // Not eligible logically, but safety fallback:
                 return BigDecimal.ZERO;
 
             default:
-                // Safety net
                 return flat;
         }
+    }
+
+    private List<ShippingMethod> findEligibleMethods(Long ownerProjectId,
+                                                     ShippingAddressDTO addr,
+                                                     List<CartLine> cartLines) {
+        List<ShippingMethod> methods =
+                methodRepository.findByOwnerProject_IdAndEnabledTrue(ownerProjectId);
+
+        if (methods == null || methods.isEmpty()) {
+            return List.of();
+        }
+
+        BigDecimal itemsSubtotal = sumItemsSubtotal(cartLines);
+        BigDecimal totalWeight = sumTotalWeight(cartLines);
+
+        List<ShippingMethod> eligible = new ArrayList<>();
+        for (ShippingMethod method : methods) {
+            if (isEligible(method, addr, itemsSubtotal, totalWeight)) {
+                eligible.add(method);
+            }
+        }
+
+        return eligible;
     }
 
     /* ========================= main API ========================= */
@@ -131,12 +204,9 @@ public class ShippingServiceImpl implements ShippingService {
             throw new IllegalArgumentException("ownerProjectId is required for shipping quote");
         }
 
-        // 1) Load enabled methods for that app
-        List<ShippingMethod> methods =
-                methodRepository.findByOwnerProject_IdAndEnabledTrue(ownerProjectId);
+        List<ShippingMethod> eligibleMethods = findEligibleMethods(ownerProjectId, addr, cartLines);
 
-        if (methods == null || methods.isEmpty()) {
-            // No methods configured → 0 cost
+        if (eligibleMethods.isEmpty()) {
             return new ShippingQuote(
                     null,
                     "No shipping",
@@ -145,40 +215,36 @@ public class ShippingServiceImpl implements ShippingService {
             );
         }
 
-        // 2) Compute totals for pricing logic
         BigDecimal itemsSubtotal = sumItemsSubtotal(cartLines);
-        BigDecimal totalWeight   = sumTotalWeight(cartLines);
+        BigDecimal totalWeight = sumTotalWeight(cartLines);
 
-        // 3) Choose a method:
-        //    - if addr contains shippingMethodId, prefer that
-        //    - else fall back to the first enabled method
         ShippingMethod chosen = null;
         Long requestedMethodId = (addr != null) ? addr.getShippingMethodId() : null;
 
         if (requestedMethodId != null) {
-            for (ShippingMethod m : methods) {
+            for (ShippingMethod m : eligibleMethods) {
                 if (m.getId().equals(requestedMethodId)) {
                     chosen = m;
                     break;
                 }
             }
+
+            if (chosen == null) {
+                throw new IllegalArgumentException("Selected shipping method is not available for this address/cart");
+            }
         }
 
         if (chosen == null) {
-            chosen = methods.get(0);
+            chosen = eligibleMethods.get(0);
         }
 
-        // 4) Compute final shipping price
         BigDecimal price = computePrice(chosen, itemsSubtotal, totalWeight);
-
-        // (Optional) You can inject currency symbol from elsewhere.
-        String currencySymbol = null;
 
         return new ShippingQuote(
                 chosen.getId(),
                 chosen.getName(),
                 price,
-                currencySymbol
+                null
         );
     }
 
@@ -191,26 +257,26 @@ public class ShippingServiceImpl implements ShippingService {
             throw new IllegalArgumentException("ownerProjectId is required for shipping methods");
         }
 
-        List<ShippingMethod> methods =
-                methodRepository.findByOwnerProject_IdAndEnabledTrue(ownerProjectId);
+        List<ShippingMethod> eligibleMethods = findEligibleMethods(ownerProjectId, addr, cartLines);
 
-        if (methods == null || methods.isEmpty()) {
+        if (eligibleMethods.isEmpty()) {
             return List.of();
         }
 
         BigDecimal itemsSubtotal = sumItemsSubtotal(cartLines);
-        BigDecimal totalWeight   = sumTotalWeight(cartLines);
+        BigDecimal totalWeight = sumTotalWeight(cartLines);
 
         List<ShippingQuote> quotes = new ArrayList<>();
-        for (ShippingMethod method : methods) {
+        for (ShippingMethod method : eligibleMethods) {
             BigDecimal price = computePrice(method, itemsSubtotal, totalWeight);
             quotes.add(new ShippingQuote(
                     method.getId(),
                     method.getName(),
                     price,
-                    null  // currency symbol (optional)
+                    null
             ));
         }
+
         return quotes;
     }
 }
