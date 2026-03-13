@@ -333,7 +333,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
            JOIN oi.item i
            WHERE i.ownerProject.id = :ownerProjectId
              AND UPPER(o.status.name) = 'COMPLETED'
-             AND LOWER(i.status) = 'published'
+             AND UPPER(i.status.code) = 'PUBLISHED'
              AND TYPE(i) = com.build4all.features.ecommerce.domain.Product
            GROUP BY oi.item.id
            ORDER BY totalQty DESC
