@@ -5,12 +5,14 @@ import com.build4all.app.internaltesting.dto.IosInternalTestingRequestResponseDt
 import com.build4all.app.internaltesting.service.IosInternalTestingRequestService;
 import com.build4all.security.JwtUtil;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -86,12 +88,34 @@ public class OwnerIosInternalTestingRequestController {
         }
     }
 
+    @GetMapping("/{linkId}/ios-internal-requests")
+    public ResponseEntity<Map<String, Object>> listIosInternalTestingRequests(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable("linkId") Long linkId
+    ) {
+        Long requesterAdminId = jwtUtil.extractAdminId(tokenFromHeader(authHeader));
+
+        List<IosInternalTestingRequestResponseDto> requests =
+                service.listRequestsForApp(requesterAdminId, linkId);
+
+        long usedSlots = service.getUsedSlotsForApp(requesterAdminId, linkId);
+        int maxSlots = service.getMaxSlotsPerApp();
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("message", "iOS internal testing requests fetched successfully");
+        body.put("requests", requests);
+        body.put("usedSlots", usedSlots);
+        body.put("maxSlots", maxSlots);
+
+        return ResponseEntity.ok(body);
+    }
+
     private Long adminIdFromToken(String authHeader) {
         String token = extractToken(authHeader);
 
         if (!jwtUtil.validateToken(token)) {
             throw new ResponseStatusException(
-                    org.springframework.http.HttpStatus.UNAUTHORIZED,
+                    HttpStatus.UNAUTHORIZED,
                     "Invalid token"
             );
         }
@@ -99,7 +123,7 @@ public class OwnerIosInternalTestingRequestController {
         String role = jwtUtil.extractRole(token);
         if (role == null || (!role.equalsIgnoreCase("OWNER") && !role.equalsIgnoreCase("SUPER_ADMIN"))) {
             throw new ResponseStatusException(
-                    org.springframework.http.HttpStatus.FORBIDDEN,
+                    HttpStatus.FORBIDDEN,
                     "Forbidden"
             );
         }
@@ -107,7 +131,7 @@ public class OwnerIosInternalTestingRequestController {
         Long adminId = jwtUtil.extractAdminId(token);
         if (adminId == null) {
             throw new ResponseStatusException(
-                    org.springframework.http.HttpStatus.UNAUTHORIZED,
+                    HttpStatus.UNAUTHORIZED,
                     "Missing admin id in token"
             );
         }
@@ -115,10 +139,22 @@ public class OwnerIosInternalTestingRequestController {
         return adminId;
     }
 
+    private String tokenFromHeader(String authHeader) {
+        if (authHeader == null || authHeader.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing Authorization header");
+        }
+
+        if (!authHeader.startsWith("Bearer ")) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid Authorization header");
+        }
+
+        return authHeader.substring(7);
+    }
+
     private String extractToken(String authHeader) {
         if (authHeader == null || authHeader.isBlank() || !authHeader.startsWith("Bearer ")) {
             throw new ResponseStatusException(
-                    org.springframework.http.HttpStatus.UNAUTHORIZED,
+                    HttpStatus.UNAUTHORIZED,
                     "Missing/invalid Authorization header"
             );
         }

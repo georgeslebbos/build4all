@@ -22,4 +22,13 @@ public interface IosInternalTestingRequestRepository extends JpaRepository<IosIn
     List<IosInternalTestingRequest> findByStatusInOrderByCreatedAtAsc(
             Collection<IosInternalTestingRequestStatus> statuses
     );
+    
+ // ✅ NEW: list all requests for one app
+    List<IosInternalTestingRequest> findByOwnerProjectLinkIdOrderByCreatedAtDesc(Long ownerProjectLinkId);
+
+    // ✅ NEW: count used slots for one app
+    long countByOwnerProjectLinkIdAndStatusIn(
+            Long ownerProjectLinkId,
+            Collection<IosInternalTestingRequestStatus> statuses
+    );
 }
