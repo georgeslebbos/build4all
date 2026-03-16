@@ -18,10 +18,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
-
+import org.springframework.beans.factory.annotation.Value;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Service
 @Transactional
@@ -31,17 +32,31 @@ public class IosInternalTestingRequestService {
     private final AdminUserProjectRepository adminUserProjectRepository;
     private final AdminUsersRepository adminUsersRepository;
     private final AppleInternalTestingGateway appleInternalTestingGateway;
+    private final boolean autoProcessOnCreate;
+    
+    private static final int MAX_INTERNAL_TESTERS_PER_APP = 10;
 
+    private static final Set<IosInternalTestingRequestStatus> SLOT_CONSUMING_STATUSES = Set.of(
+            IosInternalTestingRequestStatus.REQUESTED,
+            IosInternalTestingRequestStatus.PROCESSING,
+            IosInternalTestingRequestStatus.INVITED_TO_APPLE_TEAM,
+            IosInternalTestingRequestStatus.WAITING_OWNER_ACCEPTANCE,
+            IosInternalTestingRequestStatus.ADDING_TO_INTERNAL_TESTING,
+            IosInternalTestingRequestStatus.READY
+    );
+    
     public IosInternalTestingRequestService(
             IosInternalTestingRequestRepository requestRepository,
             AdminUserProjectRepository adminUserProjectRepository,
             AdminUsersRepository adminUsersRepository,
-            AppleInternalTestingGateway appleInternalTestingGateway
+            AppleInternalTestingGateway appleInternalTestingGateway,
+            @Value("${build4all.ios-internal.auto-process-on-create:true}") boolean autoProcessOnCreate
     ) {
         this.requestRepository = requestRepository;
         this.adminUserProjectRepository = adminUserProjectRepository;
         this.adminUsersRepository = adminUsersRepository;
         this.appleInternalTestingGateway = appleInternalTestingGateway;
+        this.autoProcessOnCreate = autoProcessOnCreate;
     }
 
     public IosInternalTestingRequestResponseDto createRequest(
@@ -71,12 +86,19 @@ public class IosInternalTestingRequestService {
         validateLinkForIosInternalTesting(link);
 
         Optional<IosInternalTestingRequest> existing = requestRepository
-                .findTopByOwnerProjectLinkIdAndAppleEmailIgnoreCaseOrderByCreatedAtDesc(ownerProjectLinkId, appleEmail);
+                .findTopByOwnerProjectLinkIdAndAppleEmailIgnoreCaseOrderByCreatedAtDesc(link.getId(), appleEmail);
 
         if (existing.isPresent() && !existing.get().isFinalStatus()) {
             return toDto(existing.get());
         }
 
+        long usedSlots = countUsedSlotsForApp(link.getId());
+        if (usedSlots >= MAX_INTERNAL_TESTERS_PER_APP) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "This app already reached the internal testing capacity of " + MAX_INTERNAL_TESTERS_PER_APP
+            );
+        }
         IosInternalTestingRequest request = new IosInternalTestingRequest();
         request.setOwnerProjectLinkId(link.getId());
         request.setOwnerId(link.getAdmin().getAdminId());
@@ -95,7 +117,17 @@ public class IosInternalTestingRequestService {
         request.setReadyAt(null);
 
         IosInternalTestingRequest saved = requestRepository.save(request);
-        return toDto(saved);
+
+        if (!autoProcessOnCreate) {
+            return toDto(saved);
+        }
+
+        try {
+            return processRequestInternal(saved.getId());
+        } catch (Exception ex) {
+            IosInternalTestingRequest refreshed = requestRepository.findById(saved.getId()).orElse(saved);
+            return toDto(refreshed);
+        }
     }
 
     @Transactional(readOnly = true)
@@ -126,6 +158,51 @@ public class IosInternalTestingRequestService {
     }
 
     @Transactional(readOnly = true)
+    public List<IosInternalTestingRequestResponseDto> listRequestsForApp(
+            Long requesterAdminId,
+            Long ownerProjectLinkId
+    ) {
+        if (requesterAdminId == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing requester admin id");
+        }
+        if (ownerProjectLinkId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "ownerProjectLinkId is required");
+        }
+
+        AdminUser requester = adminUsersRepository.findByAdminId(requesterAdminId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Requester not found"));
+
+        AdminUserProject link = resolveAccessibleLink(requester, requesterAdminId, ownerProjectLinkId);
+
+        return requestRepository.findByOwnerProjectLinkIdOrderByCreatedAtDesc(link.getId())
+                .stream()
+                .map(this::toDto)
+                .toList();
+    }
+    
+    @Transactional(readOnly = true)
+    public long getUsedSlotsForApp(Long requesterAdminId, Long ownerProjectLinkId) {
+        if (requesterAdminId == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing requester admin id");
+        }
+        if (ownerProjectLinkId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "ownerProjectLinkId is required");
+        }
+
+        AdminUser requester = adminUsersRepository.findByAdminId(requesterAdminId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Requester not found"));
+
+        AdminUserProject link = resolveAccessibleLink(requester, requesterAdminId, ownerProjectLinkId);
+
+        return countUsedSlotsForApp(link.getId());
+    }
+
+    @Transactional(readOnly = true)
+    public int getMaxSlotsPerApp() {
+        return MAX_INTERNAL_TESTERS_PER_APP;
+    }
+    
+    @Transactional(readOnly = true)
     public List<IosInternalTestingRequestResponseDto> listAllForSuperAdmin(Long requesterAdminId) {
         AdminUser requester = adminUsersRepository.findByAdminId(requesterAdminId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Requester not found"));
@@ -138,15 +215,10 @@ public class IosInternalTestingRequestService {
                 .toList();
     }
 
-    public IosInternalTestingRequestResponseDto processRequest(Long requesterAdminId, Long requestId) {
+    private IosInternalTestingRequestResponseDto processRequestInternal(Long requestId) {
         if (requestId == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "requestId is required");
         }
-
-        AdminUser requester = adminUsersRepository.findByAdminId(requesterAdminId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Requester not found"));
-
-        requireSuperAdmin(requester);
 
         IosInternalTestingRequest request = requestRepository.findById(requestId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Request not found"));
@@ -159,9 +231,14 @@ public class IosInternalTestingRequestService {
             return toDto(request);
         }
 
+        if (request.getStatus() == IosInternalTestingRequestStatus.WAITING_OWNER_ACCEPTANCE
+                || request.getStatus() == IosInternalTestingRequestStatus.INVITED_TO_APPLE_TEAM) {
+            return toDto(request);
+        }
+
         AdminUserProject link = adminUserProjectRepository.findById(request.getOwnerProjectLinkId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "App link not found"));
-        
+
         if (link.getStatus() != null && link.getStatus().equalsIgnoreCase("DELETED")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This app is deleted and cannot be processed");
         }
@@ -221,7 +298,20 @@ public class IosInternalTestingRequestService {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to process iOS internal testing request");
         }
     }
+    
+    public IosInternalTestingRequestResponseDto processRequest(Long requesterAdminId, Long requestId) {
+        if (requestId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "requestId is required");
+        }
 
+        AdminUser requester = adminUsersRepository.findByAdminId(requesterAdminId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Requester not found"));
+
+        requireSuperAdmin(requester);
+
+        return processRequestInternal(requestId);
+    }
+    
     public int syncWaitingRequests() {
         List<IosInternalTestingRequest> waitingRequests = requestRepository.findByStatusInOrderByCreatedAtAsc(List.of(
                 IosInternalTestingRequestStatus.INVITED_TO_APPLE_TEAM,
@@ -328,8 +418,8 @@ public class IosInternalTestingRequestService {
         String roleName = requester.getRole() != null ? requester.getRole().getName() : null;
 
         if (roleName != null && roleName.equalsIgnoreCase("SUPER_ADMIN")) {
-            return adminUserProjectRepository.findActiveById(ownerProjectLinkId)
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Active app link not found"));
+            return adminUserProjectRepository.findById(ownerProjectLinkId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "App link not found"));
         }
 
         AdminUserProject link = adminUserProjectRepository.findByIdAndAdmin_AdminId(ownerProjectLinkId, requesterAdminId)
@@ -338,13 +428,13 @@ public class IosInternalTestingRequestService {
                         "You do not have access to this app"
                 ));
 
-        String status = link.getStatus();
-        if (status != null && status.equalsIgnoreCase("DELETED")) {
+        if (link.getStatus() != null && link.getStatus().equalsIgnoreCase("DELETED")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This app is deleted and cannot be used");
         }
 
         return link;
     }
+    
 
     private void requireSuperAdmin(AdminUser requester) {
         String roleName = requester.getRole() != null ? requester.getRole().getName() : null;
@@ -368,6 +458,13 @@ public class IosInternalTestingRequestService {
                     "This app does not have an iOS bundle id yet"
             );
         }
+    }
+    
+    private long countUsedSlotsForApp(Long ownerProjectLinkId) {
+        return requestRepository.countByOwnerProjectLinkIdAndStatusIn(
+                ownerProjectLinkId,
+                SLOT_CONSUMING_STATUSES
+        );
     }
 
     private IosInternalTestingRequestResponseDto toDto(IosInternalTestingRequest request) {
