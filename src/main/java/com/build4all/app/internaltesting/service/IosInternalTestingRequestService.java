@@ -42,6 +42,7 @@ public class IosInternalTestingRequestService {
             IosInternalTestingRequestStatus.INVITED_TO_APPLE_TEAM,
             IosInternalTestingRequestStatus.WAITING_OWNER_ACCEPTANCE,
             IosInternalTestingRequestStatus.ADDING_TO_INTERNAL_TESTING,
+            IosInternalTestingRequestStatus.MANUAL_REVIEW_REQUIRED,
             IosInternalTestingRequestStatus.READY
     );
     
@@ -88,10 +89,17 @@ public class IosInternalTestingRequestService {
         Optional<IosInternalTestingRequest> existing = requestRepository
                 .findTopByOwnerProjectLinkIdAndAppleEmailIgnoreCaseOrderByCreatedAtDesc(link.getId(), appleEmail);
 
-        if (existing.isPresent() && !existing.get().isFinalStatus()) {
-            return toDto(existing.get());
-        }
+        if (existing.isPresent()) {
+            IosInternalTestingRequest current = existing.get();
 
+            if (current.getStatus() == IosInternalTestingRequestStatus.READY) {
+                return toDto(current);
+            }
+
+            if (!current.isFinalStatus()) {
+                return toDto(current);
+            }
+        }
         long usedSlots = countUsedSlotsForApp(link.getId());
         if (usedSlots >= MAX_INTERNAL_TESTERS_PER_APP) {
             throw new ResponseStatusException(
@@ -202,6 +210,144 @@ public class IosInternalTestingRequestService {
         return MAX_INTERNAL_TESTERS_PER_APP;
     }
     
+    
+    @Transactional(readOnly = true)
+    public List<IosInternalTestingRequestResponseDto> listAllForSuperAdmin(
+            Long requesterAdminId,
+            String status,
+            boolean manualOnly
+    ) {
+        AdminUser requester = adminUsersRepository.findByAdminId(requesterAdminId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Requester not found"));
+
+        requireSuperAdmin(requester);
+
+        List<IosInternalTestingRequest> all = requestRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"));
+
+        return all.stream()
+                .filter(r -> {
+                    if (manualOnly) {
+                        return r.getStatus() == IosInternalTestingRequestStatus.MANUAL_REVIEW_REQUIRED
+                                || r.getStatus() == IosInternalTestingRequestStatus.FAILED;
+                    }
+                    return true;
+                })
+                .filter(r -> {
+                    if (status == null || status.isBlank()) {
+                        return true;
+                    }
+                    return r.getStatus().name().equalsIgnoreCase(status.trim());
+                })
+                .map(this::toDto)
+                .toList();
+    }
+    
+    
+    @Transactional(readOnly = true)
+    public IosInternalTestingRequestResponseDto getRequestForSuperAdmin(Long requesterAdminId, Long requestId) {
+        AdminUser requester = adminUsersRepository.findByAdminId(requesterAdminId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Requester not found"));
+
+        requireSuperAdmin(requester);
+
+        IosInternalTestingRequest request = requestRepository.findById(requestId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Request not found"));
+
+        return toDto(request);
+    }
+    
+    public int syncAllForSuperAdmin(Long requesterAdminId) {
+        AdminUser requester = adminUsersRepository.findByAdminId(requesterAdminId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Requester not found"));
+
+        requireSuperAdmin(requester);
+
+        return syncWaitingRequests();
+    }
+    
+    public IosInternalTestingRequestResponseDto markManualReviewRequired(
+            Long requesterAdminId,
+            Long requestId,
+            String note
+    ) {
+        AdminUser requester = adminUsersRepository.findByAdminId(requesterAdminId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Requester not found"));
+
+        requireSuperAdmin(requester);
+
+        IosInternalTestingRequest request = requestRepository.findById(requestId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Request not found"));
+
+        request.setStatus(IosInternalTestingRequestStatus.MANUAL_REVIEW_REQUIRED);
+        request.setLastError(
+                (note != null && !note.isBlank())
+                        ? note.trim()
+                        : "Manual super-admin review required"
+        );
+
+        IosInternalTestingRequest saved = requestRepository.save(request);
+        return toDto(saved);
+    }
+    
+    public IosInternalTestingRequestResponseDto markReadyManually(
+            Long requesterAdminId,
+            Long requestId,
+            String appleUserId,
+            String note
+    ) {
+        AdminUser requester = adminUsersRepository.findByAdminId(requesterAdminId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Requester not found"));
+
+        requireSuperAdmin(requester);
+
+        IosInternalTestingRequest request = requestRepository.findById(requestId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Request not found"));
+
+        request.setStatus(IosInternalTestingRequestStatus.READY);
+
+        if (appleUserId != null && !appleUserId.isBlank()) {
+            request.setAppleUserId(appleUserId.trim());
+        }
+
+        if (request.getAcceptedAt() == null) {
+            request.setAcceptedAt(LocalDateTime.now());
+        }
+
+        request.setReadyAt(LocalDateTime.now());
+
+        // minimal version: نخلي note بـ lastError = null
+      
+        request.setLastError(null);
+
+        IosInternalTestingRequest saved = requestRepository.save(request);
+        return toDto(saved);
+    }
+    
+    public IosInternalTestingRequestResponseDto cancelRequestForSuperAdmin(
+            Long requesterAdminId,
+            Long requestId,
+            String note
+    ) {
+        AdminUser requester = adminUsersRepository.findByAdminId(requesterAdminId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Requester not found"));
+
+        requireSuperAdmin(requester);
+
+        IosInternalTestingRequest request = requestRepository.findById(requestId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Request not found"));
+
+        request.setStatus(IosInternalTestingRequestStatus.CANCELLED);
+
+        if (note != null && !note.isBlank()) {
+            request.setLastError(note.trim());
+        }
+
+        IosInternalTestingRequest saved = requestRepository.save(request);
+        return toDto(saved);
+    }
+    
+    
+    
     @Transactional(readOnly = true)
     public List<IosInternalTestingRequestResponseDto> listAllForSuperAdmin(Long requesterAdminId) {
         AdminUser requester = adminUsersRepository.findByAdminId(requesterAdminId)
@@ -272,6 +418,17 @@ public class IosInternalTestingRequestService {
                 IosInternalTestingRequest saved = requestRepository.save(request);
                 return toDto(saved);
             }
+            
+            if (gatewayResult.outcome() == AppleInternalTestingGatewayOutcome.INTERNAL_ACCESS_PENDING) {
+                request.setAppleUserId(gatewayResult.appleUserId());
+                request.setAppleInvitationId(gatewayResult.invitationId());
+                request.setStatus(IosInternalTestingRequestStatus.ADDING_TO_INTERNAL_TESTING);
+                request.setLastError("Invitation accepted/user exists, but internal testing access is not confirmed yet");
+                request.setProcessedAt(LocalDateTime.now());
+
+                IosInternalTestingRequest saved = requestRepository.save(request);
+                return toDto(saved);
+            }
 
             if (gatewayResult.outcome() == AppleInternalTestingGatewayOutcome.INVITATION_SENT) {
                 request.setAppleInvitationId(gatewayResult.invitationId());
@@ -313,10 +470,11 @@ public class IosInternalTestingRequestService {
     }
     
     public int syncWaitingRequests() {
-        List<IosInternalTestingRequest> waitingRequests = requestRepository.findByStatusInOrderByCreatedAtAsc(List.of(
-                IosInternalTestingRequestStatus.INVITED_TO_APPLE_TEAM,
-                IosInternalTestingRequestStatus.WAITING_OWNER_ACCEPTANCE
-        ));
+    	List<IosInternalTestingRequest> waitingRequests = requestRepository.findByStatusInOrderByCreatedAtAsc(List.of(
+    	        IosInternalTestingRequestStatus.INVITED_TO_APPLE_TEAM,
+    	        IosInternalTestingRequestStatus.WAITING_OWNER_ACCEPTANCE,
+    	        IosInternalTestingRequestStatus.ADDING_TO_INTERNAL_TESTING
+    	));
 
         int updatedCount = 0;
 
@@ -348,17 +506,20 @@ public class IosInternalTestingRequestService {
     }
 
     private boolean syncSingleWaitingRequestInternal(IosInternalTestingRequest request) {
-        if (request.getStatus() != IosInternalTestingRequestStatus.INVITED_TO_APPLE_TEAM
-                && request.getStatus() != IosInternalTestingRequestStatus.WAITING_OWNER_ACCEPTANCE) {
-            return false;
-        }
+    	if (request.getStatus() != IosInternalTestingRequestStatus.INVITED_TO_APPLE_TEAM
+    	        && request.getStatus() != IosInternalTestingRequestStatus.WAITING_OWNER_ACCEPTANCE
+    	        && request.getStatus() != IosInternalTestingRequestStatus.ADDING_TO_INTERNAL_TESTING) {
+    	    return false;
+    	}
 
-        if (isBlank(request.getAppleInvitationId())) {
-            request.setStatus(IosInternalTestingRequestStatus.FAILED);
-            request.setLastError("Missing apple invitation id for waiting request");
-            requestRepository.save(request);
-            return true;
-        }
+    	if ((request.getStatus() == IosInternalTestingRequestStatus.INVITED_TO_APPLE_TEAM
+    	        || request.getStatus() == IosInternalTestingRequestStatus.WAITING_OWNER_ACCEPTANCE)
+    	        && isBlank(request.getAppleInvitationId())) {
+    	    request.setStatus(IosInternalTestingRequestStatus.FAILED);
+    	    request.setLastError("Missing apple invitation id for waiting request");
+    	    requestRepository.save(request);
+    	    return true;
+    	}
 
         try {
             AppleInternalTestingGatewayResult result =
@@ -372,13 +533,22 @@ public class IosInternalTestingRequestService {
                 requestRepository.save(request);
                 return false;
             }
-
+            
             if (result.outcome() == AppleInternalTestingGatewayOutcome.STILL_WAITING) {
                 request.setLastError(null);
                 requestRepository.save(request);
                 return false;
             }
 
+            if (result.outcome() == AppleInternalTestingGatewayOutcome.INTERNAL_ACCESS_PENDING) {
+                request.setStatus(IosInternalTestingRequestStatus.ADDING_TO_INTERNAL_TESTING);
+                request.setAppleUserId(result.appleUserId());
+                request.setLastError("Invitation accepted/user exists, but internal testing access is not confirmed yet");
+                requestRepository.save(request);
+                return false;
+            }
+            
+          
             if (result.outcome() == AppleInternalTestingGatewayOutcome.INVITATION_ACCEPTED_AND_ADDED) {
                 request.setStatus(IosInternalTestingRequestStatus.READY);
                 request.setAppleUserId(result.appleUserId());
@@ -393,9 +563,15 @@ public class IosInternalTestingRequestService {
             requestRepository.save(request);
             return false;
 
-        } catch (Exception ex) {
-            request.setLastError(ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName());
+        }catch (Exception ex) {
+            String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
+            request.setLastError(msg);
             requestRepository.save(request);
+
+            System.out.println("❌ syncSingleWaitingRequestInternal failed for requestId=" + request.getId());
+            System.out.println("❌ sync error => " + msg);
+            ex.printStackTrace();
+
             return false;
         }
     }
