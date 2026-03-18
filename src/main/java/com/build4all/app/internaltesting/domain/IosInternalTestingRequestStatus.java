@@ -8,7 +8,8 @@ public enum IosInternalTestingRequestStatus {
     ADDING_TO_INTERNAL_TESTING,
     READY,
     FAILED,
-    CANCELLED;
+    CANCELLED,
+	MANUAL_REVIEW_REQUIRED;
 
     public boolean isFinalStatus() {
         return this == READY || this == FAILED || this == CANCELLED;
