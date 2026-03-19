@@ -365,6 +365,13 @@ public class ProductService {
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
+    
+    public List<ProductResponse> listCustomerVisibleByOwnerProject(Long ownerProjectId) {
+        return productRepository.findByOwnerProject_Id(ownerProjectId).stream()
+                .filter(this::isPublicVisibleStatus)
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+    }
 
     public List<ProductResponse> listNewArrivals(Long ownerProjectId, Integer daysBack) {
         if (ownerProjectId == null) throw new IllegalArgumentException("ownerProjectId is required");
@@ -403,6 +410,7 @@ public class ProductService {
         return itemIdsOrdered.stream()
                 .map(productById::get)
                 .filter(Objects::nonNull)
+                .filter(this::isPublicVisibleStatus)
                 .map(this::toResponse)
                 .toList();
     }
@@ -427,6 +435,15 @@ public class ProductService {
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
+    
+    public List<ProductResponse> listCustomerVisibleByItemType(Long ownerProjectId, Long itemTypeId) {
+        return listByItemType(ownerProjectId, itemTypeId).stream()
+                .filter(p -> p.getStatusCode() != null && (
+                        STATUS_PUBLISHED.equalsIgnoreCase(p.getStatusCode())
+                                || STATUS_UPCOMING.equalsIgnoreCase(p.getStatusCode())
+                ))
+                .collect(Collectors.toList());
+    }
 
     public List<ProductResponse> listByCategory(Long ownerProjectId, Long categoryId) {
         if (ownerProjectId == null) throw new IllegalArgumentException("ownerProjectId is required");
@@ -446,6 +463,16 @@ public class ProductService {
                 .findByOwnerProject_IdAndItemType_Category_Id(ownerProjectId, categoryId)
                 .stream()
                 .map(this::toResponse)
+                .collect(Collectors.toList());
+    }
+    
+    
+    public List<ProductResponse> listCustomerVisibleByCategory(Long ownerProjectId, Long categoryId) {
+        return listByCategory(ownerProjectId, categoryId).stream()
+                .filter(p -> p.getStatusCode() != null && (
+                        STATUS_PUBLISHED.equalsIgnoreCase(p.getStatusCode())
+                                || STATUS_UPCOMING.equalsIgnoreCase(p.getStatusCode())
+                ))
                 .collect(Collectors.toList());
     }
 
@@ -673,5 +700,18 @@ public class ProductService {
         String s = raw.trim();
         if (s.isBlank()) return null;
         return s.toUpperCase();
+    }
+    
+    
+    private Product getCustomerVisibleProductOrThrow(Long id, Long ownerProjectId) {
+        Product product = getTenantProductOrThrow(id, ownerProjectId);
+        if (!isPublicVisibleStatus(product)) {
+            throw new IllegalArgumentException("Product not found");
+        }
+        return product;
+    }
+
+    public ProductResponse getCustomerVisible(Long id, Long ownerProjectId) {
+        return toResponse(getCustomerVisibleProductOrThrow(id, ownerProjectId));
     }
 }

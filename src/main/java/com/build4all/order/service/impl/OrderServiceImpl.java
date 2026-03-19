@@ -254,10 +254,13 @@ public class OrderServiceImpl implements OrderService {
 
         Users user = usersRepo.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        requireActiveUser(user);
 
         Item item = itemRepo.findByIdForStockCheck(itemId)
                 .orElseThrow(() -> new IllegalArgumentException("Item not found: " + itemId));
+        assertItemPurchasable(item);
 
+        
         Currency currency = null;
         if (currencyId != null) {
             currency = currencyRepo.findById(currencyId)
@@ -371,8 +374,12 @@ public class OrderServiceImpl implements OrderService {
 
         Users user = usersRepo.findById(businessUserId)
                 .orElseThrow(() -> new IllegalArgumentException("Business user not found"));
+        requireActiveUser(user);
+
         Item item = itemRepo.findById(itemId)
                 .orElseThrow(() -> new IllegalArgumentException("Item not found"));
+        assertItemPurchasable(item);
+       
 
         Currency currency = null;
         if (currencyId != null) {
@@ -473,10 +480,18 @@ public class OrderServiceImpl implements OrderService {
         var header = oi.getOrder();
         String curr = currentStatusCode(header);
 
-        if ("COMPLETED".equals(curr)) throw new IllegalStateException("Cannot reset a completed order");
+        if ("COMPLETED".equals(curr)) {
+            throw new IllegalStateException("Cannot reset a completed order");
+        }
+
+        if (isReleasedStatus(curr)) {
+            Order full = orderRepo.findByIdWithItems(header.getId())
+                    .orElseThrow(() -> new IllegalStateException("Order not found"));
+            reserveStockForOrder(full);
+        }
+
         flipStatus(oi, "PENDING");
     }
-
     @Override
     public void deleteorder(Long orderItemId, Long actorId) {
         orderItemRepo.findByIdAndUser(orderItemId, actorId)
@@ -497,6 +512,12 @@ public class OrderServiceImpl implements OrderService {
             case "CANCELED" -> flipStatus(oi, "REFUNDED");
             case "COMPLETED" -> throw new IllegalStateException("Completed orders cannot be refunded");
             case "PENDING", "CANCEL_REQUESTED" -> {
+                Order full = orderRepo.findByIdWithItems(header.getId())
+                        .orElseThrow(() -> new IllegalStateException("Order not found"));
+
+                releaseStockForOrder(full);
+                releaseCouponForOrderIfAny(full);
+
                 flipStatus(oi, "CANCELED");
                 flipStatus(oi, "REFUNDED");
             }
@@ -606,6 +627,8 @@ public class OrderServiceImpl implements OrderService {
         Order order = oi.getOrder();
         if (order == null) throw new IllegalStateException("Missing order");
 
+        String curr = currentStatusCode(order);
+
         Long ownerProjectId = oi.getItem().getOwnerProject().getId();
         BigDecimal orderTotal = order.getTotalPrice();
 
@@ -632,13 +655,17 @@ public class OrderServiceImpl implements OrderService {
             throw new IllegalStateException("Cannot complete order: still not fully paid");
         }
 
+        if (isReleasedStatus(curr)) {
+            Order full = orderRepo.findByIdWithItems(order.getId())
+                    .orElseThrow(() -> new IllegalStateException("Order not found"));
+            reserveStockForOrder(full);
+        }
+
         order.setStatus(requireStatus("COMPLETED"));
-
-        // ✅ FIX: do NOT touch orderDate
-        // order.setOrderDate(LocalDateTime.now());
-
         orderRepo.save(order);
     }
+
+       
 
     @Override
     public void deleteordersByItemId(Long itemId) {
@@ -671,12 +698,52 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public void unrejectorder(Long orderItemId, Long businessId) {
         var oi = requireBusinessOwned(orderItemId, businessId);
-        String curr = currentStatusCode(oi.getOrder());
+        Order order = oi.getOrder();
+        String curr = currentStatusCode(order);
 
-        if ("COMPLETED".equals(curr)) throw new IllegalStateException("Cannot restore completed order");
+        if ("COMPLETED".equals(curr)) {
+            throw new IllegalStateException("Cannot restore completed order");
+        }
+
+        if (isReleasedStatus(curr)) {
+            Order full = orderRepo.findByIdWithItems(order.getId())
+                    .orElseThrow(() -> new IllegalStateException("Order not found"));
+            reserveStockForOrder(full);
+        }
+
         flipStatus(oi, "PENDING");
     }
 
+    private boolean isReleasedStatus(String status) {
+        if (status == null) return false;
+        String s = status.trim().toUpperCase(Locale.ROOT);
+        return "REJECTED".equals(s) || "CANCELED".equals(s) || "REFUNDED".equals(s);
+    }
+    
+    private void requireActiveUser(Users user) {
+        if (user == null) {
+            throw new IllegalArgumentException("User not found");
+        }
+        if (!user.isEnabled() || !user.isAccountNonLocked()) {
+            throw new IllegalStateException("User account is inactive or blocked");
+        }
+    }
+
+    private String itemStatusCode(Item item) {
+        if (item == null || item.getStatus() == null || item.getStatus().getCode() == null) return "";
+        return item.getStatus().getCode().trim().toUpperCase(Locale.ROOT);
+    }
+
+    private void assertItemPurchasable(Item item) {
+        if (item == null) {
+            throw new IllegalArgumentException("Item not found");
+        }
+
+        String code = itemStatusCode(item);
+        if (!"PUBLISHED".equals(code)) {
+            throw new IllegalStateException("Item is not available for ordering");
+        }
+    }
     /* ===============================
        ORDER CODE
        =============================== */
@@ -765,6 +832,7 @@ public class OrderServiceImpl implements OrderService {
         return sum;
     }
     
+  
     @Override
     public CheckoutSummaryResponse quoteCheckoutFromCart(Long userId, CheckoutRequest request) {
 
@@ -772,6 +840,9 @@ public class OrderServiceImpl implements OrderService {
         if (request == null) throw new IllegalArgumentException("request is required");
         if (request.getCurrencyId() == null) throw new IllegalArgumentException("currencyId is required");
 
+        Users user = usersRepo.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        requireActiveUser(user);
         Cart cart = cartRepo.findByUser_IdAndStatus(userId, CartStatus.ACTIVE)
                 .orElseThrow(() -> new IllegalStateException("No active cart"));
 
@@ -800,6 +871,7 @@ public class OrderServiceImpl implements OrderService {
 
             Item item = itemRepo.findById(itemId)
                     .orElseThrow(() -> new IllegalArgumentException("Item not found: " + itemId));
+            assertItemPurchasable(item);
 
             if (isShippingRequired(item)) {
                 shippingRequired = true;
@@ -875,6 +947,7 @@ public class OrderServiceImpl implements OrderService {
 
         Users user = usersRepo.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        requireActiveUser(user);
 
         Currency currency = currencyRepo.findById(request.getCurrencyId())
                 .orElseThrow(() -> new IllegalArgumentException("Currency not found"));
@@ -894,6 +967,7 @@ public class OrderServiceImpl implements OrderService {
 
             Item item = itemRepo.findById(line.getItemId())
                     .orElseThrow(() -> new IllegalArgumentException("Item not found: " + line.getItemId()));
+            assertItemPurchasable(item);
             itemCache.put(item.getId(), item);
 
             if (isShippingRequired(item)) shippingRequired = true; // ✅ NEW
@@ -1147,6 +1221,10 @@ public class OrderServiceImpl implements OrderService {
         if (request.getPaymentMethod() == null || request.getPaymentMethod().isBlank())
             throw new IllegalArgumentException("paymentMethod is required");
 
+        Users user = usersRepo.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        requireActiveUser(user);
+
         Cart cart = cartRepo.findByUser_IdAndStatus(userId, CartStatus.ACTIVE)
                 .orElseThrow(() -> new IllegalStateException("No active cart"));
 
@@ -1186,6 +1264,7 @@ public class OrderServiceImpl implements OrderService {
 
             Item fresh = itemRepo.findByIdForStockCheck(line.getItemId())
                     .orElseThrow(() -> new IllegalArgumentException("Item not found: " + line.getItemId()));
+            assertItemPurchasable(fresh);
 
             if (isShippingRequired(fresh)) {
                 shippingRequired = true;
@@ -1254,6 +1333,7 @@ public class OrderServiceImpl implements OrderService {
 
             Item fresh = itemRepo.findByIdForStockCheck(line.getItemId())
                     .orElseThrow(() -> new IllegalArgumentException("Item not found: " + line.getItemId()));
+            assertItemPurchasable(fresh);
 
             Integer stock = readStock(fresh);
             if (stock != null) {
@@ -1306,6 +1386,37 @@ public class OrderServiceImpl implements OrderService {
                Integer newStock = itemRepo.findStockValue(item.getId());
                Long tenantId = item.getOwnerProject().getId();
                wsEvents.sendStockChanged(tenantId, item.getId(), +qty, newStock, "ORDER_RELEASED", order.getId());
+            }
+        }
+    }
+    
+    
+    private void reserveStockForOrder(Order order) {
+        if (order == null || order.getOrderItems() == null) return;
+
+        for (OrderItem oi : order.getOrderItems()) {
+            Item item = oi.getItem();
+            if (item == null || item.getId() == null) continue;
+
+            Integer stock = readStock(item);
+            if (stock == null) continue; // non-stock item
+
+            int qty = oi.getQuantity();
+            if (qty <= 0) continue;
+
+            int updated = itemRepo.decrementStockIfEnough(item.getId(), qty);
+            if (updated != 1) {
+                Integer currentStock = itemRepo.findStockValue(item.getId());
+                int available = currentStock == null ? 0 : currentStock;
+                throw new IllegalStateException(
+                        "Not enough stock to restore order for itemId=" + item.getId() + ". Available: " + available
+                );
+            }
+
+            Integer newStock = itemRepo.findStockValue(item.getId());
+            Long tenantId = item.getOwnerProject() != null ? item.getOwnerProject().getId() : null;
+            if (tenantId != null) {
+                wsEvents.sendStockChanged(tenantId, item.getId(), -qty, newStock, "ORDER_RESTORED", order.getId());
             }
         }
     }

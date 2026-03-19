@@ -89,6 +89,39 @@ public class CartServiceImpl implements CartService {
                 throw new IllegalArgumentException("Not enough stock. Available: " + item.getStock());
         }
     }
+    
+    
+    private static final String STATUS_PUBLISHED = "PUBLISHED";
+    private static final String STATUS_UPCOMING = "UPCOMING";
+    private static final String STATUS_COMING_SOON = "COMING_SOON";
+
+    private String itemStatusCode(Item item) {
+        if (item == null || item.getStatus() == null || item.getStatus().getCode() == null) {
+            return "";
+        }
+        return item.getStatus().getCode().trim().toUpperCase(Locale.ROOT);
+    }
+
+    private boolean isCartPurchasable(Item item) {
+        return STATUS_PUBLISHED.equals(itemStatusCode(item));
+    }
+
+    private void assertItemPurchasableForCart(Item item) {
+        if (item == null) {
+            throw new IllegalArgumentException("Item not found");
+        }
+
+        String code = itemStatusCode(item);
+
+        // support both labels just in case
+        if (STATUS_UPCOMING.equals(code) || STATUS_COMING_SOON.equals(code)) {
+            throw new IllegalArgumentException("Coming Soon products cannot be added to cart or purchased yet");
+        }
+
+        if (!STATUS_PUBLISHED.equals(code)) {
+            throw new IllegalArgumentException("Item is not available for purchase");
+        }
+    }
 
     /* ============================================================
        PUBLIC API (TENANT SAFE)
@@ -119,6 +152,7 @@ public class CartServiceImpl implements CartService {
         Item item = itemRepo.findByTenantForUpdate(aupId, request.getItemId())
                 .orElseThrow(() -> new IllegalArgumentException("Item not found"));
 
+        assertItemPurchasableForCart(item);
         CartItem existing = cart.getItems().stream()
                 .filter(ci -> ci.getItem().getId().equals(item.getId()))
                 .findFirst()
@@ -169,7 +203,9 @@ public class CartServiceImpl implements CartService {
             Item fresh = itemRepo.findByTenantForUpdate(aupId, itemId)
                     .orElseThrow(() -> new IllegalArgumentException("Item not found"));
 
+            assertItemPurchasableForCart(fresh);
             assertStockAvailable(fresh, request.getQuantity());
+
             ci.setQuantity(request.getQuantity());
             ci.setUpdatedAt(LocalDateTime.now());
         }
@@ -229,6 +265,7 @@ public class CartServiceImpl implements CartService {
             Item fresh = itemRepo.findByTenantForUpdate(aupId, ci.getItem().getId())
                     .orElseThrow(() -> new IllegalArgumentException("Item not found"));
 
+            assertItemPurchasableForCart(fresh);
             assertStockAvailable(fresh, ci.getQuantity());
         }
 
@@ -278,7 +315,10 @@ public class CartServiceImpl implements CartService {
         }
 
         res.setItems(items);
-        res.setCanCheckout(!items.isEmpty());
+        boolean allPurchasable = cart.getItems().stream()
+                .allMatch(ci -> isCartPurchasable(ci.getItem()));
+
+        res.setCanCheckout(!items.isEmpty() && allPurchasable);
         res.setCheckoutTotalPrice(cart.getTotalPrice());
         return res;
     }

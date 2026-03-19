@@ -395,7 +395,10 @@ public class ProductController {
         Long ownerProjectId = tenantFromAuth(auth);
 
         try {
-            ProductResponse p = productService.getTenant(id, ownerProjectId);
+            ProductResponse p = isOwner(auth)
+                    ? productService.getTenant(id, ownerProjectId)
+                    : productService.getCustomerVisible(id, ownerProjectId);
+
             return ResponseEntity.ok(p);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -421,12 +424,20 @@ public class ProductController {
         try {
             List<ProductResponse> result;
 
+            boolean owner = isOwner(auth);
+
             if (itemTypeId != null) {
-                result = productService.listByItemType(ownerProjectId, itemTypeId);
+                result = owner
+                        ? productService.listByItemType(ownerProjectId, itemTypeId)
+                        : productService.listCustomerVisibleByItemType(ownerProjectId, itemTypeId);
             } else if (categoryId != null) {
-                result = productService.listByCategory(ownerProjectId, categoryId);
+                result = owner
+                        ? productService.listByCategory(ownerProjectId, categoryId)
+                        : productService.listCustomerVisibleByCategory(ownerProjectId, categoryId);
             } else {
-                result = productService.listByOwnerProject(ownerProjectId);
+                result = owner
+                        ? productService.listByOwnerProject(ownerProjectId)
+                        : productService.listCustomerVisibleByOwnerProject(ownerProjectId);
             }
 
             return ResponseEntity.ok(result);
@@ -537,5 +548,15 @@ public class ProductController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", e.getMessage()));
         }
+    }
+    
+    
+    private String roleFromAuth(String authHeader) {
+        String role = jwtUtil.extractRole(authHeader);
+        return role == null ? "" : role.trim().toUpperCase();
+    }
+
+    private boolean isOwner(String authHeader) {
+        return "OWNER".equals(roleFromAuth(authHeader));
     }
 }

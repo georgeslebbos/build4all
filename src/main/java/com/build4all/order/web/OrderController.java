@@ -270,81 +270,43 @@ public class OrderController {
                 .orElseThrow(() -> new IllegalArgumentException("Unknown status: " + statusCode));
     }
 
-    private Map<String, Object> toOwnerOrderDetailsResponse(Order order) {
-        Map<String, Object> out = new HashMap<>();
+    private Map<String, Object> toOrderDetailsResponse(Order order) {
+        Map<String, Object> out = new LinkedHashMap<>();
 
-        Map<String, Object> header = new HashMap<>();
-        header.put("id", order.getId());
-        header.put("orderDate", order.getOrderDate());
-        header.put("totalPrice", order.getTotalPrice());
-        header.put("shippingFullName", order.getShippingFullName());
-        header.put("customerName", order.getShippingFullName());
-
-        String statusName = (order.getStatus() != null) ? order.getStatus().getName() : null;
-        header.put("status", statusName);
-        header.put("statusUi", titleCaseStatus(statusName));
-
-        Object paymentMethod = null;
-        if (order.getPaymentMethod() != null) {
-            Object codeOrName = tryGet(order.getPaymentMethod(), "getCode", "getName");
-            paymentMethod = (codeOrName != null) ? codeOrName : tryGet(order.getPaymentMethod(), "getId");
-        }
-        header.put("paymentMethod", paymentMethod);
-
-        if (order.getCurrency() != null) {
-            Map<String, Object> currency = new HashMap<>();
-            currency.put("code", tryGet(order.getCurrency(), "getCode"));
-            currency.put("symbol", tryGet(order.getCurrency(), "getSymbol"));
-            header.put("currency", currency);
-        } else {
-            header.put("currency", null);
-        }
-
-        header.put("shippingCity", order.getShippingCity());
-        header.put("shippingPostalCode", order.getShippingPostalCode());
-        header.put("shippingMethodId", order.getShippingMethodId());
-        header.put("shippingMethodName", order.getShippingMethodName());
-        header.put("shippingAddress", order.getShippingAddress());
-        header.put("shippingPhone", order.getShippingPhone());
-        header.put("shippingTotal", order.getShippingTotal());
-        header.put("itemTaxTotal", order.getItemTaxTotal());
-        header.put("shippingTaxTotal", order.getShippingTaxTotal());
-        header.put("couponCode", order.getCouponCode());
-        header.put("couponDiscount", order.getCouponDiscount());
-        header.put("orderCode", order.getOrderCode());
-        header.put("orderSeq", order.getOrderSeq());
-
-        OrderPaymentReadService.PaymentSummary ps =
-                paymentRead.summaryForOrder(order.getId(), order.getTotalPrice());
-        header.put("fullyPaid", ps.isFullyPaid());
-        header.put("payment", paymentToMap(ps));
-
-        out.put("order", header);
-
+        BigDecimal itemsSubtotal = BigDecimal.ZERO;
         List<Map<String, Object>> items = new ArrayList<>();
+
         if (order.getOrderItems() != null) {
             for (OrderItem oi : order.getOrderItems()) {
-                Map<String, Object> row = new HashMap<>();
+                BigDecimal unitPrice = (oi.getPrice() == null) ? BigDecimal.ZERO : oi.getPrice();
+                BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(oi.getQuantity()));
+                itemsSubtotal = itemsSubtotal.add(lineTotal);
+
+                Map<String, Object> row = new LinkedHashMap<>();
                 row.put("orderItemId", oi.getId());
                 row.put("quantity", oi.getQuantity());
-                row.put("price", oi.getPrice());
+                row.put("price", unitPrice);       // keep old key for compatibility
+                row.put("unitPrice", unitPrice);   // add explicit key
+                row.put("lineTotal", lineTotal);   // add explicit key
 
                 Object itemEntity = oi.getItem();
-                Map<String, Object> item = new HashMap<>();
+                Map<String, Object> item = new LinkedHashMap<>();
                 item.put("id", itemEntity != null ? tryGet(itemEntity, "getId") : null);
+                item.put("itemId", itemEntity != null ? tryGet(itemEntity, "getId") : null);
                 item.put("itemName", itemEntity != null ? tryGet(itemEntity, "getName", "getItemName", "getTitle") : null);
                 item.put("imageUrl", itemEntity != null ? tryGet(itemEntity, "getImageUrl", "getImage", "getImagePath") : null);
                 item.put("location", itemEntity != null ? tryGet(itemEntity, "getLocation", "getAddress", "getPlace") : null);
                 item.put("startDatetime", itemEntity != null ? tryGet(itemEntity, "getStartDatetime", "getStartDateTime", "getStartAt", "getStart") : null);
-
                 row.put("item", item);
 
                 if (oi.getUser() != null) {
-                    Map<String, Object> u = new HashMap<>();
+                    Map<String, Object> u = new LinkedHashMap<>();
                     u.put("id", tryGet(oi.getUser(), "getId"));
                     u.put("username", tryGet(oi.getUser(), "getUsername"));
                     u.put("firstName", tryGet(oi.getUser(), "getFirstName"));
                     u.put("lastName", tryGet(oi.getUser(), "getLastName"));
+                    u.put("email", tryGet(oi.getUser(), "getEmail"));
+                    u.put("phoneNumber", tryGet(oi.getUser(), "getPhoneNumber"));
                     row.put("user", u);
                 } else {
                     row.put("user", null);
@@ -354,8 +316,76 @@ public class OrderController {
             }
         }
 
+        String statusName = (order.getStatus() != null) ? order.getStatus().getName() : null;
+
+        Object paymentMethod = null;
+        if (order.getPaymentMethod() != null) {
+            Object codeOrName = tryGet(order.getPaymentMethod(), "getCode", "getName");
+            paymentMethod = (codeOrName != null) ? codeOrName : tryGet(order.getPaymentMethod(), "getId");
+        }
+
+        String currencyCode = null;
+        String currencySymbol = null;
+        if (order.getCurrency() != null) {
+            Object cc = tryGet(order.getCurrency(), "getCode");
+            Object cs = tryGet(order.getCurrency(), "getSymbol");
+            currencyCode = cc == null ? null : String.valueOf(cc);
+            currencySymbol = cs == null ? null : String.valueOf(cs);
+        }
+
+        OrderPaymentReadService.PaymentSummary ps =
+                paymentRead.summaryForOrder(order.getId(), order.getTotalPrice());
+
+        Map<String, Object> header = new LinkedHashMap<>();
+        header.put("id", order.getId()); // important for frontend mapper
+        header.put("orderId", order.getId()); // keep compatibility
+        header.put("orderDate", order.getOrderDate());
+
+        header.put("status", statusName); // important
+        header.put("statusUi", titleCaseStatus(statusName));
+
+        header.put("totalPrice", order.getTotalPrice());
+        header.put("grandTotal", order.getTotalPrice());
+
+        header.put("itemsSubtotal", itemsSubtotal);
+        header.put("shippingTotal", order.getShippingTotal());
+        header.put("itemTaxTotal", order.getItemTaxTotal());
+        header.put("shippingTaxTotal", order.getShippingTaxTotal());
+
+        header.put("couponCode", order.getCouponCode());
+        header.put("couponDiscount", order.getCouponDiscount());
+
+        header.put("shippingFullName", order.getShippingFullName());
+        header.put("customerName", order.getShippingFullName());
+        header.put("shippingPhone", order.getShippingPhone());
+        header.put("shippingAddress", order.getShippingAddress());
+        header.put("shippingCity", order.getShippingCity());
+        header.put("shippingPostalCode", order.getShippingPostalCode());
+        header.put("shippingMethodId", order.getShippingMethodId());
+        header.put("shippingMethodName", order.getShippingMethodName());
+
+        header.put("orderCode", order.getOrderCode());
+        header.put("orderSeq", order.getOrderSeq());
+
+        header.put("currencyCode", currencyCode);
+        header.put("currencySymbol", currencySymbol);
+
+        header.put("paymentMethod", paymentMethod);
+        header.put("paymentStatus", ps != null ? ps.getPaymentState() : null);
+
+        header.put("fullyPaid", ps != null && ps.isFullyPaid());
+        header.put("payment", paymentToMap(ps));
+
+        if (order.getUser() != null) {
+            header.put("customerEmail", tryGet(order.getUser(), "getEmail"));
+            header.put("customerPhone", tryGet(order.getUser(), "getPhoneNumber"));
+            header.put("customerUsername", tryGet(order.getUser(), "getUsername"));
+        }
+
+        out.put("order", header);
         out.put("items", items);
         out.put("itemsCount", items.size());
+
         return out;
     }
 
@@ -429,46 +459,7 @@ public class OrderController {
         Order order = orderRepo.findByIdAndUserIdWithItems(orderId, userId)
                 .orElseThrow(() -> new NoSuchElementException("Order not found"));
 
-        String statusName = (order.getStatus() != null) ? order.getStatus().getName() : null;
-        var ps = paymentRead.summaryForOrder(order.getId(), order.getTotalPrice());
-
-        Map<String, Object> header = new LinkedHashMap<>();
-        header.put("orderId", order.getId());
-        header.put("orderDate", order.getOrderDate());
-        header.put("orderStatus", statusName);
-        header.put("orderStatusUi", titleCaseStatus(statusName));
-        header.put("totalPrice", order.getTotalPrice());
-        header.put("fullyPaid", ps.isFullyPaid());
-        header.put("payment", paymentToMap(ps));
-        header.put("orderCode", order.getOrderCode());
-        header.put("orderSeq", order.getOrderSeq());
-
-        List<Map<String, Object>> items = new ArrayList<>();
-        if (order.getOrderItems() != null) {
-            for (OrderItem oi : order.getOrderItems()) {
-                Map<String, Object> row = new LinkedHashMap<>();
-                row.put("orderItemId", oi.getId());
-                row.put("quantity", oi.getQuantity());
-                row.put("unitPrice", oi.getPrice());
-
-                Object it = oi.getItem();
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.put("itemId", it != null ? tryGet(it, "getId") : null);
-                item.put("itemName", it != null ? tryGet(it, "getName", "getItemName", "getTitle") : null);
-                item.put("imageUrl", it != null ? tryGet(it, "getImageUrl", "getImage", "getImagePath") : null);
-                item.put("location", it != null ? tryGet(it, "getLocation", "getAddress", "getPlace") : null);
-                item.put("startDatetime", it != null ? tryGet(it, "getStartDatetime", "getStartDateTime", "getStartAt") : null);
-
-                row.put("item", item);
-                items.add(row);
-            }
-        }
-
-        Map<String, Object> res = new LinkedHashMap<>();
-        res.put("order", header);
-        res.put("items", items);
-        res.put("itemsCount", items.size());
-        return ResponseEntity.ok(res);
+        return ResponseEntity.ok(toOrderDetailsResponse(order));
     }
 
     /* --------------------------- checkout + quote (USER write) --------------------------- */
@@ -800,7 +791,7 @@ public class OrderController {
         Order order = orderRepo.findByIdWithItems(orderId)
                 .orElseThrow(() -> new NoSuchElementException("Order not found"));
 
-        return ResponseEntity.ok(toOwnerOrderDetailsResponse(order));
+        return ResponseEntity.ok(toOrderDetailsResponse(order));
     }
 
     @PreAuthorize("hasRole('OWNER')")
