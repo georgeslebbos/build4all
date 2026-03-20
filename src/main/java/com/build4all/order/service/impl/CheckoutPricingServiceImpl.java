@@ -79,22 +79,18 @@ public class CheckoutPricingServiceImpl implements CheckoutPricingService {
                     lines
             );
 
-            if (quote != null && quote.getCost() != null) {
-                shippingTotal = quote.getCost();
+            if (quote != null) {
+                if (quote.getCost() != null) {
+                    shippingTotal = quote.getCost();
+                } else if (quote.getPrice() != null) {
+                    shippingTotal = quote.getPrice();
+                }
             }
         }
 
-        BigDecimal itemTaxTotal = taxService.calculateItemTax(
-                ownerProjectId,
-                address,
-                lines
-        );
-
-        BigDecimal shippingTaxTotal = taxService.calculateShippingTax(
-                ownerProjectId,
-                address,
-                shippingTotal
-        );
+        if (shippingTotal.compareTo(BigDecimal.ZERO) < 0) {
+            shippingTotal = BigDecimal.ZERO;
+        }
 
         BigDecimal couponDiscount = BigDecimal.ZERO;
         String couponCode = null;
@@ -113,7 +109,6 @@ public class CheckoutPricingServiceImpl implements CheckoutPricingService {
                 if (coupon != null) {
                     if (coupon.getType() == CouponDiscountType.FREE_SHIPPING) {
                         shippingTotal = BigDecimal.ZERO;
-                        shippingTaxTotal = BigDecimal.ZERO;
                         couponDiscount = BigDecimal.ZERO;
                         couponCode = coupon.getCode();
                     } else {
@@ -136,6 +131,24 @@ public class CheckoutPricingServiceImpl implements CheckoutPricingService {
                 couponMessage = mapCouponErrorMessage(ex);
             }
         }
+
+        if (shippingTotal.compareTo(BigDecimal.ZERO) < 0) {
+            shippingTotal = BigDecimal.ZERO;
+        }
+
+        BigDecimal itemTaxTotal = taxService.calculateItemTax(
+                ownerProjectId,
+                address,
+                lines
+        );
+
+        // IMPORTANT:
+        // Calculate shipping tax ONLY after coupon/final shipping is known
+        BigDecimal shippingTaxTotal = taxService.calculateShippingTax(
+                ownerProjectId,
+                address,
+                shippingTotal
+        );
 
         BigDecimal grandTotal = itemsSubtotal
                 .add(shippingTotal)

@@ -16,6 +16,7 @@ import com.build4all.catalog.repository.ItemAttributeValueRepository;
 import com.build4all.catalog.repository.ItemStatusRepository;
 import com.build4all.catalog.repository.ItemTypeRepository;
 import com.build4all.features.ecommerce.domain.Product;
+import com.build4all.features.ecommerce.domain.ProductType;
 import com.build4all.features.ecommerce.dto.AttributeValueDTO;
 import com.build4all.features.ecommerce.dto.ProductRequest;
 import com.build4all.features.ecommerce.dto.ProductResponse;
@@ -166,6 +167,67 @@ public class ProductService {
                 });
     }
 
+    
+    private String trimToNull(String v) {
+        if (v == null) return null;
+        String s = v.trim();
+        return s.isBlank() ? null : s;
+    }
+
+    private void assertMaxLen(String field, String value, int max) {
+        if (value != null && value.length() > max) {
+            throw new IllegalArgumentException(field + " is too long");
+        }
+    }
+
+    private void validateProductBusinessRules(
+            ProductType productType,
+            boolean virtualProduct,
+            boolean downloadable,
+            String downloadUrl,
+            String externalUrl,
+            String buttonText
+    ) {
+        ProductType finalType = (productType == null) ? ProductType.SIMPLE : productType;
+
+        String cleanDownloadUrl = trimToNull(downloadUrl);
+        String cleanExternalUrl = trimToNull(externalUrl);
+        String cleanButtonText = trimToNull(buttonText);
+
+        assertMaxLen("downloadUrl", cleanDownloadUrl, 2000);
+        assertMaxLen("externalUrl", cleanExternalUrl, 2000);
+        assertMaxLen("buttonText", cleanButtonText, 500);
+
+        if (downloadable) {
+            if (finalType != ProductType.SIMPLE) {
+                throw new IllegalArgumentException("Downloadable product must use SIMPLE product type");
+            }
+            if (!virtualProduct) {
+                throw new IllegalArgumentException("Downloadable product must be virtual");
+            }
+            if (cleanDownloadUrl == null) {
+                throw new IllegalArgumentException("Download URL is required for downloadable product");
+            }
+            if (cleanExternalUrl != null) {
+                throw new IllegalArgumentException("Downloadable product cannot have externalUrl");
+            }
+        }
+
+        if (finalType == ProductType.EXTERNAL) {
+            if (cleanExternalUrl == null) {
+                throw new IllegalArgumentException("External URL is required for external product");
+            }
+            if (downloadable) {
+                throw new IllegalArgumentException("External product cannot be downloadable");
+            }
+        }
+    }
+
+    private ProductResponse hideCustomerDownloadUrl(ProductResponse r) {
+        r.setDownloadUrl(null);
+        return r;
+    }
+    
     private Currency resolveCurrencyOrDefault(Long currencyId) {
         if (currencyId != null) {
             return currencyRepository.findById(currencyId)
@@ -233,6 +295,15 @@ public class ProductService {
 
         ItemStatus status = resolveStatusOrDefault(request.getStatusCode());
 
+        validateProductBusinessRules(
+                request.getProductType(),
+                request.isVirtualProduct(),
+                request.isDownloadable(),
+                request.getDownloadUrl(),
+                request.getExternalUrl(),
+                request.getButtonText()
+        );
+        
         Product p = new Product();
 
         p.setOwnerProject(ownerProject);
@@ -255,14 +326,12 @@ public class ProductService {
         p.setLengthCm(request.getLengthCm());
 
         p.setSku(normalizedSku);
-        if (request.getProductType() != null) {
-            p.setProductType(request.getProductType());
-        }
+        p.setProductType(request.getProductType() == null ? ProductType.SIMPLE : request.getProductType());
         p.setVirtualProduct(request.isVirtualProduct());
         p.setDownloadable(request.isDownloadable());
-        p.setDownloadUrl(request.getDownloadUrl());
-        p.setExternalUrl(request.getExternalUrl());
-        p.setButtonText(request.getButtonText());
+        p.setDownloadUrl(trimToNull(request.getDownloadUrl()));
+        p.setExternalUrl(trimToNull(request.getExternalUrl()));
+        p.setButtonText(trimToNull(request.getButtonText()));
 
         p.setSalePrice(request.getSalePrice());
         p.setSaleStart(parseDateTimeOrNull(request.getSaleStart()));
@@ -306,6 +375,39 @@ public class ProductService {
             p.setStatus(resolveStatusOrDefault(request.getStatusCode()));
         }
 
+        
+        ProductType finalProductType = request.getProductType() != null
+                ? request.getProductType()
+                : p.getProductType();
+
+        Boolean finalVirtual = request.getVirtualProduct() != null
+                ? request.getVirtualProduct()
+                : p.isVirtualProduct();
+
+        Boolean finalDownloadable = request.getDownloadable() != null
+                ? request.getDownloadable()
+                : p.isDownloadable();
+
+        String finalDownloadUrl = request.getDownloadUrl() != null
+                ? request.getDownloadUrl()
+                : p.getDownloadUrl();
+
+        String finalExternalUrl = request.getExternalUrl() != null
+                ? request.getExternalUrl()
+                : p.getExternalUrl();
+
+        String finalButtonText = request.getButtonText() != null
+                ? request.getButtonText()
+                : p.getButtonText();
+
+        validateProductBusinessRules(
+                finalProductType,
+                Boolean.TRUE.equals(finalVirtual),
+                Boolean.TRUE.equals(finalDownloadable),
+                finalDownloadUrl,
+                finalExternalUrl,
+                finalButtonText
+        );
         if (request.getName() != null) p.setItemName(request.getName());
         if (request.getDescription() != null) p.setDescription(request.getDescription());
         if (request.getPrice() != null) p.setPrice(request.getPrice());
@@ -318,13 +420,13 @@ public class ProductService {
         if (request.getWidthCm() != null) p.setWidthCm(request.getWidthCm());
         if (request.getHeightCm() != null) p.setHeightCm(request.getHeightCm());
         if (request.getLengthCm() != null) p.setLengthCm(request.getLengthCm());
-
-        if (request.getProductType() != null) p.setProductType(request.getProductType());
-        if (request.getVirtualProduct() != null) p.setVirtualProduct(request.getVirtualProduct());
-        if (request.getDownloadable() != null) p.setDownloadable(request.getDownloadable());
-        if (request.getDownloadUrl() != null) p.setDownloadUrl(request.getDownloadUrl());
-        if (request.getExternalUrl() != null) p.setExternalUrl(request.getExternalUrl());
-        if (request.getButtonText() != null) p.setButtonText(request.getButtonText());
+        
+        p.setProductType(finalProductType);
+        p.setVirtualProduct(Boolean.TRUE.equals(finalVirtual));
+        p.setDownloadable(Boolean.TRUE.equals(finalDownloadable));
+        p.setDownloadUrl(trimToNull(finalDownloadUrl));
+        p.setExternalUrl(trimToNull(finalExternalUrl));
+        p.setButtonText(trimToNull(finalButtonText));
 
         if (request.getSalePrice() != null) p.setSalePrice(request.getSalePrice());
         if (request.getSaleStart() != null) p.setSaleStart(parseDateTimeOrNull(request.getSaleStart()));
@@ -386,6 +488,80 @@ public class ProductService {
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
+    
+    public ProductResponse getCustomerVisibleSafe(Long id, Long ownerProjectId) {
+        return hideCustomerDownloadUrl(toResponse(getCustomerVisibleProductOrThrow(id, ownerProjectId)));
+    }
+
+    public List<ProductResponse> listCustomerVisibleSafeByOwnerProject(Long ownerProjectId) {
+        return productRepository.findByOwnerProject_Id(ownerProjectId).stream()
+                .filter(this::isPublicVisibleStatus)
+                .map(this::toResponse)
+                .map(this::hideCustomerDownloadUrl)
+                .collect(Collectors.toList());
+    }
+
+    public List<ProductResponse> listCustomerVisibleSafeByItemType(Long ownerProjectId, Long itemTypeId) {
+        return listByItemType(ownerProjectId, itemTypeId).stream()
+                .filter(p -> p.getStatusCode() != null && (
+                        STATUS_PUBLISHED.equalsIgnoreCase(p.getStatusCode())
+                                || STATUS_UPCOMING.equalsIgnoreCase(p.getStatusCode())
+                ))
+                .map(this::hideCustomerDownloadUrl)
+                .collect(Collectors.toList());
+    }
+    
+    private Product getDownloadableCustomerProductOrThrow(Long id, Long ownerProjectId) {
+        Product p = getCustomerVisibleProductOrThrow(id, ownerProjectId);
+        if (!p.isDownloadable()) {
+            throw new IllegalArgumentException("This product is not downloadable");
+        }
+        return p;
+    }
+
+    public Map<String, Object> getDownloadAccess(Long id, Long ownerProjectId, Long userId) {
+        Product p = getDownloadableCustomerProductOrThrow(id, ownerProjectId);
+
+        boolean purchased = orderItemRepository.userPurchasedDownloadableProduct(userId, p.getId());
+
+        return Map.of(
+                "productId", p.getId(),
+                "downloadable", true,
+                "purchased", purchased,
+                "canDownload", purchased,
+                "message", purchased ? "Ready to download" : "Available after purchase"
+        );
+    }
+
+    public Map<String, Object> getDownload(Long id, Long ownerProjectId, Long userId) {
+        Product p = getDownloadableCustomerProductOrThrow(id, ownerProjectId);
+
+        boolean purchased = orderItemRepository.userPurchasedDownloadableProduct(userId, p.getId());
+        if (!purchased) {
+            throw new SecurityException("You must purchase this product first");
+        }
+
+        String url = trimToNull(p.getDownloadUrl());
+        if (url == null) {
+            throw new IllegalStateException("Download URL is missing");
+        }
+
+        return Map.of(
+                "productId", p.getId(),
+                "canDownload", true,
+                "downloadUrl", url
+        );
+    }
+
+    public List<ProductResponse> listCustomerVisibleSafeByCategory(Long ownerProjectId, Long categoryId) {
+        return listByCategory(ownerProjectId, categoryId).stream()
+                .filter(p -> p.getStatusCode() != null && (
+                        STATUS_PUBLISHED.equalsIgnoreCase(p.getStatusCode())
+                                || STATUS_UPCOMING.equalsIgnoreCase(p.getStatusCode())
+                ))
+                .map(this::hideCustomerDownloadUrl)
+                .collect(Collectors.toList());
+    }
 
     @Transactional(Transactional.TxType.SUPPORTS)
     public List<ProductResponse> listBestSellers(Long ownerProjectId, Integer limit) {
@@ -413,6 +589,66 @@ public class ProductService {
                 .filter(this::isPublicVisibleStatus)
                 .map(this::toResponse)
                 .toList();
+    }
+    
+    public List<ProductResponse> listCustomerVisibleSafeNewArrivals(Long ownerProjectId, Integer daysBack) {
+        if (ownerProjectId == null) throw new IllegalArgumentException("ownerProjectId is required");
+
+        int days = (daysBack == null || daysBack <= 0) ? 14 : daysBack;
+        LocalDateTime from = LocalDateTime.now().minusDays(days);
+
+        return productRepository
+                .findByOwnerProject_IdAndCreatedAtAfterOrderByCreatedAtDesc(ownerProjectId, from)
+                .stream()
+                .filter(this::isPurchasableStatus)
+                .map(this::toResponse)
+                .map(this::hideCustomerDownloadUrl)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(Transactional.TxType.SUPPORTS)
+    public List<ProductResponse> listCustomerVisibleSafeBestSellers(Long ownerProjectId, Integer limit) {
+        if (ownerProjectId == null) throw new IllegalArgumentException("ownerProjectId is required");
+        int max = (limit == null || limit <= 0) ? 10 : limit;
+
+        List<Object[]> rows = orderItemRepository.findBestSellingItemsByOwnerProject(ownerProjectId);
+        if (rows.isEmpty()) return List.of();
+
+        List<Long> itemIdsOrdered = rows.stream()
+                .map(r -> ((Number) r[0]).longValue())
+                .distinct()
+                .limit(max)
+                .toList();
+
+        if (itemIdsOrdered.isEmpty()) return List.of();
+
+        List<Product> products = productRepository.findByIdIn(itemIdsOrdered);
+        Map<Long, Product> productById = new HashMap<>();
+        for (Product p : products) productById.put(p.getId(), p);
+
+        return itemIdsOrdered.stream()
+                .map(productById::get)
+                .filter(Objects::nonNull)
+                .filter(this::isPublicVisibleStatus)
+                .map(this::toResponse)
+                .map(this::hideCustomerDownloadUrl)
+                .toList();
+    }
+
+    @Transactional(Transactional.TxType.SUPPORTS)
+    public List<ProductResponse> listCustomerVisibleSafeDiscounted(Long ownerProjectId) {
+        if (ownerProjectId == null) {
+            throw new IllegalArgumentException("ownerProjectId is required");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        return productRepository.findActiveDiscountedByOwnerProject(ownerProjectId, now)
+                .stream()
+                .filter(this::isRealActiveFlashSale)
+                .map(this::toResponse)
+                .map(this::hideCustomerDownloadUrl)
+                .collect(Collectors.toList());
     }
 
     public List<ProductResponse> listByItemType(Long ownerProjectId, Long itemTypeId) {

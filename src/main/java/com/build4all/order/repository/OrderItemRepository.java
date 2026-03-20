@@ -407,4 +407,27 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
      * based on at least one line item in the order.
      */
     boolean existsByOrder_IdAndItem_OwnerProject_Id(Long orderId, Long ownerProjectId);
+
+
+    @Query("""
+    	    select case when count(oi) > 0 then true else false end
+    	    from OrderItem oi
+    	    where oi.user.id = :userId
+    	      and oi.item.id = :productId
+    	      and upper(oi.order.status.name) in ('PAID', 'COMPLETED')
+    	""")
+    	boolean userPurchasedDownloadableProduct(
+    	        @Param("userId") Long userId,
+    	        @Param("productId") Long productId
+    	);
+
+    	@Query("""
+    	    select oi.item.id
+    	    from OrderItem oi
+    	    where oi.user.id = :userId
+    	      and upper(oi.order.status.name) in ('PAID', 'COMPLETED')
+    	      and type(oi.item) = com.build4all.features.ecommerce.domain.Product
+    	    group by oi.item.id
+    	""")
+    	java.util.List<Long> findPurchasedProductIdsByUserId(@Param("userId") Long userId);
 }

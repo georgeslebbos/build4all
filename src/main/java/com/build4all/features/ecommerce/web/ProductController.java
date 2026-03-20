@@ -89,17 +89,29 @@ public class ProductController {
     private ResponseEntity<?> handleSkuConflict(DataIntegrityViolationException e) {
         String msg = String.valueOf(
                 e.getMostSpecificCause() != null ? e.getMostSpecificCause().getMessage() : e.getMessage()
-        ).toLowerCase();
+        );
 
-        if (msg.contains("uk_items_aup_sku_ci")) {
+        String low = msg.toLowerCase();
+
+        if (low.contains("uk_items_aup_sku_ci")) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(Map.of("error", "SKU already exists in this app"));
         }
 
-        return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(Map.of("error", "Data conflict"));
-    }
+        if (low.contains("value too long for type character varying")) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of(
+                            "error", "A text field is too long",
+                            "details", msg
+                    ));
+        }
 
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of(
+                        "error", "Data conflict",
+                        "details", msg
+                ));
+    }
     /* =========================================================
      * CREATE (OWNER only)
      * ========================================================= */
@@ -395,9 +407,9 @@ public class ProductController {
         Long ownerProjectId = tenantFromAuth(auth);
 
         try {
-            ProductResponse p = isOwner(auth)
-                    ? productService.getTenant(id, ownerProjectId)
-                    : productService.getCustomerVisible(id, ownerProjectId);
+        	ProductResponse p = isOwner(auth)
+        	        ? productService.getTenant(id, ownerProjectId)
+        	        : productService.getCustomerVisibleSafe(id, ownerProjectId);
 
             return ResponseEntity.ok(p);
         } catch (IllegalArgumentException e) {
@@ -429,15 +441,15 @@ public class ProductController {
             if (itemTypeId != null) {
                 result = owner
                         ? productService.listByItemType(ownerProjectId, itemTypeId)
-                        : productService.listCustomerVisibleByItemType(ownerProjectId, itemTypeId);
+                        : productService.listCustomerVisibleSafeByItemType(ownerProjectId, itemTypeId);
             } else if (categoryId != null) {
                 result = owner
                         ? productService.listByCategory(ownerProjectId, categoryId)
-                        : productService.listCustomerVisibleByCategory(ownerProjectId, categoryId);
+                        : productService.listCustomerVisibleSafeByCategory(ownerProjectId, categoryId);
             } else {
                 result = owner
                         ? productService.listByOwnerProject(ownerProjectId)
-                        : productService.listCustomerVisibleByOwnerProject(ownerProjectId);
+                        : productService.listCustomerVisibleSafeByOwnerProject(ownerProjectId);
             }
 
             return ResponseEntity.ok(result);
@@ -466,7 +478,11 @@ public class ProductController {
         Long ownerProjectId = tenantFromAuth(auth);
 
         try {
-            return ResponseEntity.ok(productService.listNewArrivals(ownerProjectId, days));
+        	return ResponseEntity.ok(
+        	        isOwner(auth)
+        	                ? productService.listNewArrivals(ownerProjectId, days)
+        	                : productService.listCustomerVisibleSafeNewArrivals(ownerProjectId, days)
+        	);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
@@ -491,7 +507,11 @@ public class ProductController {
         Long ownerProjectId = tenantFromAuth(auth);
 
         try {
-            return ResponseEntity.ok(productService.listBestSellers(ownerProjectId, limit));
+        	return ResponseEntity.ok(
+        	        isOwner(auth)
+        	                ? productService.listBestSellers(ownerProjectId, limit)
+        	                : productService.listCustomerVisibleSafeBestSellers(ownerProjectId, limit)
+        	);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
@@ -515,7 +535,71 @@ public class ProductController {
         Long ownerProjectId = tenantFromAuth(auth);
 
         try {
-            return ResponseEntity.ok(productService.listDiscounted(ownerProjectId));
+        	return ResponseEntity.ok(
+        	        isOwner(auth)
+        	                ? productService.listDiscounted(ownerProjectId)
+        	                : productService.listCustomerVisibleSafeDiscounted(ownerProjectId)
+        	);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    private Long userIdFromAuth(String authHeader) {
+        return jwtUtil.extractId(authHeader); // if method name differs, use your real one
+    }
+    
+    
+    @GetMapping("/{id}/download-access")
+    @Operation(summary = "Check if current user can download this product")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<?> getDownloadAccess(
+            @RequestHeader(value = "Authorization", required = false) String auth,
+            @PathVariable Long id
+    ) {
+        if (auth == null || auth.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Missing Authorization header"));
+        }
+
+        Long ownerProjectId = tenantFromAuth(auth);
+        Long userId = userIdFromAuth(auth);
+
+        try {
+            return ResponseEntity.ok(productService.getDownloadAccess(id, ownerProjectId, userId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    @GetMapping("/{id}/download")
+    @Operation(summary = "Get download URL for purchased downloadable product")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<?> downloadProduct(
+            @RequestHeader(value = "Authorization", required = false) String auth,
+            @PathVariable Long id
+    ) {
+        if (auth == null || auth.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Missing Authorization header"));
+        }
+
+        Long ownerProjectId = tenantFromAuth(auth);
+        Long userId = userIdFromAuth(auth);
+
+        try {
+            return ResponseEntity.ok(productService.getDownload(id, ownerProjectId, userId));
+        } catch (SecurityException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", e.getMessage()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));

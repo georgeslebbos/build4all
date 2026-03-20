@@ -6,6 +6,7 @@ import com.build4all.order.domain.OrderItem;
 import com.build4all.order.domain.OrderStatus;
 import com.build4all.order.dto.CheckoutRequest;
 import com.build4all.order.dto.CheckoutSummaryResponse;
+import com.build4all.order.dto.OrderEditRequest;
 import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.order.repository.OrderRepository;
 import com.build4all.order.repository.OrderStatusRepository;
@@ -361,9 +362,27 @@ public class OrderController {
         header.put("shippingAddress", order.getShippingAddress());
         header.put("shippingCity", order.getShippingCity());
         header.put("shippingPostalCode", order.getShippingPostalCode());
+
+        header.put(
+            "shippingCountryId",
+            order.getShippingCountry() != null ? tryGet(order.getShippingCountry(), "getId") : null
+        );
+        header.put(
+            "shippingCountryName",
+            order.getShippingCountry() != null ? tryGet(order.getShippingCountry(), "getName", "getTitle") : null
+        );
+
+        header.put(
+            "shippingRegionId",
+            order.getShippingRegion() != null ? tryGet(order.getShippingRegion(), "getId") : null
+        );
+        header.put(
+            "shippingRegionName",
+            order.getShippingRegion() != null ? tryGet(order.getShippingRegion(), "getName", "getTitle") : null
+        );
+
         header.put("shippingMethodId", order.getShippingMethodId());
         header.put("shippingMethodName", order.getShippingMethodName());
-
         header.put("orderCode", order.getOrderCode());
         header.put("orderSeq", order.getOrderSeq());
 
@@ -509,7 +528,25 @@ public class OrderController {
         orderService.cancelorder(orderItemId, actorId);
         return ResponseEntity.ok().build();
     }
+    
+    @PreAuthorize("hasRole('OWNER')")
+    @PutMapping("/owner/orders/{orderId}/edit")
+    public ResponseEntity<?> ownerEditOrder(
+            @RequestHeader("Authorization") String auth,
+            @PathVariable Long orderId,
+            @RequestBody @Valid OrderEditRequest request
+    ) {
+        Long ownerProjectId = jwt.requireOwnerProjectId(auth);
+        assertOwnerCanAccessOrder(orderId, ownerProjectId);
 
+        ResponseEntity<?> blocked = ownerSubscriptionGuard.blockIfWriteNotAllowed(ownerProjectId);
+        if (blocked != null) return blocked;
+
+        var result = orderService.ownerEditOrder(orderId, ownerProjectId, request);
+        return ResponseEntity.ok(result);
+    }
+    
+    
     @PreAuthorize("hasRole('USER')")
     @PutMapping("/pending/{orderItemId}")
     public ResponseEntity<?> resetToPending(@RequestHeader("Authorization") String auth, @PathVariable Long orderItemId) {
@@ -833,7 +870,6 @@ public class OrderController {
         }
 
         order.setStatus(newStatus);
-        order.setOrderDate(LocalDateTime.now());
         orderRepo.save(order);
 
         Map<String, Object> r = new HashMap<>();
@@ -873,7 +909,6 @@ public class OrderController {
             if (!List.of("CANCELED", "REJECTED", "REFUNDED").contains(cur)) {
                 OrderStatus completed = requireStatusByName("COMPLETED");
                 order.setStatus(completed);
-                order.setOrderDate(LocalDateTime.now());
                 orderRepo.save(order);
             }
         }
@@ -1055,7 +1090,6 @@ public class OrderController {
         // Set status to PENDING (use your existing status table)
         OrderStatus pending = requireStatusByName("PENDING");
         order.setStatus(pending);
-        order.setOrderDate(LocalDateTime.now());
         orderRepo.save(order);
 
         // Return updated summary
