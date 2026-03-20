@@ -13,7 +13,7 @@ public class Product extends Item {
  
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "product_type", nullable = false)
+    @Column(name = "product_type", nullable = false,length = 50)
     private ProductType productType = ProductType.SIMPLE;
 
     @Column(name = "is_virtual")
@@ -22,14 +22,16 @@ public class Product extends Item {
     @Column(name = "is_downloadable")
     private boolean downloadable;     // digital goods
 
-    @Column(name = "download_url")
+    @Column(name = "download_url", length = 2000)
     private String downloadUrl;
 
-    @Column(name = "external_url")
-    private String externalUrl;       // affiliate link
+    @Column(name = "external_url", length = 2000)
+    private String externalUrl;
 
-    @Column(name = "button_text")
-    private String buttonText;        // optional: "Buy now", "Book now"
+    @Column(name = "button_text", length = 500)
+    private String buttonText;
+
+   
 
     @Column(name = "weight_kg")
     private BigDecimal weightKg;

@@ -3,10 +3,12 @@ package com.build4all.order.service;
 import com.build4all.order.domain.OrderItem;
 import com.build4all.order.dto.CheckoutRequest;
 import com.build4all.order.dto.CheckoutSummaryResponse;
+import com.build4all.order.dto.OrderEditRequest;
 
 import jakarta.validation.Valid;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * OrderService
@@ -190,6 +192,8 @@ public interface OrderService {
      */
     CheckoutSummaryResponse checkout(Long userId, CheckoutRequest request);
 
+    Map<String, Object> ownerEditOrder(Long orderId, Long ownerProjectId, OrderEditRequest request);
+    
 	CheckoutSummaryResponse checkoutFromCart(Long userId, @Valid CheckoutRequest request);
 	
 	void ownerRejectOrder(Long orderId, Long ownerProjectId, String reason);

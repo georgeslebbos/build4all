@@ -21,6 +21,7 @@ import com.build4all.order.domain.OrderStatus;
 import com.build4all.order.dto.CartLine;
 import com.build4all.order.dto.CheckoutRequest;
 import com.build4all.order.dto.CheckoutSummaryResponse;
+import com.build4all.order.dto.OrderEditRequest;
 import com.build4all.order.dto.ShippingAddressDTO;
 import com.build4all.order.repository.OrderItemRepository;
 import com.build4all.order.repository.OrderRepository;
@@ -1457,6 +1458,412 @@ public class OrderServiceImpl implements OrderService {
         }
         cart.setTotalPrice(total);
         cart.setUpdatedAt(LocalDateTime.now());
+    }
+    
+    private void assertOwnerOwnsOrder(Order order, Long ownerProjectId) {
+        boolean ok = order.getOrderItems() != null && order.getOrderItems().stream().anyMatch(oi ->
+                oi != null
+                        && oi.getItem() != null
+                        && oi.getItem().getOwnerProject() != null
+                        && ownerProjectId.equals(oi.getItem().getOwnerProject().getId())
+        );
+
+        if (!ok) {
+            throw new NoSuchElementException("Order not found");
+        }
+    }
+    
+    private void clearShippingFields(Order order) {
+        order.setShippingCountry(null);
+        order.setShippingRegion(null);
+        order.setShippingCity(null);
+        order.setShippingPostalCode(null);
+        order.setShippingMethodId(null);
+        order.setShippingMethodName(null);
+        order.setShippingAddress(null);
+        order.setShippingPhone(null);
+        order.setShippingFullName(null);
+    }
+    
+    private void applyShippingToOrder(Order order, ShippingAddressDTO addr, boolean shippingRequired) {
+        if (!shippingRequired) {
+            clearShippingFields(order);
+            return;
+        }
+
+        if (addr == null) {
+            throw new IllegalArgumentException("CHECKOUT_SHIPPING_ADDRESS_REQUIRED");
+        }
+
+        Country shippingCountry = null;
+        Region shippingRegion = null;
+
+        if (addr.getCountryId() != null) {
+            shippingCountry = countryRepo.findById(addr.getCountryId())
+                    .orElseThrow(() -> new IllegalArgumentException("Shipping country not found"));
+        }
+
+        if (addr.getRegionId() != null) {
+            shippingRegion = regionRepo.findById(addr.getRegionId())
+                    .orElseThrow(() -> new IllegalArgumentException("Shipping region not found"));
+        }
+
+        Users user = order.getUser();
+        String shippingName = trimOrNull(addr.getFullName());
+
+        if (shippingName == null && user != null) {
+            String fn = user.getFirstName() == null ? "" : user.getFirstName().trim();
+            String ln = user.getLastName() == null ? "" : user.getLastName().trim();
+            String full = (fn + " " + ln).trim();
+            shippingName = full.isBlank() ? String.valueOf(user.getUsername()) : full;
+        }
+
+        order.setShippingCountry(shippingCountry);
+        order.setShippingRegion(shippingRegion);
+        order.setShippingCity(trimOrNull(addr.getCity()));
+        order.setShippingPostalCode(trimOrNull(addr.getPostalCode()));
+        order.setShippingMethodId(addr.getShippingMethodId());
+        order.setShippingMethodName(trimOrNull(addr.getShippingMethodName()));
+        order.setShippingAddress(trimOrNull(addr.getAddressLine()));
+        order.setShippingPhone(trimOrNull(addr.getPhone()));
+        order.setShippingFullName(shippingName);
+    }
+    
+    private CheckoutRequest buildEditPricingRequest(
+            Order order,
+            OrderEditRequest request,
+            Map<Long, Integer> newQty,
+            Map<Long, OrderItem> existingByItemId,
+            Map<Long, Item> lockedItems
+    ) {
+        CheckoutRequest pricingRequest = new CheckoutRequest();
+        pricingRequest.setCurrencyId(order.getCurrency().getId());
+        pricingRequest.setShippingAddress(request.getShippingAddress());
+        pricingRequest.setCouponCode(trimOrNull(order.getCouponCode()));
+
+        List<CartLine> lines = new ArrayList<>();
+
+        for (Map.Entry<Long, Integer> e : newQty.entrySet()) {
+            Long itemId = e.getKey();
+            int qty = e.getValue();
+
+            Item item = lockedItems.get(itemId);
+            OrderItem existing = existingByItemId.get(itemId);
+
+            BigDecimal unitPrice =
+                    (existing != null && existing.getPrice() != null)
+                            ? existing.getPrice()
+                            : resolveUnitPrice(item);
+
+            CartLine cl = new CartLine();
+            cl.setItemId(itemId);
+            cl.setQuantity(qty);
+            cl.setUnitPrice(unitPrice);
+            cl.setLineSubtotal(unitPrice.multiply(BigDecimal.valueOf(qty)));
+
+            Object n = tryGet(item, "getName", "getItemName", "getTitle");
+            if (n != null) {
+                String itemName = n.toString().trim();
+                if (!itemName.isBlank()) cl.setItemName(itemName);
+            }
+
+            lines.add(cl);
+        }
+
+        pricingRequest.setLines(lines);
+        return pricingRequest;
+    }
+    
+    
+    @Override
+    public Map<String, Object> ownerEditOrder(Long orderId, Long ownerProjectId, OrderEditRequest request) {
+
+        if (orderId == null) throw new IllegalArgumentException("orderId is required");
+        if (ownerProjectId == null) throw new IllegalArgumentException("ownerProjectId is required");
+        if (request == null || request.getLines() == null || request.getLines().isEmpty()) {
+            throw new IllegalArgumentException("Edited order lines are required");
+        }
+
+        Order order = orderRepo.findByIdWithItems(orderId)
+                .orElseThrow(() -> new NoSuchElementException("Order not found"));
+
+        assertOwnerOwnsOrder(order, ownerProjectId);
+
+        String curr = currentStatusCode(order);
+        if (!List.of("PENDING", "CANCEL_REQUESTED").contains(curr)) {
+            throw new IllegalStateException("Only pending orders can be edited");
+        }
+
+        String provider = providerForOrder(order);
+
+        // V1 safe rule
+        if (!"CASH".equalsIgnoreCase(provider)) {
+            throw new IllegalStateException("Only CASH orders can be edited for now");
+        }
+
+        if (order.getCurrency() == null || order.getCurrency().getId() == null) {
+            throw new IllegalStateException("Order currency is missing");
+        }
+
+        Map<Long, OrderItem> existingByItemId = new LinkedHashMap<>();
+        Map<Long, Integer> oldQty = new LinkedHashMap<>();
+
+        if (order.getOrderItems() != null) {
+            for (OrderItem oi : order.getOrderItems()) {
+                if (oi == null || oi.getItem() == null || oi.getItem().getId() == null) continue;
+
+                Long itemId = oi.getItem().getId();
+                existingByItemId.putIfAbsent(itemId, oi);
+                oldQty.merge(itemId, oi.getQuantity(), Integer::sum);
+            }
+        }
+
+        Map<Long, Integer> newQty = new LinkedHashMap<>();
+        for (var l : request.getLines()) {
+            if (l == null || l.getItemId() == null) {
+                throw new IllegalArgumentException("itemId is required");
+            }
+            if (l.getQuantity() < 0) {
+                throw new IllegalArgumentException("quantity cannot be negative");
+            }
+            if (l.getQuantity() == 0) continue; // remove
+            newQty.merge(l.getItemId(), l.getQuantity(), Integer::sum);
+        }
+
+        if (newQty.isEmpty()) {
+            throw new IllegalArgumentException("Edited order must contain at least one item");
+        }
+
+        Set<Long> affectedIds = new TreeSet<>();
+        affectedIds.addAll(oldQty.keySet());
+        affectedIds.addAll(newQty.keySet());
+
+        Map<Long, Item> lockedItems = new LinkedHashMap<>();
+        boolean shippingRequired = false;
+
+        for (Long itemId : affectedIds) {
+            Item locked = itemRepo.findByIdForStockCheck(itemId)
+                    .orElseThrow(() -> new IllegalArgumentException("Item not found: " + itemId));
+
+            int oldQuantity = oldQty.getOrDefault(itemId, 0);
+            int newQuantity = newQty.getOrDefault(itemId, 0);
+
+            boolean isExistingLine = oldQuantity > 0;
+            boolean isNewLine = oldQuantity == 0 && newQuantity > 0;
+            boolean isIncreasingExisting = isExistingLine && newQuantity > oldQuantity;
+
+            // ✅ business rule:
+            // - new item must be purchasable
+            // - increasing an existing item must also be purchasable
+            // - keeping same qty / reducing qty / removing item is allowed
+            //   even if the item is no longer published
+            if (isNewLine || isIncreasingExisting) {
+                assertItemPurchasable(locked);
+            }
+
+            if (locked.getOwnerProject() == null || locked.getOwnerProject().getId() == null) {
+                throw new IllegalStateException("Item " + itemId + " has no ownerProject");
+            }
+
+            if (!ownerProjectId.equals(locked.getOwnerProject().getId())) {
+                throw new IllegalArgumentException("All edited items must belong to the same owner project");
+            }
+
+            lockedItems.put(itemId, locked);
+
+            if (newQuantity > 0 && isShippingRequired(locked)) {
+                shippingRequired = true;
+            }
+        }
+
+        validateShippingOrThrow(request.getShippingAddress(), shippingRequired);
+
+        List<String> reservedStatuses = List.of("PENDING", "COMPLETED", "CANCEL_REQUESTED");
+
+        // capacity validation
+        for (Long itemId : affectedIds) {
+            Item item = lockedItems.get(itemId);
+            if (item == null) continue;
+
+            int oldQuantity = oldQty.getOrDefault(itemId, 0);
+            int newQuantity = newQty.getOrDefault(itemId, 0);
+
+            Integer stock = readStock(item);
+            if (stock != null) continue;
+
+            Integer capacity = readSeatsCapacity(item);
+            if (capacity != null) {
+                int totalReserved = orderItemRepo.sumQuantityByItemIdAndStatusNames(itemId, reservedStatuses);
+                int reservedByOthers = Math.max(0, totalReserved - oldQuantity);
+                int remainingForThisOrder = capacity - reservedByOthers;
+
+                if (newQuantity > remainingForThisOrder) {
+                    throw new IllegalStateException(
+                            "Only " + Math.max(remainingForThisOrder, 0) + " available for itemId=" + itemId
+                    );
+                }
+            }
+        }
+
+        // stock delta
+        for (Long itemId : affectedIds) {
+            Item item = lockedItems.get(itemId);
+            if (item == null) continue;
+
+            Integer stock = readStock(item);
+            if (stock == null) continue;
+
+            int oldQuantity = oldQty.getOrDefault(itemId, 0);
+            int newQuantity = newQty.getOrDefault(itemId, 0);
+            int delta = newQuantity - oldQuantity;
+
+            if (delta > 0) {
+                int updated = itemRepo.decrementStockIfEnough(itemId, delta);
+                if (updated != 1) {
+                    Integer currentStock = itemRepo.findStockValue(itemId);
+                    int available = currentStock == null ? 0 : currentStock;
+                    throw new IllegalStateException(
+                            "Not enough stock for itemId=" + itemId + ". Available: " + available
+                    );
+                }
+
+                Integer newStock = itemRepo.findStockValue(itemId);
+                Long tenantId = item.getOwnerProject() != null ? item.getOwnerProject().getId() : null;
+                if (tenantId != null) {
+                    wsEvents.sendStockChanged(tenantId, itemId, -delta, newStock, "ORDER_EDITED", order.getId());
+                }
+
+            } else if (delta < 0) {
+                int returnedQty = -delta;
+                itemRepo.incrementStock(itemId, returnedQty);
+
+                Integer newStock = itemRepo.findStockValue(itemId);
+                Long tenantId = item.getOwnerProject() != null ? item.getOwnerProject().getId() : null;
+                if (tenantId != null) {
+                    wsEvents.sendStockChanged(tenantId, itemId, returnedQty, newStock, "ORDER_EDITED", order.getId());
+                }
+            }
+        }
+
+        // delete removed lines
+        if (order.getOrderItems() != null) {
+            Iterator<OrderItem> it = order.getOrderItems().iterator();
+            while (it.hasNext()) {
+                OrderItem oi = it.next();
+                if (oi == null || oi.getItem() == null || oi.getItem().getId() == null) continue;
+
+                Long itemId = oi.getItem().getId();
+                if (!newQty.containsKey(itemId)) {
+                    orderItemRepo.delete(oi);
+                    it.remove();
+                }
+            }
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        // update/add lines
+        for (Map.Entry<Long, Integer> e : newQty.entrySet()) {
+            Long itemId = e.getKey();
+            int qty = e.getValue();
+
+            Item item = lockedItems.get(itemId);
+            OrderItem existing = existingByItemId.get(itemId);
+
+            if (existing == null) {
+                OrderItem oi = new OrderItem();
+                oi.setOrder(order);
+                oi.setItem(item);
+                oi.setUser(order.getUser());
+                oi.setCurrency(order.getCurrency());
+                oi.setQuantity(qty);
+                oi.setPrice(resolveUnitPrice(item));
+                oi.setCreatedAt(now);
+                oi.setUpdatedAt(now);
+                orderItemRepo.save(oi);
+
+                if (order.getOrderItems() != null) {
+                    order.getOrderItems().add(oi);
+                }
+            } else {
+                existing.setQuantity(qty);
+                if (existing.getPrice() == null) {
+                    existing.setPrice(resolveUnitPrice(item));
+                }
+                existing.setUpdatedAt(now);
+                orderItemRepo.save(existing);
+            }
+        }
+
+        CheckoutRequest pricingRequest = buildEditPricingRequest(
+                order,
+                request,
+                newQty,
+                existingByItemId,
+                lockedItems
+        );
+
+        CheckoutSummaryResponse priced;
+        String editMessage = null;
+
+        String previousCouponCode = trimOrNull(order.getCouponCode());
+        boolean releaseRemovedCoupon = false;
+
+        try {
+            priced = checkoutPricingService.priceCheckout(
+                    ownerProjectId,
+                    order.getCurrency().getId(),
+                    pricingRequest
+            );
+        } catch (Exception ex) {
+            if (previousCouponCode != null) {
+                pricingRequest.setCouponCode(null);
+
+                priced = checkoutPricingService.priceCheckout(
+                        ownerProjectId,
+                        order.getCurrency().getId(),
+                        pricingRequest
+                );
+
+                editMessage = mapCouponErrorMessage(ex);
+                releaseRemovedCoupon = true;
+            } else {
+                throw ex;
+            }
+        }
+
+        if (releaseRemovedCoupon && previousCouponCode != null) {
+            couponService.releaseOne(ownerProjectId, previousCouponCode);
+        }
+
+        applyShippingToOrder(order, request.getShippingAddress(), shippingRequired);
+
+        order.setShippingTotal(priced.getShippingTotal());
+        order.setItemTaxTotal(priced.getItemTaxTotal());
+        order.setShippingTaxTotal(priced.getShippingTaxTotal());
+        order.setCouponCode(priced.getCouponCode());
+        order.setCouponDiscount(priced.getCouponDiscount());
+        order.setTotalPrice(priced.getGrandTotal());
+
+        orderRepo.save(order);
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("message",
+                (editMessage == null || editMessage.isBlank())
+                        ? "Order updated successfully"
+                        : "Order updated successfully. " + editMessage
+        );
+        res.put("orderId", order.getId());
+        res.put("orderCode", order.getOrderCode());
+        res.put("status", currentStatusCode(order));
+        res.put("totalPrice", order.getTotalPrice());
+        res.put("shippingTotal", order.getShippingTotal());
+        res.put("itemTaxTotal", order.getItemTaxTotal());
+        res.put("shippingTaxTotal", order.getShippingTaxTotal());
+        res.put("couponCode", order.getCouponCode());
+        res.put("couponDiscount", order.getCouponDiscount());
+
+        return res;
     }
 
     @Override

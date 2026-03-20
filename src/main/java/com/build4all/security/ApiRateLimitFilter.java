@@ -11,7 +11,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -36,6 +35,11 @@ public class ApiRateLimitFilter extends OncePerRequestFilter {
     private static final int AUTH_IP_LIMIT_PER_MIN = 20;    // stricter for login/register/reset
     private static final int AUTH_USER_LIMIT_PER_MIN = 40;
 
+    // Checkout pricing endpoints are sensitive because one UI refresh can fan out
+    // into shipping methods + tax preview + quote calculation.
+    private static final int CHECKOUT_PRICING_IP_LIMIT_PER_MIN = 10;
+    private static final int CHECKOUT_PRICING_USER_LIMIT_PER_MIN = 15;
+
     private static final int API_IP_LIMIT_PER_MIN = 180;    // general endpoints
     private static final int API_USER_LIMIT_PER_MIN = 300;
 
@@ -57,7 +61,7 @@ public class ApiRateLimitFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         if (path == null) return true;
 
-        // ✅ Skip websocket handshakes even though they are under /api/
+        // Skip websocket handshakes even though they are under /api/
         if (path.startsWith("/api/ws")) return true;
 
         if (!path.startsWith("/api/")) return true;
@@ -75,28 +79,34 @@ public class ApiRateLimitFilter extends OncePerRequestFilter {
         maybeCleanup(now);
 
         String path = safe(request.getRequestURI());
-        boolean authPath = path.startsWith("/api/auth/")
-                || path.startsWith("/api/users/reset-password")
-                || path.startsWith("/api/users/verify-reset-code")
-                || path.startsWith("/api/users/update-password");
+
+        boolean authPath = isAuthPath(path);
+        boolean checkoutPricingPath = isCheckoutPricingPath(request, path);
 
         String ip = resolveClientIp(request);
         String userKey = resolveUserKey(request); // may be null
 
-        Limit ipLimit = authPath
-                ? new Limit(AUTH_IP_LIMIT_PER_MIN, ONE_MINUTE_MS)
-                : new Limit(API_IP_LIMIT_PER_MIN, ONE_MINUTE_MS);
+        Limit ipLimit;
+        Limit userLimit;
+        String routeGroup;
 
-        Limit userLimit = authPath
-                ? new Limit(AUTH_USER_LIMIT_PER_MIN, ONE_MINUTE_MS)
-                : new Limit(API_USER_LIMIT_PER_MIN, ONE_MINUTE_MS);
-
-        // Bucket namespaces include route type so auth traffic doesn't consume general quota
-        String routeGroup = authPath ? "AUTH" : "API";
+        if (checkoutPricingPath) {
+            ipLimit = new Limit(CHECKOUT_PRICING_IP_LIMIT_PER_MIN, ONE_MINUTE_MS);
+            userLimit = new Limit(CHECKOUT_PRICING_USER_LIMIT_PER_MIN, ONE_MINUTE_MS);
+            routeGroup = "CHECKOUT_PRICING";
+        } else if (authPath) {
+            ipLimit = new Limit(AUTH_IP_LIMIT_PER_MIN, ONE_MINUTE_MS);
+            userLimit = new Limit(AUTH_USER_LIMIT_PER_MIN, ONE_MINUTE_MS);
+            routeGroup = "AUTH";
+        } else {
+            ipLimit = new Limit(API_IP_LIMIT_PER_MIN, ONE_MINUTE_MS);
+            userLimit = new Limit(API_USER_LIMIT_PER_MIN, ONE_MINUTE_MS);
+            routeGroup = "API";
+        }
 
         Decision ipDecision = consume("IP|" + routeGroup + "|" + ip, ipLimit, now);
         if (!ipDecision.allowed()) {
-            write429(response, "ip", ipDecision, ipLimit);
+            write429(response, "ip", routeGroup, ipDecision, ipLimit);
             return;
         }
 
@@ -106,7 +116,7 @@ public class ApiRateLimitFilter extends OncePerRequestFilter {
         if (userKey != null) {
             Decision userDecision = consume("USER|" + routeGroup + "|" + userKey, userLimit, now);
             if (!userDecision.allowed()) {
-                write429(response, "user", userDecision, userLimit);
+                write429(response, "user", routeGroup, userDecision, userLimit);
                 return;
             }
 
@@ -117,12 +127,28 @@ public class ApiRateLimitFilter extends OncePerRequestFilter {
             }
         }
 
-        // Helpful headers (optional but nice for clients/debugging)
         response.setHeader("X-RateLimit-Limit", String.valueOf(effectiveLimit.maxRequests()));
         response.setHeader("X-RateLimit-Remaining", String.valueOf(effectiveDecision.remaining()));
         response.setHeader("X-RateLimit-Reset", String.valueOf(effectiveDecision.resetEpochSeconds()));
+        response.setHeader("X-RateLimit-Policy", routeGroup);
 
         filterChain.doFilter(request, response);
+    }
+
+    private boolean isAuthPath(String path) {
+        return path.startsWith("/api/auth/")
+                || path.startsWith("/api/users/reset-password")
+                || path.startsWith("/api/users/verify-reset-code")
+                || path.startsWith("/api/users/update-password");
+    }
+
+    private boolean isCheckoutPricingPath(HttpServletRequest request, String path) {
+        if (!"POST".equalsIgnoreCase(request.getMethod())) return false;
+
+        return "/api/shipping/available-methods".equals(path)
+                || "/api/tax/preview".equals(path)
+                || "/api/orders/checkout/quote".equals(path)
+                || "/api/shipping/quote".equals(path);
     }
 
     private Decision consume(String key, Limit limit, long now) {
@@ -152,7 +178,13 @@ public class ApiRateLimitFilter extends OncePerRequestFilter {
         }
     }
 
-    private void write429(HttpServletResponse response, String scope, Decision decision, Limit limit) throws IOException {
+    private void write429(
+            HttpServletResponse response,
+            String scope,
+            String routeGroup,
+            Decision decision,
+            Limit limit
+    ) throws IOException {
         response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
 
@@ -160,17 +192,24 @@ public class ApiRateLimitFilter extends OncePerRequestFilter {
         response.setHeader("X-RateLimit-Limit", String.valueOf(limit.maxRequests()));
         response.setHeader("X-RateLimit-Remaining", "0");
         response.setHeader("X-RateLimit-Reset", String.valueOf(decision.resetEpochSeconds()));
+        response.setHeader("X-RateLimit-Policy", routeGroup);
+
+        String message = switch (routeGroup) {
+            case "CHECKOUT_PRICING" -> "Too many checkout refresh requests. Please retry later.";
+            case "AUTH" -> "Too many authentication requests. Please retry later.";
+            default -> "Rate limit exceeded. Please retry later.";
+        };
 
         String body = """
                 {
                   "error":"Too many requests",
                   "code":"RATE_LIMITED",
                   "scope":"%s",
-                  "message":"Rate limit exceeded. Please retry later.",
+                  "message":"%s",
                   "retryAfterSeconds":%d,
                   "timestamp":"%s"
                 }
-                """.formatted(scope, decision.retryAfterSeconds(), Instant.now().toString());
+                """.formatted(scope, message, decision.retryAfterSeconds(), Instant.now().toString());
 
         response.getWriter().write(body);
     }
@@ -207,7 +246,6 @@ public class ApiRateLimitFilter extends OncePerRequestFilter {
         // If app is behind reverse proxy/load balancer, configure forwarded headers in Spring too.
         String xff = request.getHeader("X-Forwarded-For");
         if (xff != null && !xff.isBlank()) {
-            // XFF can be "client, proxy1, proxy2"
             String first = xff.split(",")[0].trim();
             if (!first.isBlank()) return first;
         }
