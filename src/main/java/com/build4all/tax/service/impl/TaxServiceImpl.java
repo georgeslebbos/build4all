@@ -19,6 +19,9 @@ public class TaxServiceImpl implements TaxService {
 
     private final TaxRuleRepository ruleRepository;
 
+    private static final BigDecimal ZERO = BigDecimal.ZERO;
+    private static final BigDecimal MAX_TAX_RATE = new BigDecimal("100.00");
+
     public TaxServiceImpl(TaxRuleRepository ruleRepository) {
         this.ruleRepository = ruleRepository;
     }
@@ -29,15 +32,10 @@ public class TaxServiceImpl implements TaxService {
 
     /**
      * Null-safe BigDecimal helper.
-     * Any null numeric value becomes 0 to avoid NullPointerException in calculations.
      */
     private BigDecimal safe(BigDecimal v) {
         return v == null ? BigDecimal.ZERO : v;
     }
-
-    
-    private static final BigDecimal ZERO = BigDecimal.ZERO;
-    private static final BigDecimal MAX_TAX_RATE = new BigDecimal("100.00");
 
     private void validateRuleForSave(TaxRule rule) {
         if (rule == null) {
@@ -64,16 +62,84 @@ public class TaxServiceImpl implements TaxService {
             throw new IllegalArgumentException("rate cannot be greater than 100%");
         }
     }
+
     /**
-     * ✅ NEW (important):
+     * Scope priority model:
+     * - REGION:{id}
+     * - COUNTRY:{id}
+     * - GLOBAL
+     */
+    private String scopeKey(TaxRule rule) {
+        if (rule == null) return "UNKNOWN";
+
+        if (rule.getRegion() != null && rule.getRegion().getId() != null) {
+            return "REGION:" + rule.getRegion().getId();
+        }
+
+        if (rule.getCountry() != null && rule.getCountry().getId() != null) {
+            return "COUNTRY:" + rule.getCountry().getId();
+        }
+
+        return "GLOBAL";
+    }
+
+    private boolean sameScope(TaxRule a, TaxRule b) {
+        return Objects.equals(scopeKey(a), scopeKey(b));
+    }
+
+    private String humanScopeLabel(TaxRule rule) {
+        if (rule == null) return "scope";
+
+        if (rule.getRegion() != null && rule.getRegion().getId() != null) {
+            return "region";
+        }
+
+        if (rule.getCountry() != null && rule.getCountry().getId() != null) {
+            return "country";
+        }
+
+        return "global";
+    }
+
+    /**
+     * one enabled rule per scope only
+     */
+    private void validateNoEnabledConflict(TaxRule candidate, Long currentIdOrNull) {
+        if (candidate == null) return;
+
+        // only enforce overlap check when the candidate is enabled
+        if (!candidate.isEnabled()) return;
+
+        Long ownerProjectId = candidate.getOwnerProject() != null
+                ? candidate.getOwnerProject().getId()
+                : null;
+
+        if (ownerProjectId == null) {
+            throw new IllegalArgumentException("ownerProjectId is required");
+        }
+
+        List<TaxRule> enabledRules = ruleRepository.findByOwnerProject_IdAndEnabledTrue(ownerProjectId);
+
+        for (TaxRule existing : enabledRules) {
+            if (existing == null || existing.getId() == null) continue;
+
+            if (currentIdOrNull != null && existing.getId().equals(currentIdOrNull)) {
+                continue;
+            }
+
+            if (sameScope(candidate, existing)) {
+                throw new IllegalArgumentException(
+                        "Only one enabled tax rule is allowed for the same " + humanScopeLabel(candidate)
+                );
+            }
+        }
+    }
+
+    /**
      * Pick the best matching rule with clear priority:
      *   1) region match
      *   2) country match
-     *   3) global rule (no country, no region)
-     *
-     * Also:
-     * - If rule has country set but address.countryId is null -> NOT a match
-     * - If rule has region set but address.regionId is null -> NOT a match
+     *   3) global rule
      *
      * If forShipping=true -> only rules where appliesToShipping=true.
      */
@@ -87,22 +153,22 @@ public class TaxServiceImpl implements TaxService {
         if (rules == null || rules.isEmpty()) return null;
 
         Long countryId = (addr != null) ? addr.getCountryId() : null;
-        Long regionId  = (addr != null) ? addr.getRegionId()  : null;
+        Long regionId = (addr != null) ? addr.getRegionId() : null;
 
-        // 1) region-specific rule (strict match)
+        // 1) region-specific rule
         TaxRule regionRule = rules.stream()
                 .filter(r -> !forShipping || r.isAppliesToShipping())
-                .filter(r -> r.getRegion() != null) // must be region-specific
+                .filter(r -> r.getRegion() != null)
                 .filter(r -> regionId != null && Objects.equals(r.getRegion().getId(), regionId))
                 .findFirst()
                 .orElse(null);
 
         if (regionRule != null) return regionRule;
 
-        // 2) country-specific rule (strict match)
+        // 2) country-specific rule
         TaxRule countryRule = rules.stream()
                 .filter(r -> !forShipping || r.isAppliesToShipping())
-                .filter(r -> r.getRegion() == null) // region has priority, so ignore region rules here
+                .filter(r -> r.getRegion() == null)
                 .filter(r -> r.getCountry() != null)
                 .filter(r -> countryId != null && Objects.equals(r.getCountry().getId(), countryId))
                 .findFirst()
@@ -110,7 +176,7 @@ public class TaxServiceImpl implements TaxService {
 
         if (countryRule != null) return countryRule;
 
-        // 3) global rule (no country/region)
+        // 3) global rule
         return rules.stream()
                 .filter(r -> !forShipping || r.isAppliesToShipping())
                 .filter(r -> r.getCountry() == null && r.getRegion() == null)
@@ -125,13 +191,12 @@ public class TaxServiceImpl implements TaxService {
     @Override
     public TaxRule createRule(TaxRule rule) {
         validateRuleForSave(rule);
+        validateNoEnabledConflict(rule, null);
         return ruleRepository.save(rule);
     }
 
     /**
-     * ✅ NEW:
-     * Tenant-safe update: must provide ownerProjectId and we fetch by (id, ownerProjectId)
-     * so nobody can update a rule from another tenant.
+     * Tenant-safe update
      */
     public TaxRule updateRuleScoped(Long ownerProjectId, Long id, TaxRule updates) {
         if (ownerProjectId == null) {
@@ -160,12 +225,15 @@ public class TaxServiceImpl implements TaxService {
 
         existing.setAppliesToShipping(updates.isAppliesToShipping());
         existing.setEnabled(updates.isEnabled());
-
         existing.setCountry(updates.getCountry());
         existing.setRegion(updates.getRegion());
 
+        validateRuleForSave(existing);
+        validateNoEnabledConflict(existing, existing.getId());
+
         return ruleRepository.save(existing);
     }
+
     /**
      * Kept for interface compatibility.
      * Prefer calling updateRuleScoped from controller.
@@ -176,8 +244,7 @@ public class TaxServiceImpl implements TaxService {
     }
 
     /**
-     * ✅ NEW:
-     * Tenant-safe delete.
+     * Tenant-safe delete
      */
     public void deleteRuleScoped(Long ownerProjectId, Long id) {
         if (ownerProjectId == null) {
@@ -187,13 +254,11 @@ public class TaxServiceImpl implements TaxService {
         TaxRule rule = ruleRepository.findByIdAndOwnerProject_Id(id, ownerProjectId)
                 .orElseThrow(() -> new IllegalArgumentException("TaxRule not found for this ownerProject"));
 
-        // Choose hard delete or soft delete; you currently hard delete:
         ruleRepository.delete(rule);
     }
 
     /**
-     * ✅ NEW:
-     * Tenant-safe get.
+     * Tenant-safe get
      */
     public TaxRule getRuleScoped(Long ownerProjectId, Long id) {
         if (ownerProjectId == null) {
@@ -247,7 +312,6 @@ public class TaxServiceImpl implements TaxService {
         BigDecimal rate = rule.getRate();
         if (rate.compareTo(BigDecimal.ZERO) <= 0) return BigDecimal.ZERO;
 
-        // ✅ recommended rounding to 2 decimals (money). Adjust if your currency differs.
         return subtotal.multiply(rate)
                 .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
     }

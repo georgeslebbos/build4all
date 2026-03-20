@@ -143,9 +143,31 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                             filterChain.doFilter(request, response);
                             return;
                         }
+
+                        if (isStaleToken(issuedAt, u.getCreatedAt())) {
+                            SecurityContextHolder.clearContext();
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+
+                        if (ownerProjectId != null
+                                && u.getOwnerProject() != null
+                                && u.getOwnerProject().getId() != null
+                                && !ownerProjectId.equals(u.getOwnerProject().getId())) {
+                            SecurityContextHolder.clearContext();
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+
+                        if (!u.isEnabled() || !u.isAccountNonLocked()) {
+                            SecurityContextHolder.clearContext();
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+
                         principal = u;
                         idClaim = u.getId();
-                    } else {
+                    }else {
                         Optional<Users> userOpt = usersRepository.findById(idClaim);
                         if (userOpt.isEmpty()) {
                             SecurityContextHolder.clearContext();
@@ -169,6 +191,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                             return;
                         }
 
+                        if (!user.isEnabled() || !user.isAccountNonLocked()) {
+                            SecurityContextHolder.clearContext();
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+
+                       
                         principal = user;
                     }
                 }

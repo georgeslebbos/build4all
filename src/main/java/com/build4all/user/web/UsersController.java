@@ -2,6 +2,7 @@ package com.build4all.user.web;
 
 import com.build4all.common.errors.ApiException;
 import com.build4all.security.JwtUtil;
+import com.build4all.security.service.AuthTokenRevocationService;
 import com.build4all.user.domain.UserStatus;
 import com.build4all.user.domain.Users;
 import com.build4all.user.dto.UserDto;
@@ -42,7 +43,8 @@ public class UsersController {
     @Autowired private JwtUtil jwtUtil;
     @Autowired private UsersRepository usersRepository;
     @Autowired private UserStatusRepository userStatusRepository;
-
+    @Autowired private AuthTokenRevocationService tokenRevocationService;
+    
     private final UserService userService;
     public UsersController(UserService userService) { this.userService = userService; }
 
@@ -141,6 +143,17 @@ public class UsersController {
         if (e.getCode() != null) body.put("code", e.getCode());
         if (e.getDetails() != null) body.put("details", e.getDetails());
         return ResponseEntity.status(e.getStatus()).body(body);
+    }
+    
+    
+    private void revokeUserTokensIfNeeded(Users user) {
+        if (user == null || user.getStatus() == null || user.getStatus().getName() == null) return;
+
+        String status = user.getStatus().getName().trim().toUpperCase();
+        if ("ACTIVE".equals(status)) return;
+
+        Long ownerProjectId = user.getOwnerProject() != null ? user.getOwnerProject().getId() : null;
+        tokenRevocationService.revokeNow("USER", user.getId(), ownerProjectId);
     }
 
     /* =====================================================
@@ -586,6 +599,7 @@ public class UsersController {
             user.setStatus(newStatusOpt.get());
             user.setUpdatedAt(LocalDateTime.now());
             usersRepository.save(user);
+            revokeUserTokensIfNeeded(user);
 
             return ok("User status updated to " + newStatusOpt.get().getName());
 
@@ -630,6 +644,7 @@ public class UsersController {
             user.setStatus(statusEntity);
             user.setUpdatedAt(LocalDateTime.now());
             userService.save(user);
+            revokeUserTokensIfNeeded(user);
 
             Map<String, Object> resp = new LinkedHashMap<>();
             resp.put("message", "User status updated successfully");
@@ -679,6 +694,7 @@ public class UsersController {
             user.setStatus(status);
             user.setUpdatedAt(LocalDateTime.now());
             userService.save(user);
+            revokeUserTokensIfNeeded(user);
 
             Map<String, Object> resp = new LinkedHashMap<>();
             resp.put("message", "Google account status updated");
