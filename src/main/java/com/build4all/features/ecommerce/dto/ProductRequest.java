@@ -22,6 +22,7 @@ public class ProductRequest {
     private String statusCode;    // DRAFT, UPCOMING, PUBLISHED, ARCHIVED
 
     private String imageUrl;
+    private Integer mainImageIndex;
     private String sku;
     private ProductType productType = ProductType.SIMPLE;
 
@@ -59,6 +60,13 @@ public class ProductRequest {
 
     public Long getCategoryId() {
         return categoryId;
+    }
+    public Integer getMainImageIndex() {
+        return mainImageIndex;
+    }
+    
+    public void setMainImageIndex(Integer mainImageIndex) {
+        this.mainImageIndex = mainImageIndex;
     }
 
     public Long getCurrencyId() {

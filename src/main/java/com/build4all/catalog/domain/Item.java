@@ -6,6 +6,8 @@ import com.build4all.tax.domain.TaxClass;
 import jakarta.persistence.*;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
+import java.util.ArrayList;
+import java.util.List;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -60,6 +62,8 @@ public abstract class Item {
     
     @Column(name = "sku", length = 100)
     private String sku;
+    
+    
 
     @Enumerated(EnumType.STRING)
     @Column(name = "tax_class", nullable = false)
@@ -76,6 +80,11 @@ public abstract class Item {
     @Column(name = "image_url")
     private String imageUrl;
 
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @OneToMany(mappedBy = "item", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("sortOrder ASC, id ASC")
+    private List<ItemImage> images = new ArrayList<>();
+    
     @ManyToOne
     @JoinColumn(name = "currency_id")
     @OnDelete(action = OnDeleteAction.CASCADE)
@@ -143,6 +152,14 @@ public abstract class Item {
     public BigDecimal getPrice() { return price; }
     public void setPrice(BigDecimal price) { this.price = price; }
 
+    public List<ItemImage> getImages() {
+        return images;
+    }
+
+    public void setImages(List<ItemImage> images) {
+        this.images = images;
+    }
+    
     public BigDecimal getSalePrice() { return salePrice; }
     public void setSalePrice(BigDecimal salePrice) { this.salePrice = salePrice; }
 

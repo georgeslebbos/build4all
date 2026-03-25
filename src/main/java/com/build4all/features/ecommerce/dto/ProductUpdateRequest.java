@@ -2,6 +2,7 @@ package com.build4all.features.ecommerce.dto;
 
 import com.build4all.tax.domain.TaxClass;
 import com.build4all.features.ecommerce.domain.ProductType;
+import java.util.List;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -20,6 +21,10 @@ public class ProductUpdateRequest {
     private String statusCode;
 
     private String imageUrl;
+    
+    private Integer mainImageIndex;
+    private Long mainImageId;
+    private List<Long> removeImageIds;
 
     private String sku;
     private ProductType productType;
@@ -117,6 +122,30 @@ public class ProductUpdateRequest {
         return saleEnd;
     }
 
+    public Integer getMainImageIndex() {
+        return mainImageIndex;
+    }
+
+    public Long getMainImageId() {
+        return mainImageId;
+    }
+
+    public List<Long> getRemoveImageIds() {
+        return removeImageIds;
+    }
+    
+    
+    public void setMainImageIndex(Integer mainImageIndex) {
+        this.mainImageIndex = mainImageIndex;
+    }
+
+    public void setMainImageId(Long mainImageId) {
+        this.mainImageId = mainImageId;
+    }
+
+    public void setRemoveImageIds(List<Long> removeImageIds) {
+        this.removeImageIds = removeImageIds;
+    }
     public List<AttributeValueDTO> getAttributes() {
         return attributes;
     }

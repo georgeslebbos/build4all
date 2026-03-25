@@ -15,6 +15,7 @@ import com.build4all.catalog.repository.ItemAttributeRepository;
 import com.build4all.catalog.repository.ItemAttributeValueRepository;
 import com.build4all.catalog.repository.ItemStatusRepository;
 import com.build4all.catalog.repository.ItemTypeRepository;
+import com.build4all.catalog.service.ItemImageService;
 import com.build4all.features.ecommerce.domain.Product;
 import com.build4all.features.ecommerce.domain.ProductType;
 import com.build4all.features.ecommerce.dto.AttributeValueDTO;
@@ -47,6 +48,8 @@ public class ProductService {
     private static final String STATUS_PUBLISHED = "PUBLISHED";
     private static final String STATUS_ARCHIVED = "ARCHIVED";
 
+    private final ItemImageService itemImageService;
+    
     private final ProductRepository productRepository;
     private final ItemTypeRepository itemTypeRepository;
     private final CurrencyRepository currencyRepository;
@@ -65,7 +68,8 @@ public class ProductService {
                           ItemAttributeValueRepository itemAttributeValueRepository,
                           OrderItemRepository orderItemRepository,
                           CategoryRepository categoryRepository,
-                          ItemStatusRepository itemStatusRepository) {
+                          ItemStatusRepository itemStatusRepository,
+                          ItemImageService itemImageService) {
         this.productRepository = productRepository;
         this.itemTypeRepository = itemTypeRepository;
         this.currencyRepository = currencyRepository;
@@ -75,6 +79,7 @@ public class ProductService {
         this.orderItemRepository = orderItemRepository;
         this.categoryRepository = categoryRepository;
         this.itemStatusRepository = itemStatusRepository;
+        this.itemImageService = itemImageService;
     }
 
     /* =========================================================
@@ -303,7 +308,7 @@ public class ProductService {
                 request.getExternalUrl(),
                 request.getButtonText()
         );
-        
+
         Product p = new Product();
 
         p.setOwnerProject(ownerProject);
@@ -314,7 +319,10 @@ public class ProductService {
         p.setItemName(request.getName());
         p.setDescription(request.getDescription());
         p.setPrice(request.getPrice());
+
+        // old compatibility: keep supporting direct imageUrl if frontend sends it manually
         p.setImageUrl(request.getImageUrl());
+
         if (request.getStock() != null) p.setStock(request.getStock());
 
         if (request.getTaxable() != null) p.setTaxable(request.getTaxable());
@@ -345,18 +353,44 @@ public class ProductService {
 
         return toResponse(saved);
     }
+    
+    public ProductResponse createWithImages(ProductRequest request, List<MultipartFile> images) throws IOException {
+        ProductResponse created = create(request);
 
-    public ProductResponse createWithImage(ProductRequest request, MultipartFile image) throws IOException {
-        String url = saveProductImage(image);
-        if (url != null) request.setImageUrl(url);
-        return create(request);
+        Product saved = getTenantProductOrThrow(created.getId(), created.getOwnerProjectId());
+
+        if (images != null && !images.isEmpty()) {
+            itemImageService.saveNewImages(saved, images, request.getMainImageIndex());
+            saved = productRepository.save(saved);
+        } else {
+            itemImageService.syncMainImageField(saved);
+            saved = productRepository.save(saved);
+        }
+
+        return toResponse(saved);
     }
+    
+    public ProductResponse createWithImage(ProductRequest request, MultipartFile image) throws IOException {
+        List<MultipartFile> images = (image != null && !image.isEmpty())
+                ? List.of(image)
+                : Collections.emptyList();
 
+        return createWithImages(request, images);
+    }
+    
     /* =========================================================
        UPDATE (TENANT SAFE)
        ========================================================= */
 
     public ProductResponse updateWithImageTenant(Long id, Long ownerProjectId, ProductUpdateRequest request, MultipartFile imageFile) throws IOException {
+        List<MultipartFile> images = (imageFile != null && !imageFile.isEmpty())
+                ? List.of(imageFile)
+                : Collections.emptyList();
+
+        return updateWithImagesTenant(id, ownerProjectId, request, images);
+    }
+
+    public ProductResponse updateWithImagesTenant(Long id, Long ownerProjectId, ProductUpdateRequest request, List<MultipartFile> imageFiles) throws IOException {
         Product p = getTenantProductOrThrow(id, ownerProjectId);
 
         ItemType newItemType = resolveItemTypeForUpdate(request);
@@ -375,7 +409,6 @@ public class ProductService {
             p.setStatus(resolveStatusOrDefault(request.getStatusCode()));
         }
 
-        
         ProductType finalProductType = request.getProductType() != null
                 ? request.getProductType()
                 : p.getProductType();
@@ -408,6 +441,7 @@ public class ProductService {
                 finalExternalUrl,
                 finalButtonText
         );
+
         if (request.getName() != null) p.setItemName(request.getName());
         if (request.getDescription() != null) p.setDescription(request.getDescription());
         if (request.getPrice() != null) p.setPrice(request.getPrice());
@@ -420,7 +454,7 @@ public class ProductService {
         if (request.getWidthCm() != null) p.setWidthCm(request.getWidthCm());
         if (request.getHeightCm() != null) p.setHeightCm(request.getHeightCm());
         if (request.getLengthCm() != null) p.setLengthCm(request.getLengthCm());
-        
+
         p.setProductType(finalProductType);
         p.setVirtualProduct(Boolean.TRUE.equals(finalVirtual));
         p.setDownloadable(Boolean.TRUE.equals(finalDownloadable));
@@ -432,13 +466,6 @@ public class ProductService {
         if (request.getSaleStart() != null) p.setSaleStart(parseDateTimeOrNull(request.getSaleStart()));
         if (request.getSaleEnd() != null) p.setSaleEnd(parseDateTimeOrNull(request.getSaleEnd()));
 
-        if (imageFile != null && !imageFile.isEmpty()) {
-            deleteLocalImageIfManaged(p.getImageUrl());
-            p.setImageUrl(saveProductImage(imageFile));
-        } else if (request.getImageUrl() != null) {
-            p.setImageUrl(request.getImageUrl());
-        }
-
         Product saved = productRepository.save(p);
 
         if (request.getAttributes() != null) {
@@ -447,12 +474,30 @@ public class ProductService {
             saveAttributes(saved, saved.getItemType(), request.getAttributes());
         }
 
+        if (request.getRemoveImageIds() != null && !request.getRemoveImageIds().isEmpty()) {
+            itemImageService.removeImages(saved, request.getRemoveImageIds());
+        }
+
+        if (imageFiles != null && !imageFiles.isEmpty()) {
+            itemImageService.saveNewImages(saved, imageFiles, request.getMainImageIndex());
+        }
+
+        if (request.getMainImageId() != null) {
+            itemImageService.setMainImage(saved, request.getMainImageId());
+        } else if (request.getImageUrl() != null && !request.getImageUrl().isBlank()) {
+            // compatibility fallback for older clients sending raw imageUrl manually
+            saved.setImageUrl(request.getImageUrl());
+        } else {
+            itemImageService.syncMainImageField(saved);
+        }
+
+        saved = productRepository.save(saved);
         return toResponse(saved);
     }
-
+    
     public ProductResponse updateTenant(Long id, Long ownerProjectId, ProductUpdateRequest request) {
         try {
-            return updateWithImageTenant(id, ownerProjectId, request, null);
+            return updateWithImagesTenant(id, ownerProjectId, request, Collections.emptyList());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -760,20 +805,12 @@ public class ProductService {
             );
         }
 
-        final String imageUrl = p.getImageUrl();
-
         itemAttributeValueRepository.deleteAllByItem_Id(id);
 
+        itemImageService.deleteAllImages(p);
+
         productRepository.delete(p);
-
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                deleteLocalImageIfManaged(imageUrl);
-            }
-        });
     }
-
     /* =========================================================
        ATTRIBUTES
        ========================================================= */
@@ -868,6 +905,7 @@ public class ProductService {
         r.setPrice(p.getPrice());
         r.setStock(p.getStock());
         r.setImageUrl(p.getImageUrl());
+        r.setImages(itemImageService.getImages(p.getId()));
 
         r.setStatusId(p.getStatus() != null ? p.getStatus().getId() : null);
         r.setStatusCode(p.getStatus() != null ? p.getStatus().getCode() : null);
