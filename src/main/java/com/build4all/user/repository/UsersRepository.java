@@ -27,7 +27,10 @@ import java.util.Optional;
  */
 @Repository
 public interface UsersRepository extends JpaRepository<Users, Long> {
-
+	
+	
+  //getbyid , getall , delete , save
+	
     /* =========================================================
      * A) TENANT-SCOPED FINDERS (pass AdminUserProject entity)
      * ========================================================= */
@@ -42,6 +45,8 @@ public interface UsersRepository extends JpaRepository<Users, Long> {
      *     AND aup_id  = :link.aup_id;
      */
     Optional<Users> findByIdAndOwnerProject(Long id, AdminUserProject link);
+
+    
 
     /**
      * Find by email inside a tenant link.
@@ -74,7 +79,8 @@ public interface UsersRepository extends JpaRepository<Users, Long> {
     		""")
     		List<Users> findDeletedUsersBefore(@Param("cutoff") LocalDateTime cutoff);
 
-    
+   
+   
     /**
      * Find by username inside a tenant link.
      *

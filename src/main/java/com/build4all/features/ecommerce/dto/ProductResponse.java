@@ -2,6 +2,7 @@ package com.build4all.features.ecommerce.dto;
 
 import com.build4all.tax.domain.TaxClass;
 import com.build4all.features.ecommerce.domain.ProductType;
+import com.build4all.catalog.dto.ItemImageDTO;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -20,6 +21,7 @@ public class ProductResponse {
     private BigDecimal price;
     private Integer stock;
     private String imageUrl;
+    private List<ItemImageDTO> images;
 
     // ✅ NEW status fields
     private Long statusId;
@@ -132,6 +134,13 @@ public class ProductResponse {
 
     public String getButtonText() {
         return buttonText;
+    }
+    public List<ItemImageDTO> getImages() {
+        return images;
+    }
+    
+    public void setImages(List<ItemImageDTO> images) {
+        this.images = images;
     }
 
     public BigDecimal getSalePrice() {

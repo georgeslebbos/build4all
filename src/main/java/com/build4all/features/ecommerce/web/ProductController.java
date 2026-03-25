@@ -22,6 +22,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import java.util.ArrayList;
+import java.util.Collections;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -79,6 +81,30 @@ public class ProductController {
             ));
         }
     }
+    
+    private List<Long> parseLongIds(String json) throws Exception {
+        if (json == null || json.isBlank()) return null;
+        ObjectMapper om = new ObjectMapper();
+        return om.readValue(json, new TypeReference<List<Long>>() {});
+    }
+
+    private List<MultipartFile> mergeImages(MultipartFile image, List<MultipartFile> images) {
+        List<MultipartFile> merged = new ArrayList<>();
+
+        if (images != null) {
+            for (MultipartFile file : images) {
+                if (file != null && !file.isEmpty()) {
+                    merged.add(file);
+                }
+            }
+        }
+
+        if ((merged.isEmpty()) && image != null && !image.isEmpty()) {
+            merged.add(image);
+        }
+
+        return merged;
+    }
 
     private List<AttributeValueDTO> parseAttributes(String attributesJson) throws Exception {
         if (attributesJson == null || attributesJson.isBlank()) return null;
@@ -117,7 +143,7 @@ public class ProductController {
      * ========================================================= */
 
     @PostMapping(value = "/with-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Create product with optional image (flat form-data) - tenant from token")
+    @Operation(summary = "Create product with optional images (flat form-data) - tenant from token")
     @PreAuthorize("hasRole('OWNER')")
     public ResponseEntity<?> createWithImageFlat(
             @RequestHeader(value = "Authorization", required = false) String auth,
@@ -153,8 +179,10 @@ public class ProductController {
             @RequestParam(required = false) BigDecimal lengthCm,
 
             @RequestParam(required = false) String attributesJson,
+            @RequestParam(required = false) Integer mainImageIndex,
 
-            @RequestParam(value = "image", required = false) MultipartFile image
+            @RequestParam(value = "image", required = false) MultipartFile image,
+            @RequestParam(value = "images", required = false) List<MultipartFile> images
     ) {
         if (auth == null || auth.isBlank()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -207,10 +235,14 @@ public class ProductController {
             req.setHeightCm(heightCm);
             req.setLengthCm(lengthCm);
 
+            req.setMainImageIndex(mainImageIndex);
+
             List<AttributeValueDTO> attrs = parseAttributes(attributesJson);
             if (attrs != null) req.setAttributes(attrs);
 
-            ProductResponse saved = productService.createWithImage(req, image);
+            List<MultipartFile> mergedImages = mergeImages(image, images);
+
+            ProductResponse saved = productService.createWithImages(req, mergedImages);
             wsEvents.sendProductCreated(ownerProjectId, saved);
 
             return ResponseEntity.status(HttpStatus.CREATED).body(saved);
@@ -225,13 +257,13 @@ public class ProductController {
                     .body(Map.of("error", e.getMessage()));
         }
     }
-
+    
     /* =========================================================
      * UPDATE (OWNER only)
      * ========================================================= */
 
     @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Update product with optional image (flat form-data) - tenant from token")
+    @Operation(summary = "Update product with optional images (flat form-data) - tenant from token")
     @PreAuthorize("hasRole('OWNER')")
     public ResponseEntity<?> updateWithImage(
             @RequestHeader(value = "Authorization", required = false) String auth,
@@ -267,8 +299,12 @@ public class ProductController {
             @RequestParam(required = false) BigDecimal lengthCm,
 
             @RequestParam(required = false) String attributesJson,
+            @RequestParam(required = false) Integer mainImageIndex,
+            @RequestParam(required = false) Long mainImageId,
+            @RequestParam(required = false) String removeImageIdsJson,
 
-            @RequestParam(value = "image", required = false) MultipartFile image
+            @RequestParam(value = "image", required = false) MultipartFile image,
+            @RequestParam(value = "images", required = false) List<MultipartFile> images
     ) {
         if (auth == null || auth.isBlank()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -313,10 +349,20 @@ public class ProductController {
             req.setHeightCm(heightCm);
             req.setLengthCm(lengthCm);
 
+            req.setMainImageIndex(mainImageIndex);
+            req.setMainImageId(mainImageId);
+
+            List<Long> removeImageIds = parseLongIds(removeImageIdsJson);
+            if (removeImageIds != null) {
+                req.setRemoveImageIds(removeImageIds);
+            }
+
             List<AttributeValueDTO> attrs = parseAttributes(attributesJson);
             if (attrs != null) req.setAttributes(attrs);
 
-            ProductResponse updated = productService.updateWithImageTenant(id, ownerProjectId, req, image);
+            List<MultipartFile> mergedImages = mergeImages(image, images);
+
+            ProductResponse updated = productService.updateWithImagesTenant(id, ownerProjectId, req, mergedImages);
             wsEvents.sendProductUpdated(ownerProjectId, updated);
 
             if (stock != null) {
@@ -340,7 +386,7 @@ public class ProductController {
                     .body(Map.of("error", e.getMessage()));
         }
     }
-
+    
     /* =========================================================
      * DELETE (OWNER only)
      * ========================================================= */

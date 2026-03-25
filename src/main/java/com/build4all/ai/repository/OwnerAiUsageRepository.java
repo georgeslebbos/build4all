@@ -8,5 +8,6 @@ import java.time.LocalDate;
 import java.util.Optional;
 
 public interface OwnerAiUsageRepository extends JpaRepository<OwnerAiUsage, OwnerAiUsageId> {
+	
     Optional<OwnerAiUsage> findByOwnerIdAndUsageDate(Long ownerId, LocalDate usageDate);
 }

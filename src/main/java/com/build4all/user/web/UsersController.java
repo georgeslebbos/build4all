@@ -46,6 +46,7 @@ public class UsersController {
     @Autowired private AuthTokenRevocationService tokenRevocationService;
     
     private final UserService userService;
+    
     public UsersController(UserService userService) { this.userService = userService; }
 
     /* =====================================================
