@@ -93,7 +93,7 @@ public class OwnerIosInternalTestingRequestController {
             @RequestHeader("Authorization") String authHeader,
             @PathVariable("linkId") Long linkId
     ) {
-        Long requesterAdminId = jwtUtil.extractAdminId(tokenFromHeader(authHeader));
+    	Long requesterAdminId = adminIdFromToken(authHeader);
 
         List<IosInternalTestingRequestResponseDto> requests =
                 service.listRequestsForApp(requesterAdminId, linkId);

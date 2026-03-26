@@ -4,6 +4,7 @@ public record AppleInternalTestingGatewayResult(
         AppleInternalTestingGatewayOutcome outcome,
         String appleUserId,
         String invitationId,
+        String appleBetaTesterId,
         String message
 ) {
 }

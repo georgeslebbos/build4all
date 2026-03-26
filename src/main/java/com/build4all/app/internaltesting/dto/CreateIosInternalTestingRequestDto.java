@@ -7,15 +7,17 @@ import jakarta.validation.constraints.Size;
 public record CreateIosInternalTestingRequestDto(
 
         @NotBlank(message = "Apple email is required")
-        @Email(message = "Invalid Apple email")
+        @Email(message = "Apple email must be valid")
         @Size(max = 255, message = "Apple email is too long")
         String appleEmail,
 
         @NotBlank(message = "First name is required")
-        @Size(min = 2, max = 100, message = "First name must be between 2 and 100 characters")
+        @Size(min = 2, max = 120, message = "First name must be between 2 and 120 characters")
         String firstName,
 
         @NotBlank(message = "Last name is required")
-        @Size(min = 2, max = 100, message = "Last name must be between 2 and 100 characters")
+        @Size(min = 2, max = 120, message = "Last name must be between 2 and 120 characters")
         String lastName
-) {}
+
+) {
+}
