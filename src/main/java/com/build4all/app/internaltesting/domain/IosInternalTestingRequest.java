@@ -1,21 +1,17 @@
 package com.build4all.app.internaltesting.domain;
 
 import jakarta.persistence.*;
+import lombok.*;
 
 import java.time.LocalDateTime;
 
 @Entity
-@Table(
-        name = "ios_internal_testing_requests",
-        indexes = {
-                @Index(name = "idx_ios_itr_link", columnList = "owner_project_link_id"),
-                @Index(name = "idx_ios_itr_owner", columnList = "owner_id"),
-                @Index(name = "idx_ios_itr_project", columnList = "project_id"),
-                @Index(name = "idx_ios_itr_email", columnList = "apple_email"),
-                @Index(name = "idx_ios_itr_status", columnList = "status"),
-                @Index(name = "idx_ios_itr_created", columnList = "created_at")
-        }
-)
+@Table(name = "ios_internal_testing_requests")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class IosInternalTestingRequest {
 
     @Id
@@ -31,7 +27,7 @@ public class IosInternalTestingRequest {
     @Column(name = "project_id", nullable = false)
     private Long projectId;
 
-    @Column(name = "app_name_snapshot", nullable = false, length = 180)
+    @Column(name = "app_name_snapshot", nullable = false, length = 255)
     private String appNameSnapshot;
 
     @Column(name = "bundle_id_snapshot", nullable = false, length = 255)
@@ -40,20 +36,20 @@ public class IosInternalTestingRequest {
     @Column(name = "apple_email", nullable = false, length = 255)
     private String appleEmail;
 
-    @Column(name = "first_name", nullable = false, length = 100)
+    @Column(name = "first_name", nullable = false, length = 120)
     private String firstName;
 
-    @Column(name = "last_name", nullable = false, length = 100)
+    @Column(name = "last_name", nullable = false, length = 120)
     private String lastName;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
-    private IosInternalTestingRequestStatus status = IosInternalTestingRequestStatus.REQUESTED;
+    private IosInternalTestingRequestStatus status;
 
-    @Column(name = "apple_user_id", length = 255)
+    @Column(name = "apple_user_id", length = 120)
     private String appleUserId;
 
-    @Column(name = "apple_invitation_id", length = 255)
+    @Column(name = "apple_invitation_id", length = 120)
     private String appleInvitationId;
 
     @Column(name = "last_error", columnDefinition = "TEXT")
@@ -71,193 +67,266 @@ public class IosInternalTestingRequest {
     @Column(name = "ready_at")
     private LocalDateTime readyAt;
 
-    @Column(name = "created_at", updatable = false, nullable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    public IosInternalTestingRequest() {
-    }
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(
+            name = "apple_tester_identity_id",
+            foreignKey = @ForeignKey(name = "fk_ios_internal_testing_request_identity")
+    )
+    private AppleTesterIdentity appleTesterIdentity;
 
     @PrePersist
     protected void onCreate() {
         LocalDateTime now = LocalDateTime.now();
-        this.createdAt = now;
-        this.updatedAt = now;
+
+        if (this.createdAt == null) {
+            this.createdAt = now;
+        }
+
+        if (this.updatedAt == null) {
+            this.updatedAt = now;
+        }
 
         if (this.requestedAt == null) {
             this.requestedAt = now;
         }
 
-        normalizeFields();
-    }
-
-    @PreUpdate
-    protected void onUpdate() {
-        this.updatedAt = LocalDateTime.now();
-        normalizeFields();
-    }
-
-    private void normalizeFields() {
-        if (this.appleEmail != null) {
-            this.appleEmail = this.appleEmail.trim().toLowerCase();
+        if (this.status == null) {
+            this.status = IosInternalTestingRequestStatus.REQUESTED;
         }
+
+        if (this.appleEmail != null) {
+            this.appleEmail = normalizeEmail(this.appleEmail);
+        }
+
         if (this.firstName != null) {
             this.firstName = this.firstName.trim();
         }
+
         if (this.lastName != null) {
             this.lastName = this.lastName.trim();
         }
+
         if (this.appNameSnapshot != null) {
             this.appNameSnapshot = this.appNameSnapshot.trim();
         }
+
         if (this.bundleIdSnapshot != null) {
             this.bundleIdSnapshot = this.bundleIdSnapshot.trim();
         }
     }
 
+    @PreUpdate
+    protected void onUpdate() {
+        this.updatedAt = LocalDateTime.now();
+
+        if (this.appleEmail != null) {
+            this.appleEmail = normalizeEmail(this.appleEmail);
+        }
+
+        if (this.firstName != null) {
+            this.firstName = this.firstName.trim();
+        }
+
+        if (this.lastName != null) {
+            this.lastName = this.lastName.trim();
+        }
+
+        if (this.appNameSnapshot != null) {
+            this.appNameSnapshot = this.appNameSnapshot.trim();
+        }
+
+        if (this.bundleIdSnapshot != null) {
+            this.bundleIdSnapshot = this.bundleIdSnapshot.trim();
+        }
+    }
+
+    public Long getAppleTesterIdentityId() {
+        return appleTesterIdentity != null ? appleTesterIdentity.getId() : null;
+    }
+
     public boolean isFinalStatus() {
-        return this.status != null && this.status.isFinalStatus();
+        return status == IosInternalTestingRequestStatus.READY
+                || status == IosInternalTestingRequestStatus.FAILED
+                || status == IosInternalTestingRequestStatus.CANCELLED;
     }
 
-    public Long getId() {
-        return id;
+    public boolean isWaitingStatus() {
+        return status == IosInternalTestingRequestStatus.INVITED_TO_APPLE_TEAM
+                || status == IosInternalTestingRequestStatus.WAITING_OWNER_ACCEPTANCE
+                || status == IosInternalTestingRequestStatus.WAITING_APPLE_USER_SYNC
+                || status == IosInternalTestingRequestStatus.ADDING_TO_INTERNAL_TESTING;
     }
 
-    public Long getOwnerProjectLinkId() {
-        return ownerProjectLinkId;
+    public static String normalizeEmail(String email) {
+        return email == null ? null : email.trim().toLowerCase();
     }
 
-    public void setOwnerProjectLinkId(Long ownerProjectLinkId) {
-        this.ownerProjectLinkId = ownerProjectLinkId;
-    }
+	public Long getId() {
+		return id;
+	}
 
-    public Long getOwnerId() {
-        return ownerId;
-    }
+	public void setId(Long id) {
+		this.id = id;
+	}
 
-    public void setOwnerId(Long ownerId) {
-        this.ownerId = ownerId;
-    }
+	public Long getOwnerProjectLinkId() {
+		return ownerProjectLinkId;
+	}
 
-    public Long getProjectId() {
-        return projectId;
-    }
+	public void setOwnerProjectLinkId(Long ownerProjectLinkId) {
+		this.ownerProjectLinkId = ownerProjectLinkId;
+	}
 
-    public void setProjectId(Long projectId) {
-        this.projectId = projectId;
-    }
+	public Long getOwnerId() {
+		return ownerId;
+	}
 
-    public String getAppNameSnapshot() {
-        return appNameSnapshot;
-    }
+	public void setOwnerId(Long ownerId) {
+		this.ownerId = ownerId;
+	}
 
-    public void setAppNameSnapshot(String appNameSnapshot) {
-        this.appNameSnapshot = appNameSnapshot;
-    }
+	public Long getProjectId() {
+		return projectId;
+	}
 
-    public String getBundleIdSnapshot() {
-        return bundleIdSnapshot;
-    }
+	public void setProjectId(Long projectId) {
+		this.projectId = projectId;
+	}
 
-    public void setBundleIdSnapshot(String bundleIdSnapshot) {
-        this.bundleIdSnapshot = bundleIdSnapshot;
-    }
+	public String getAppNameSnapshot() {
+		return appNameSnapshot;
+	}
 
-    public String getAppleEmail() {
-        return appleEmail;
-    }
+	public void setAppNameSnapshot(String appNameSnapshot) {
+		this.appNameSnapshot = appNameSnapshot;
+	}
 
-    public void setAppleEmail(String appleEmail) {
-        this.appleEmail = appleEmail;
-    }
+	public String getBundleIdSnapshot() {
+		return bundleIdSnapshot;
+	}
 
-    public String getFirstName() {
-        return firstName;
-    }
+	public void setBundleIdSnapshot(String bundleIdSnapshot) {
+		this.bundleIdSnapshot = bundleIdSnapshot;
+	}
 
-    public void setFirstName(String firstName) {
-        this.firstName = firstName;
-    }
+	public String getAppleEmail() {
+		return appleEmail;
+	}
 
-    public String getLastName() {
-        return lastName;
-    }
+	public void setAppleEmail(String appleEmail) {
+		this.appleEmail = appleEmail;
+	}
 
-    public void setLastName(String lastName) {
-        this.lastName = lastName;
-    }
+	public String getFirstName() {
+		return firstName;
+	}
 
-    public IosInternalTestingRequestStatus getStatus() {
-        return status;
-    }
+	public void setFirstName(String firstName) {
+		this.firstName = firstName;
+	}
 
-    public void setStatus(IosInternalTestingRequestStatus status) {
-        this.status = status;
-    }
+	public String getLastName() {
+		return lastName;
+	}
 
-    public String getAppleUserId() {
-        return appleUserId;
-    }
+	public void setLastName(String lastName) {
+		this.lastName = lastName;
+	}
 
-    public void setAppleUserId(String appleUserId) {
-        this.appleUserId = appleUserId;
-    }
+	public IosInternalTestingRequestStatus getStatus() {
+		return status;
+	}
 
-    public String getAppleInvitationId() {
-        return appleInvitationId;
-    }
+	public void setStatus(IosInternalTestingRequestStatus status) {
+		this.status = status;
+	}
 
-    public void setAppleInvitationId(String appleInvitationId) {
-        this.appleInvitationId = appleInvitationId;
-    }
+	public String getAppleUserId() {
+		return appleUserId;
+	}
 
-    public String getLastError() {
-        return lastError;
-    }
+	public void setAppleUserId(String appleUserId) {
+		this.appleUserId = appleUserId;
+	}
 
-    public void setLastError(String lastError) {
-        this.lastError = lastError;
-    }
+	public String getAppleInvitationId() {
+		return appleInvitationId;
+	}
 
-    public LocalDateTime getRequestedAt() {
-        return requestedAt;
-    }
+	public void setAppleInvitationId(String appleInvitationId) {
+		this.appleInvitationId = appleInvitationId;
+	}
 
-    public void setRequestedAt(LocalDateTime requestedAt) {
-        this.requestedAt = requestedAt;
-    }
+	public String getLastError() {
+		return lastError;
+	}
 
-    public LocalDateTime getProcessedAt() {
-        return processedAt;
-    }
+	public void setLastError(String lastError) {
+		this.lastError = lastError;
+	}
 
-    public void setProcessedAt(LocalDateTime processedAt) {
-        this.processedAt = processedAt;
-    }
+	public LocalDateTime getRequestedAt() {
+		return requestedAt;
+	}
 
-    public LocalDateTime getAcceptedAt() {
-        return acceptedAt;
-    }
+	public void setRequestedAt(LocalDateTime requestedAt) {
+		this.requestedAt = requestedAt;
+	}
 
-    public void setAcceptedAt(LocalDateTime acceptedAt) {
-        this.acceptedAt = acceptedAt;
-    }
+	public LocalDateTime getProcessedAt() {
+		return processedAt;
+	}
 
-    public LocalDateTime getReadyAt() {
-        return readyAt;
-    }
+	public void setProcessedAt(LocalDateTime processedAt) {
+		this.processedAt = processedAt;
+	}
 
-    public void setReadyAt(LocalDateTime readyAt) {
-        this.readyAt = readyAt;
-    }
+	public LocalDateTime getAcceptedAt() {
+		return acceptedAt;
+	}
 
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
+	public void setAcceptedAt(LocalDateTime acceptedAt) {
+		this.acceptedAt = acceptedAt;
+	}
 
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
+	public LocalDateTime getReadyAt() {
+		return readyAt;
+	}
+
+	public void setReadyAt(LocalDateTime readyAt) {
+		this.readyAt = readyAt;
+	}
+
+	public LocalDateTime getCreatedAt() {
+		return createdAt;
+	}
+
+	public void setCreatedAt(LocalDateTime createdAt) {
+		this.createdAt = createdAt;
+	}
+
+	public LocalDateTime getUpdatedAt() {
+		return updatedAt;
+	}
+
+	public void setUpdatedAt(LocalDateTime updatedAt) {
+		this.updatedAt = updatedAt;
+	}
+
+	public AppleTesterIdentity getAppleTesterIdentity() {
+		return appleTesterIdentity;
+	}
+
+	public void setAppleTesterIdentity(AppleTesterIdentity appleTesterIdentity) {
+		this.appleTesterIdentity = appleTesterIdentity;
+	}
+    
+    
+    
 }

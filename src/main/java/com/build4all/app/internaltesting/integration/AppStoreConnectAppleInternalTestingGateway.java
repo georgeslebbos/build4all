@@ -34,8 +34,8 @@ import java.util.function.BooleanSupplier;
 @ConditionalOnProperty(prefix = "build4all.ios-internal.apple", name = "enabled", havingValue = "true")
 public class AppStoreConnectAppleInternalTestingGateway implements AppleInternalTestingGateway {
 
-    private static final int VERIFY_ATTEMPTS = 15;
-    private static final long VERIFY_SLEEP_MS = 1000L;
+    private static final int VERIFY_ATTEMPTS = 30;
+    private static final long VERIFY_SLEEP_MS = 2000L;
 
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
@@ -56,16 +56,19 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
         validateProperties();
 
         String appId = findAppIdByBundleId(command.bundleId());
-        String existingUserId = findUserIdByEmail(command.appleEmail());
 
+        // 1) Apple user first
+        String existingUserId = findUserIdByEmail(command.appleEmail());
         if (!isBlank(existingUserId)) {
             boolean internalReady = safeEnsureInternalTestingAccess(appId, command);
+            String betaTesterId = findExistingBetaTesterByEmail(command.appleEmail());
 
             if (internalReady) {
                 return new AppleInternalTestingGatewayResult(
                         AppleInternalTestingGatewayOutcome.EXISTING_USER_ADDED,
                         existingUserId,
                         null,
+                        betaTesterId,
                         "Existing App Store Connect user found and internal testing access is ready"
                 );
             }
@@ -74,20 +77,24 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
                     AppleInternalTestingGatewayOutcome.INTERNAL_ACCESS_PENDING,
                     existingUserId,
                     null,
+                    betaTesterId,
                     "Existing App Store Connect user found, but internal testing access is not confirmed yet"
             );
         }
 
+        // 2) Pending Apple team invitation
         String existingInvitationId = findPendingInvitationIdByEmail(command.appleEmail());
         if (!isBlank(existingInvitationId)) {
             return new AppleInternalTestingGatewayResult(
                     AppleInternalTestingGatewayOutcome.INVITATION_SENT,
                     null,
                     existingInvitationId,
-                    "Invitation already exists and is still pending"
+                    null,
+                    "Apple team invitation already exists and is still pending"
             );
         }
 
+        // 3) Send Apple team invitation
         try {
             String invitationId = inviteUser(command);
 
@@ -95,20 +102,24 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
                     AppleInternalTestingGatewayOutcome.INVITATION_SENT,
                     null,
                     invitationId,
-                    "Apple invitation sent successfully"
+                    null,
+                    "Apple team invitation sent successfully"
             );
 
         } catch (WebClientResponseException.Conflict ex) {
             System.out.println("INVITE CONFLICT => " + ex.getResponseBodyAsString());
 
+            // OLD FLOW: do not depend only on /v1/users email visibility after conflict.
             boolean internalReady = safeEnsureInternalTestingAccess(appId, command);
             String resolvedUserId = resolveAcceptedUserId(command.appleEmail(), null);
+            String betaTesterId = findExistingBetaTesterByEmail(command.appleEmail());
 
             if (internalReady) {
                 return new AppleInternalTestingGatewayResult(
                         AppleInternalTestingGatewayOutcome.EXISTING_USER_ADDED,
                         resolvedUserId,
                         null,
+                        betaTesterId,
                         "Invitation conflicted, but internal testing access was confirmed directly"
                 );
             }
@@ -117,9 +128,26 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
                     AppleInternalTestingGatewayOutcome.INTERNAL_ACCESS_PENDING,
                     resolvedUserId,
                     null,
+                    betaTesterId,
                     "Invitation conflicted and Apple user likely exists, but internal testing access is not confirmed yet"
             );
         }
+    }
+    
+    private String resolveAcceptedUserId(String appleEmail, String invitationId) {
+        if (!isBlank(invitationId)) {
+            String matchedById = findUserIdById(invitationId);
+            if (!isBlank(matchedById)) {
+                return matchedById;
+            }
+        }
+
+        String userId = findUserIdByEmail(appleEmail);
+        if (!isBlank(userId)) {
+            return userId;
+        }
+
+        return null;
     }
 
     @Override
@@ -143,6 +171,7 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
                         AppleInternalTestingGatewayOutcome.STILL_WAITING,
                         null,
                         invitationId,
+                        null,
                         "User still has not accepted the App Store Connect invitation"
                 );
             }
@@ -154,8 +183,10 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
 
         boolean internalReady = safeEnsureInternalTestingAccess(appId, command);
         String resolvedUserId = resolveAcceptedUserId(command.appleEmail(), invitationId);
+        String betaTesterId = findExistingBetaTesterByEmail(command.appleEmail());
 
         System.out.println("SYNC resolvedUserId => " + resolvedUserId);
+        System.out.println("SYNC betaTesterId => " + betaTesterId);
         System.out.println("SYNC internalReady => " + internalReady);
 
         if (internalReady) {
@@ -163,6 +194,7 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
                     AppleInternalTestingGatewayOutcome.INVITATION_ACCEPTED_AND_ADDED,
                     resolvedUserId,
                     invitationId,
+                    betaTesterId,
                     "Invitation accepted/user exists and internal testing access is ready"
             );
         }
@@ -171,6 +203,7 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
                 AppleInternalTestingGatewayOutcome.INTERNAL_ACCESS_PENDING,
                 resolvedUserId,
                 invitationId,
+                betaTesterId,
                 "Invitation accepted/user exists, but internal testing access is not confirmed yet"
         );
     }
@@ -184,7 +217,6 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
             return false;
         }
     }
-
     private boolean isInvitationStillPending(String invitationId) {
         if (isBlank(invitationId)) {
             return false;
@@ -199,22 +231,6 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
         }
 
         return false;
-    }
-
-    private String resolveAcceptedUserId(String appleEmail, String invitationId) {
-        if (!isBlank(invitationId)) {
-            String matchedById = findUserIdById(invitationId);
-            if (!isBlank(matchedById)) {
-                return matchedById;
-            }
-        }
-
-        String userId = findUserIdByEmail(appleEmail);
-        if (!isBlank(userId)) {
-            return userId;
-        }
-
-        return null;
     }
 
     private String findUserIdById(String userId) {
@@ -248,12 +264,13 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
             System.out.println("buildReady => " + buildReady);
         }
 
+        // IMPORTANT: no appleUserId email guard here.
         String betaTesterId = findOrCreateBetaTester(betaGroupId, command);
         System.out.println("betaTesterId => " + betaTesterId);
 
         boolean testerReady = false;
         if (!isBlank(betaTesterId)) {
-            testerReady = ensureBetaTesterInGroup(betaGroupId, betaTesterId);
+            testerReady = ensureBetaTesterInGroup(betaGroupId, betaTesterId, command.appleEmail());
             System.out.println("testerReady => " + testerReady);
         } else {
             System.out.println("betaTesterId unresolved => internal access not confirmed");
@@ -264,7 +281,8 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
 
         return internalReady;
     }
-
+    
+    
     private String findAppIdByBundleId(String bundleId) {
         JsonNode root = getJson("/v1/apps?filter[bundleId]=" + url(bundleId) + "&limit=1");
         JsonNode data = root.path("data");
@@ -294,6 +312,59 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
         }
 
         System.out.println("NO APPLE USER MATCH FOUND FOR => " + target);
+        return null;
+    }
+    
+    
+    private boolean isTesterInGroup(String betaGroupId, String betaTesterId, String appleEmail) {
+        String targetEmail = normalize(appleEmail);
+
+        List<JsonNode> existing = getAllPages("/v1/betaGroups/" + betaGroupId + "/betaTesters?limit=200");
+        System.out.println("CHECK TESTER IN GROUP => betaGroupId=" + betaGroupId
+                + ", testerId=" + betaTesterId
+                + ", target=" + targetEmail
+                + ", count=" + existing.size());
+
+        for (JsonNode item : existing) {
+            String currentId = item.path("id").asText(null);
+            String currentEmail = normalize(item.path("attributes").path("email").asText(null));
+
+            System.out.println("GROUP TESTER => id=" + currentId + ", email=" + currentEmail);
+
+            if (!isBlank(betaTesterId) && betaTesterId.equals(currentId)) {
+                System.out.println("MATCHED TESTER ID INSIDE GROUP => " + currentId);
+                return true;
+            }
+
+            if (!isBlank(targetEmail) && targetEmail.equals(currentEmail)) {
+                System.out.println("MATCHED TESTER EMAIL INSIDE GROUP => " + currentId);
+                return true;
+            }
+        }
+
+        System.out.println("TESTER NOT FOUND INSIDE GROUP");
+        return false;
+    }
+
+    private String findExistingBetaTesterByEmail(String email) {
+        String target = normalize(email);
+
+        List<JsonNode> testers = getAllPages("/v1/betaTesters?limit=200");
+        System.out.println("FIND EXISTING BETA TESTER => target=" + target + ", count=" + testers.size());
+
+        for (JsonNode item : testers) {
+            String currentEmail = normalize(item.path("attributes").path("email").asText(null));
+            String currentId = item.path("id").asText(null);
+
+            System.out.println("EXISTING BETA TESTER => id=" + currentId + ", email=" + currentEmail);
+
+            if (target.equals(currentEmail)) {
+                System.out.println("MATCHED EXISTING BETA TESTER => " + currentId);
+                return currentId;
+            }
+        }
+
+        System.out.println("NO EXISTING BETA TESTER FOUND FOR => " + target);
         return null;
     }
 
@@ -345,25 +416,9 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
     }
 
     private String findOrCreateInternalBetaGroup(String appId) {
-        JsonNode groupsRoot = getJson("/v1/apps/" + appId + "/betaGroups?limit=200");
-        JsonNode groups = groupsRoot.path("data");
-
-        if (groups.isArray()) {
-            for (JsonNode item : groups) {
-                boolean internal = item.path("attributes").path("isInternalGroup").asBoolean(false);
-                String name = item.path("attributes").path("name").asText("");
-
-                if (internal && properties.getInternalGroupName().equalsIgnoreCase(name)) {
-                    return item.path("id").asText(null);
-                }
-            }
-
-            for (JsonNode item : groups) {
-                boolean internal = item.path("attributes").path("isInternalGroup").asBoolean(false);
-                if (internal) {
-                    return item.path("id").asText(null);
-                }
-            }
+        String existingId = findExistingInternalBetaGroupId(appId);
+        if (!isBlank(existingId)) {
+            return existingId;
         }
 
         try {
@@ -383,17 +438,94 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
 
             String body = objectMapper.writeValueAsString(root);
 
-            JsonNode created = postJson("/v1/betaGroups", body);
-            String id = created.path("data").path("id").asText(null);
+            System.out.println("CREATE INTERNAL GROUP BODY => " + body);
 
-            if (isBlank(id)) {
-                throw new IllegalStateException("Internal beta group was created but no id returned");
+            JsonNode created = postJson("/v1/betaGroups", body);
+            String createdId = created.path("data").path("id").asText(null);
+
+            if (!isBlank(createdId)) {
+                System.out.println("CREATED INTERNAL GROUP ID => " + createdId);
             }
 
-            return id;
+            boolean visible = waitUntil(
+                    () -> !isBlank(findExistingInternalBetaGroupId(appId)),
+                    10,
+                    1500L
+            );
+
+            String visibleId = findExistingInternalBetaGroupId(appId);
+            if (!isBlank(visibleId)) {
+                System.out.println("VISIBLE INTERNAL GROUP AFTER CREATE => " + visibleId);
+                return visibleId;
+            }
+
+            if (!isBlank(createdId)) {
+                return createdId;
+            }
+
+            throw new IllegalStateException("Internal beta group was created but no id returned");
+
+        } catch (WebClientResponseException.Conflict ex) {
+            System.out.println("CREATE INTERNAL GROUP CONFLICT => " + ex.getResponseBodyAsString());
+
+            String existingAfterConflict = findExistingInternalBetaGroupId(appId);
+            if (!isBlank(existingAfterConflict)) {
+                System.out.println("FOUND INTERNAL GROUP AFTER CONFLICT => " + existingAfterConflict);
+                return existingAfterConflict;
+            }
+
+            throw new IllegalStateException(
+                    "Internal beta group conflict but no existing group was found after conflict",
+                    ex
+            );
+
         } catch (IOException ex) {
             throw new IllegalStateException("Failed to build internal beta group payload", ex);
         }
+    }
+    
+    
+    private String findExistingInternalBetaGroupId(String appId) {
+        List<JsonNode> groups = getAllPages("/v1/apps/" + appId + "/betaGroups?limit=200");
+
+        String wantedName = properties.getInternalGroupName() == null
+                ? "Internal"
+                : properties.getInternalGroupName().trim();
+
+        String anyInternalId = null;
+        int internalCount = 0;
+
+        for (JsonNode item : groups) {
+            boolean internal = item.path("attributes").path("isInternalGroup").asBoolean(false);
+            String name = item.path("attributes").path("name").asText("").trim();
+            String id = item.path("id").asText(null);
+
+            if (!internal || isBlank(id)) {
+                continue;
+            }
+
+            internalCount++;
+
+            if (anyInternalId == null) {
+                anyInternalId = id;
+            }
+
+            if (wantedName.equalsIgnoreCase(name)) {
+                System.out.println("FOUND MATCHING INTERNAL GROUP => " + id + " / " + name);
+                return id;
+            }
+        }
+
+        if (internalCount > 1) {
+            System.out.println("WARNING: multiple internal groups found for appId=" + appId + ", count=" + internalCount);
+        }
+
+        if (!isBlank(anyInternalId)) {
+            System.out.println("FOUND FALLBACK INTERNAL GROUP => " + anyInternalId);
+            return anyInternalId;
+        }
+
+        return null;
     }
 
     private String findOrCreateBetaTester(String betaGroupId, AppleInternalTestingCommand command) {
@@ -426,6 +558,7 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
             attributes.put("firstName", command.firstName());
             attributes.put("lastName", command.lastName());
 
+            // IMPORTANT: attach to group on CREATE, like the old project
             ObjectNode relationships = data.putObject("relationships");
             ObjectNode betaGroups = relationships.putObject("betaGroups");
             ArrayNode betaGroupsData = betaGroups.putArray("data");
@@ -477,19 +610,18 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
             throw new IllegalStateException("Failed to find or create beta tester: " + detailedError(ex), ex);
         }
     }
-
-    private boolean ensureBetaTesterInGroup(String betaGroupId, String betaTesterId) {
+    
+    
+    private boolean ensureBetaTesterInGroup(String betaGroupId, String betaTesterId, String appleEmail) {
         if (isBlank(betaTesterId)) {
             System.out.println("betaTesterId is blank => cannot confirm tester-group link");
             return false;
         }
 
-        if (isBetaTesterInGroup(betaGroupId, betaTesterId)) {
-            System.out.println("beta tester already in group");
+        if (isTesterInGroup(betaGroupId, betaTesterId, appleEmail)) {
+            System.out.println("tester already exists in group");
             return true;
         }
-
-        boolean relationshipPosted = false;
 
         try {
             ObjectNode root = objectMapper.createObjectNode();
@@ -500,16 +632,40 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
             testerNode.put("id", betaTesterId);
 
             String body = objectMapper.writeValueAsString(root);
+
+            System.out.println("ADD BETA TESTER TO GROUP => groupId=" + betaGroupId
+                    + ", testerId=" + betaTesterId
+                    + ", email=" + appleEmail);
             System.out.println("ADD BETA TESTER TO GROUP BODY => " + body);
 
             postJson("/v1/betaGroups/" + betaGroupId + "/relationships/betaTesters", body);
-            relationshipPosted = true;
-
             System.out.println("ADD BETA TESTER TO GROUP POSTED");
 
         } catch (WebClientResponseException.Conflict ex) {
-            relationshipPosted = true;
-            System.out.println("ADD BETA TESTER TO GROUP CONFLICT => maybe already linked");
+            String conflictBody = ex.getResponseBodyAsString();
+            System.out.println("ADD BETA TESTER TO GROUP CONFLICT BODY => " + conflictBody);
+
+            boolean foundAfterConflict = isTesterInGroup(betaGroupId, betaTesterId, appleEmail);
+            System.out.println("foundAfterConflict => " + foundAfterConflict);
+
+            if (foundAfterConflict) {
+                return true;
+            }
+
+            if (conflictBody != null && conflictBody.contains("Tester(s) cannot be assigned")) {
+                throw new IllegalStateException(
+                        "APPLE_TESTER_CANNOT_BE_ASSIGNED_TO_INTERNAL_GROUP: "
+                                + "email=" + appleEmail
+                                + ", betaGroupId=" + betaGroupId
+                                + ", betaTesterId=" + betaTesterId
+                );
+            }
+
+            throw new IllegalStateException(
+                    "APPLE_BETA_TESTER_GROUP_CONFLICT: "
+                            + (conflictBody != null && !conflictBody.isBlank() ? conflictBody : "Unknown conflict")
+            );
+
         } catch (Exception ex) {
             throw new IllegalStateException(
                     "Failed to add beta tester to internal group: " + detailedError(ex),
@@ -518,23 +674,13 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
         }
 
         boolean found = waitUntil(
-                () -> isBetaTesterInGroup(betaGroupId, betaTesterId),
+                () -> isTesterInGroup(betaGroupId, betaTesterId, appleEmail),
                 VERIFY_ATTEMPTS,
                 VERIFY_SLEEP_MS
         );
 
-        if (found) {
-            System.out.println("beta tester verified inside group");
-            return true;
-        }
-
-        
-        if (relationshipPosted) {
-            System.out.println("WARNING: relationship posted but tester not visible yet => treat as NOT CONFIRMED");
-            return false;
-        }
-
-        return false;
+        System.out.println("testerInGroupAfterPost => " + found);
+        return found;
     }
     
 
@@ -552,6 +698,29 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
         return false;
     }
 
+    
+    private boolean isEmailInBetaGroup(String betaGroupId, String email) {
+        String target = normalize(email);
+
+        List<JsonNode> existing = getAllPages("/v1/betaGroups/" + betaGroupId + "/betaTesters?limit=200");
+        System.out.println("CHECK EMAIL IN GROUP => betaGroupId=" + betaGroupId + ", target=" + target + ", count=" + existing.size());
+
+        for (JsonNode item : existing) {
+            String currentId = item.path("id").asText(null);
+            String currentEmail = normalize(item.path("attributes").path("email").asText(null));
+
+            System.out.println("GROUP TESTER => id=" + currentId + ", email=" + currentEmail);
+
+            if (target.equals(currentEmail)) {
+                System.out.println("MATCHED EMAIL INSIDE GROUP => " + currentId);
+                return true;
+            }
+        }
+
+        System.out.println("EMAIL NOT FOUND INSIDE GROUP => " + target);
+        return false;
+    }
+    
     private String findLatestBuildId(String appId) {
         List<JsonNode> builds = getAllPages("/v1/apps/" + appId + "/builds?limit=200");
 
@@ -615,6 +784,7 @@ public class AppStoreConnectAppleInternalTestingGateway implements AppleInternal
 
         } catch (WebClientResponseException.Conflict ex) {
             System.out.println("ADD BUILD TO GROUP CONFLICT => maybe already linked");
+            return true;
         } catch (Exception ex) {
             throw new IllegalStateException(
                     "Failed to add latest build to internal group: " + detailedError(ex),

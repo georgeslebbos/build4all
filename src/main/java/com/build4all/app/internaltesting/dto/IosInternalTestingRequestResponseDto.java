@@ -1,5 +1,6 @@
 package com.build4all.app.internaltesting.dto;
 
+import com.build4all.app.internaltesting.domain.AppleTesterIdentityStatus;
 import com.build4all.app.internaltesting.domain.IosInternalTestingRequestStatus;
 
 import java.time.LocalDateTime;
@@ -23,5 +24,10 @@ public record IosInternalTestingRequestResponseDto(
         LocalDateTime acceptedAt,
         LocalDateTime readyAt,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
-) {}
+        LocalDateTime updatedAt,
+
+        Long appleTesterIdentityId,
+        String appleBetaTesterId,
+        AppleTesterIdentityStatus identityStatus
+) {
+}
