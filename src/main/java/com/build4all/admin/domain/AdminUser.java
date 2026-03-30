@@ -134,6 +134,8 @@ public class AdminUser implements UserDetails {
         this.updatedAt = LocalDateTime.now();
     }
 
+    
+    
     // getters/setters …
 
     public Long getAdminId() { return adminId; }

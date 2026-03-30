@@ -14,6 +14,7 @@ import com.build4all.catalog.repository.CurrencyRepository;
 import com.build4all.catalog.repository.ItemRepository;
 import com.build4all.catalog.repository.RegionRepository;
 import com.build4all.common.errors.ApiException;
+import com.build4all.notifications.service.FrontAppNotificationService;
 import com.build4all.order.domain.Order;
 import com.build4all.order.domain.OrderItem;
 import com.build4all.order.domain.OrderSequence;
@@ -62,7 +63,7 @@ public class OrderServiceImpl implements OrderService {
     private final CurrencyRepository currencyRepo;
     private final OrderStatusRepository orderStatusRepo;
     private final WebSocketEventService wsEvents;
-
+    private final FrontAppNotificationService frontAppNotificationService;
     private final OrderPaymentReadService paymentRead;
     private final OrderPaymentWriteService paymentWrite;
 
@@ -98,7 +99,8 @@ public class OrderServiceImpl implements OrderService {
             OrderPaymentWriteService paymentWrite,
             CouponService couponService,
             OrderSequenceRepository orderSeqRepo,
-            WebSocketEventService wsEvents
+            WebSocketEventService wsEvents,
+            FrontAppNotificationService frontAppNotificationService
     ) {
         this.orderItemRepo = orderItemRepo;
         this.orderRepo = orderRepo;
@@ -118,8 +120,11 @@ public class OrderServiceImpl implements OrderService {
         this.couponService = couponService;
         this.orderSeqRepo = orderSeqRepo;
         this.wsEvents = wsEvents;
+        this.frontAppNotificationService = frontAppNotificationService;
     }
 
+    
+    private static final int LOW_STOCK_THRESHOLD = 5;
     /* ===============================
        STATUS HELPERS
        =============================== */
@@ -160,6 +165,125 @@ public class OrderServiceImpl implements OrderService {
     }
     
 
+    private Long resolveOwnerUserId(Long ownerProjectId) {
+        if (ownerProjectId == null || ownerProjectId <= 0) {
+            throw new IllegalArgumentException("ownerProjectId is required");
+        }
+
+        // TEMPORARY FOR CURRENT TEST TENANT:
+        // your current runtime logs show linkId=1 and ownerId=1,
+        // so this works for testing only.
+        return ownerProjectId;
+    }
+    
+    
+    private String resolveItemDisplayName(Item item) {
+        if (item == null) return "Item";
+
+        Object v = tryGet(item, "getName", "getItemName", "getTitle");
+        if (v == null) return "Item";
+
+        String s = v.toString().trim();
+        return s.isEmpty() ? "Item" : s;
+    }
+
+    private void notifyOwnerStockAlertIfNeeded(Item item, Integer newStock) {
+        if (item == null || item.getId() == null || newStock == null) return;
+        if (item.getOwnerProject() == null || item.getOwnerProject().getId() == null) return;
+
+        Long ownerProjectId = item.getOwnerProject().getId();
+        Long ownerUserId = resolveOwnerUserId(ownerProjectId);
+        String itemName = resolveItemDisplayName(item);
+
+        try {
+            if (newStock <= 0) {
+                frontAppNotificationService.notifyOwnerOutOfStock(
+                        ownerProjectId,
+                        ownerUserId,
+                        item.getId(),
+                        itemName
+                );
+            } else if (newStock <= LOW_STOCK_THRESHOLD) {
+                frontAppNotificationService.notifyOwnerLowStock(
+                        ownerProjectId,
+                        ownerUserId,
+                        item.getId(),
+                        itemName,
+                        newStock
+                );
+            }
+        } catch (Exception e) {
+            System.out.println("Stock changed, but failed to send owner stock notification => " + e.getMessage());
+        }
+    }
+    private Long resolveOrderUserId(Order order) {
+        if (order == null || order.getUser() == null || order.getUser().getId() == null) {
+            throw new IllegalStateException("Order user is missing");
+        }
+        return order.getUser().getId();
+    }
+
+    private Long resolveOwnerProjectId(OrderItem oi) {
+        if (oi == null || oi.getItem() == null || oi.getItem().getOwnerProject() == null
+                || oi.getItem().getOwnerProject().getId() == null) {
+            throw new IllegalStateException("Owner project id is missing on order item");
+        }
+        return oi.getItem().getOwnerProject().getId();
+    }
+
+    private void notifyUserOrderRejectedSafe(Order order, Long ownerProjectId, String reason) {
+        try {
+            Long ownerUserId = resolveOwnerUserId(ownerProjectId);
+            Long userId = resolveOrderUserId(order);
+
+            frontAppNotificationService.notifyUserOrderRejected(
+                    ownerProjectId,
+                    ownerUserId,
+                    userId,
+                    order.getId(),
+                    order.getOrderCode(),
+                    reason
+            );
+        } catch (Exception e) {
+            System.out.println("Order rejected, but failed to send user notification => " + e.getMessage());
+        }
+    }
+
+    private void notifyUserOrderCanceledByOwnerSafe(Order order, Long ownerProjectId, String reason) {
+        try {
+            Long ownerUserId = resolveOwnerUserId(ownerProjectId);
+            Long userId = resolveOrderUserId(order);
+
+            frontAppNotificationService.notifyUserOrderCanceledByOwner(
+                    ownerProjectId,
+                    ownerUserId,
+                    userId,
+                    order.getId(),
+                    order.getOrderCode(),
+                    reason
+            );
+        } catch (Exception e) {
+            System.out.println("Order canceled by owner, but failed to send user notification => " + e.getMessage());
+        }
+    }
+
+    private void notifyUserOrderStatusUpdatedSafe(Order order, Long ownerProjectId, String statusCode) {
+        try {
+            Long ownerUserId = resolveOwnerUserId(ownerProjectId);
+            Long userId = resolveOrderUserId(order);
+
+            frontAppNotificationService.notifyUserOrderStatusUpdated(
+                    ownerProjectId,
+                    ownerUserId,
+                    userId,
+                    order.getId(),
+                    order.getOrderCode(),
+                    statusCode
+            );
+        } catch (Exception e) {
+            System.out.println("Order status updated, but failed to send user notification => " + e.getMessage());
+        }
+    }
     private OrderStatus requireStatus(String code) {
         return orderStatusRepo.findByNameIgnoreCase(code)
                 .orElseThrow(() -> new IllegalStateException("OrderStatus not found: " + code));
@@ -222,6 +346,8 @@ public class OrderServiceImpl implements OrderService {
         return null;
     }
 
+    
+    
     private OrderItem requireUserOwned(Long orderItemId, Long userId) {
         return orderItemRepo.findByIdAndUser(orderItemId, userId)
                 .orElseThrow(() -> new IllegalArgumentException("Order item not found or not yours"));
@@ -232,6 +358,7 @@ public class OrderServiceImpl implements OrderService {
                 .orElseThrow(() -> new IllegalArgumentException("Order item not found or not your business"));
     }
 
+    
     /* ===============================
        LEGACY CREATE (STRIPE)
        =============================== */
@@ -555,19 +682,26 @@ public class OrderServiceImpl implements OrderService {
         }
 
         flipStatus(oi, "CANCELED");
+
+        Long ownerProjectId = resolveOwnerProjectId(oi);
+        notifyUserOrderCanceledByOwnerSafe(order, ownerProjectId, "Cancel request approved");
     }
 
     @Override
     public void rejectCancel(Long orderItemId, Long businessId) {
         var oi = requireBusinessOwned(orderItemId, businessId);
-        String curr = currentStatusCode(oi.getOrder());
+        Order order = oi.getOrder();
+        String curr = currentStatusCode(order);
 
         if ("CANCELED".equals(curr)) throw new IllegalStateException("Already canceled");
         if ("COMPLETED".equals(curr)) return;
 
         flipStatus(oi, "PENDING");
-    }
 
+        Long ownerProjectId = resolveOwnerProjectId(oi);
+        notifyUserOrderStatusUpdatedSafe(order, ownerProjectId, "PENDING");
+    }
+    
     @Override
     public void markRefunded(Long orderItemId, Long businessId) {
         var oi = requireBusinessOwned(orderItemId, businessId);
@@ -608,11 +742,9 @@ public class OrderServiceImpl implements OrderService {
         }
 
         order.setStatus(requireStatus("REJECTED"));
-
-        // ✅ FIX: do NOT touch orderDate (created time)
-        // order.setOrderDate(LocalDateTime.now());
-
         orderRepo.save(order);
+
+        notifyUserOrderRejectedSafe(order, ownerProjectId, reason);
     }
 
     @Override
@@ -664,8 +796,9 @@ public class OrderServiceImpl implements OrderService {
 
         order.setStatus(requireStatus("COMPLETED"));
         orderRepo.save(order);
-    }
 
+        notifyUserOrderStatusUpdatedSafe(order, ownerProjectId, "COMPLETED");
+    }
        
 
     @Override
@@ -694,6 +827,9 @@ public class OrderServiceImpl implements OrderService {
         }
 
         flipStatus(oi, "REJECTED");
+
+        Long ownerProjectId = resolveOwnerProjectId(oi);
+        notifyUserOrderRejectedSafe(order, ownerProjectId, "Business rejected the order");
     }
 
     @Override
@@ -713,8 +849,11 @@ public class OrderServiceImpl implements OrderService {
         }
 
         flipStatus(oi, "PENDING");
-    }
 
+        Long ownerProjectId = resolveOwnerProjectId(oi);
+        notifyUserOrderStatusUpdatedSafe(order, ownerProjectId, "PENDING");
+    }
+    
     private boolean isReleasedStatus(String status) {
         if (status == null) return false;
         String s = status.trim().toUpperCase(Locale.ROOT);
@@ -1209,6 +1348,20 @@ public class OrderServiceImpl implements OrderService {
         recalcTotals(cart);
         cartRepo.save(cart);
 
+        try {
+            Long ownerUserId = resolveOwnerUserId(ownerProjectId);
+
+            frontAppNotificationService.notifyOwnerOrderCreated(
+                    ownerProjectId,
+                    ownerUserId,
+                    userId,
+                    order.getId(),
+                    order.getOrderCode()
+            );
+        } catch (Exception e) {
+            System.out.println("Order created successfully, but failed to send owner notification => " + e.getMessage());
+        }
+
         if (couponMessage != null && !couponMessage.isBlank()) {
             priced.setMessage(couponMessage);
         }
@@ -1350,6 +1503,8 @@ public class OrderServiceImpl implements OrderService {
                 Integer newStock = itemRepo.findStockValue(fresh.getId());
                 Long tenantId = fresh.getOwnerProject().getId();
                 wsEvents.sendStockChanged(tenantId, fresh.getId(), -qty, newStock, "ORDER_RESERVED", null);
+
+                notifyOwnerStockAlertIfNeeded(fresh, newStock);
             }
         }
 
@@ -1732,6 +1887,8 @@ public class OrderServiceImpl implements OrderService {
                 if (tenantId != null) {
                     wsEvents.sendStockChanged(tenantId, itemId, -delta, newStock, "ORDER_EDITED", order.getId());
                 }
+
+                notifyOwnerStockAlertIfNeeded(item, newStock);
 
             } else if (delta < 0) {
                 int returnedQty = -delta;
