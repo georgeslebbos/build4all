@@ -1,5 +1,7 @@
 package com.build4all.order.service.impl;
 
+import com.build4all.admin.domain.AdminUserProject;
+import com.build4all.admin.repository.AdminUserProjectRepository;
 import com.build4all.cart.domain.Cart;
 import com.build4all.cart.domain.CartItem;
 import com.build4all.cart.domain.CartStatus;
@@ -66,7 +68,7 @@ public class OrderServiceImpl implements OrderService {
     private final FrontAppNotificationService frontAppNotificationService;
     private final OrderPaymentReadService paymentRead;
     private final OrderPaymentWriteService paymentWrite;
-
+    private final AdminUserProjectRepository adminUserProjectRepository;
     private final CountryRepository countryRepo;
     private final RegionRepository regionRepo;
 
@@ -100,7 +102,8 @@ public class OrderServiceImpl implements OrderService {
             CouponService couponService,
             OrderSequenceRepository orderSeqRepo,
             WebSocketEventService wsEvents,
-            FrontAppNotificationService frontAppNotificationService
+            FrontAppNotificationService frontAppNotificationService,
+            AdminUserProjectRepository adminUserProjectRepository
     ) {
         this.orderItemRepo = orderItemRepo;
         this.orderRepo = orderRepo;
@@ -121,6 +124,7 @@ public class OrderServiceImpl implements OrderService {
         this.orderSeqRepo = orderSeqRepo;
         this.wsEvents = wsEvents;
         this.frontAppNotificationService = frontAppNotificationService;
+        this.adminUserProjectRepository = adminUserProjectRepository;
     }
 
     
@@ -170,10 +174,18 @@ public class OrderServiceImpl implements OrderService {
             throw new IllegalArgumentException("ownerProjectId is required");
         }
 
-        // TEMPORARY FOR CURRENT TEST TENANT:
-        // your current runtime logs show linkId=1 and ownerId=1,
-        // so this works for testing only.
-        return ownerProjectId;
+        AdminUserProject link = adminUserProjectRepository.findById(ownerProjectId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "AdminUserProject not found for id=" + ownerProjectId
+                ));
+
+        if (link.getAdmin() == null || link.getAdmin().getAdminId() == null) {
+            throw new IllegalStateException(
+                    "Owner admin id not found for AdminUserProject id=" + ownerProjectId
+            );
+        }
+
+        return link.getAdmin().getAdminId();
     }
     
     
@@ -797,10 +809,27 @@ public class OrderServiceImpl implements OrderService {
         order.setStatus(requireStatus("COMPLETED"));
         orderRepo.save(order);
 
-        notifyUserOrderStatusUpdatedSafe(order, ownerProjectId, "COMPLETED");
+        notifyUserOrderPaidSafe(order, ownerProjectId);
     }
        
 
+    private void notifyUserOrderPaidSafe(Order order, Long ownerProjectId) {
+        try {
+            Long ownerUserId = resolveOwnerUserId(ownerProjectId);
+            Long userId = resolveOrderUserId(order);
+
+            frontAppNotificationService.notifyUserOrderStatusUpdated(
+                    ownerProjectId,
+                    ownerUserId,
+                    userId,
+                    order.getId(),
+                    order.getOrderCode(),
+                    "COMPLETED"
+            );
+        } catch (Exception e) {
+            System.out.println("Order paid/completed, but failed to send user notification => " + e.getMessage());
+        }
+    }
     @Override
     public void deleteordersByItemId(Long itemId) {
         orderItemRepo.deleteByItem_Id(itemId);

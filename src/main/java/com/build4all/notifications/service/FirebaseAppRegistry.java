@@ -62,9 +62,17 @@ public class FirebaseAppRegistry {
 
             return FirebaseApp.initializeApp(options, appName);
 
-        } catch (Exception e) {
+         } catch (Exception e) {
+            String rootMessage = e.getMessage();
+            if (e.getCause() != null && e.getCause().getMessage() != null) {
+                rootMessage = e.getCause().getMessage();
+            }
+
             throw new RuntimeException(
-                    "Failed to initialize FirebaseApp for ownerProjectLinkId=" + ownerProjectLinkId,
+                    "Failed to initialize FirebaseApp for ownerProjectLinkId="
+                            + ownerProjectLinkId
+                            + ": "
+                            + rootMessage,
                     e
             );
         }
