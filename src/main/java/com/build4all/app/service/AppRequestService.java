@@ -26,6 +26,10 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import com.build4all.notifications.domain.AppFirebaseConfig;
+import com.build4all.notifications.domain.FirebaseProvisioningStatus;
+import com.build4all.notifications.repository.AppFirebaseConfigRepository;
+import com.build4all.notifications.service.FirebaseProvisioningService;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -56,7 +60,9 @@ public class AppRequestService {
     private final AppBuildJobService buildJobService;
     
     private final AppRuntimeConfigPolicyValidator runtimePolicyValidator;
-
+    private final FirebaseProvisioningService firebaseProvisioningService;
+    private final AppFirebaseConfigRepository appFirebaseConfigRepository;
+    
     // ✅ env suffix from application.properties (test/dev/prod...)
     @Value("${build4all.envSuffix:test}")
     private String envSuffix;
@@ -75,7 +81,9 @@ public class AppRequestService {
             LicensingService licensingService,
             AppBuildJobService buildJobService,
             AppEnvCounterRepository envCounterRepo,
-            AppRuntimeConfigPolicyValidator runtimePolicyValidator) {
+            AppRuntimeConfigPolicyValidator runtimePolicyValidator,
+            FirebaseProvisioningService firebaseProvisioningService,
+            AppFirebaseConfigRepository appFirebaseConfigRepository) {
 this.appRequestRepo = appRequestRepo;
 this.aupRepo = aupRepo;
 this.adminRepo = adminRepo;
@@ -88,6 +96,8 @@ this.licensingService = licensingService;
 this.buildJobService = buildJobService;
 this.envCounterRepo = envCounterRepo;
 this.runtimePolicyValidator = runtimePolicyValidator;
+this.firebaseProvisioningService = firebaseProvisioningService;
+this.appFirebaseConfigRepository = appFirebaseConfigRepository;
 }
 
     // ------------------------------------------------------------------
@@ -277,25 +287,33 @@ this.runtimePolicyValidator = runtimePolicyValidator;
 
     @Transactional
     public AdminUserProject createAndAutoApproveBoth(
-            Long ownerId, Long projectId,
-            String appName, String slug,
+            Long ownerId,
+            Long projectId,
+            String appName,
+            String slug,
             MultipartFile logoFile,
-            Long themeId, String notes,
+            Long themeId,
+            String notes,
             String themeJson,
             Long currencyId,
             String navJson,
             String homeJson,
             String enabledFeaturesJson,
             String brandingJson,
-            String apiBaseUrlOverride
+            String apiBaseUrlOverride,
+            String ownerEmail,
+            String ownerName
     ) throws IOException {
-    	
+
         String base = (slug != null && !slug.isBlank()) ? slugify(slug) : slugify(appName);
         String uniqueSlug = ensureUniqueSlug(ownerId, projectId, base);
 
         String logoUrl = null;
+        byte[] logoBytes = null;
+
         if (logoFile != null && !logoFile.isEmpty()) {
             logoUrl = saveOwnerAppLogoToUploads(ownerId, projectId, uniqueSlug, logoFile);
+            logoBytes = logoFile.getBytes();
         }
 
         Long chosenThemeId = resolveThemeIdFromRaw(themeId);
@@ -313,16 +331,30 @@ this.runtimePolicyValidator = runtimePolicyValidator;
         r.setCurrencyId(currencyId);
         r = appRequestRepo.save(r);
 
-        return provisionOnly(
+        AdminUserProject link = provisionAndTrigger(
                 r,
+                logoBytes,
                 navJson,
                 homeJson,
                 enabledFeaturesJson,
                 brandingJson,
                 apiBaseUrlOverride
         );
-    }
 
+        rebuildIosIpaSameBundle(
+                link.getId(),
+                false,
+                apiBaseUrlOverride,
+                navJson,
+                homeJson,
+                enabledFeaturesJson,
+                brandingJson,
+                ownerEmail,
+                ownerName
+        );
+
+        return aupRepo.findById(link.getId()).orElseThrow();
+    }
     @Transactional
     public AdminUserProject rebuildAndroidBundleSamePackage(
             Long linkId,
@@ -362,6 +394,8 @@ this.runtimePolicyValidator = runtimePolicyValidator;
 
         Long currencyIdForBuild = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
 
+        ensureAndroidFirebaseReady(link);
+        
         CiDispatchResult res = ciBuildService.dispatchOwnerAndroidBuild(
                 owner.getAdminId(),
                 project.getId(),
@@ -439,6 +473,7 @@ this.runtimePolicyValidator = runtimePolicyValidator;
 
         Long currencyIdForBuild = (link.getCurrency() != null) ? link.getCurrency().getId() : null;
 
+        ensureIosFirebaseReady(link);
         CiDispatchResult res = ciBuildService.dispatchOwnerIosBuild(
                 owner.getAdminId(),
                 project.getId(),
@@ -520,6 +555,41 @@ this.runtimePolicyValidator = runtimePolicyValidator;
         licensingService.requireBuildAllowed(link.getId());
     }
     
+    private void ensureAndroidFirebaseReady(AdminUserProject link) {
+        Long linkId = link.getId();
+
+        AppFirebaseConfig config = firebaseProvisioningService.ensureFirebaseProvisioned(linkId);
+
+        if (config.getProvisioningStatus() != FirebaseProvisioningStatus.READY) {
+            throw new IllegalStateException(
+                    "Firebase config is not READY for linkId=" + linkId
+            );
+        }
+
+        if (config.getAndroidConfigPath() == null || config.getAndroidConfigPath().isBlank()) {
+            throw new IllegalStateException(
+                    "Android Firebase config file is missing for linkId=" + linkId
+            );
+        }
+    }
+    
+    private void ensureIosFirebaseReady(AdminUserProject link) {
+        Long linkId = link.getId();
+
+        AppFirebaseConfig config = firebaseProvisioningService.ensureFirebaseProvisioned(linkId);
+
+        if (config.getProvisioningStatus() != FirebaseProvisioningStatus.READY) {
+            throw new IllegalStateException(
+                    "Firebase config is not READY for linkId=" + linkId
+            );
+        }
+
+        if (config.getIosConfigPath() == null || config.getIosConfigPath().isBlank()) {
+            throw new IllegalStateException(
+                    "iOS Firebase config file is missing for linkId=" + linkId
+            );
+        }
+    }
     
     private AdminUserProject provisionOnly(
             AppRequest req,
@@ -638,6 +708,7 @@ this.runtimePolicyValidator = runtimePolicyValidator;
                 ? project.getProjectType().name()
                 : "ECOMMERCE";
 
+        ensureIosFirebaseReady(link);
         CiDispatchResult res = ciBuildService.dispatchOwnerIosBuild(
                 owner.getAdminId(),
                 project.getId(),
@@ -750,6 +821,7 @@ this.runtimePolicyValidator = runtimePolicyValidator;
                 ? project.getProjectType().name()
                 : "ECOMMERCE";
 
+        ensureIosFirebaseReady(link);
         CiDispatchResult res = ciBuildService.dispatchOwnerIosBuild(
                 owner.getAdminId(),
                 project.getId(),
@@ -865,6 +937,8 @@ this.runtimePolicyValidator = runtimePolicyValidator;
                 ? project.getProjectType().name()
                 : "ECOMMERCE";
 
+        ensureAndroidFirebaseReady(link);
+        
         CiDispatchResult res = ciBuildService.dispatchOwnerAndroidBuild(
                 owner.getAdminId(),
                 project.getId(),

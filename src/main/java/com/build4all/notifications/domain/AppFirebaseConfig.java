@@ -12,7 +12,8 @@ import java.time.LocalDateTime;
     name = "app_firebase_config",
     indexes = {
         @Index(name = "idx_afc_owner_project_link", columnList = "owner_project_link_id", unique = true),
-        @Index(name = "idx_afc_active", columnList = "is_active")
+        @Index(name = "idx_afc_active", columnList = "is_active"),
+        @Index(name = "idx_afc_provisioning_status", columnList = "provisioning_status")
     }
 )
 @Getter
@@ -56,6 +57,22 @@ public class AppFirebaseConfig {
     @Column(name = "ios_firebase_app_id", length = 255)
     private String iosFirebaseAppId;
 
+    @Column(name = "android_config_path", length = 1000)
+    private String androidConfigPath;
+
+    @Column(name = "ios_config_path", length = 1000)
+    private String iosConfigPath;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "provisioning_status", nullable = false, length = 30)
+    private FirebaseProvisioningStatus provisioningStatus = FirebaseProvisioningStatus.PENDING;
+
+    @Column(name = "last_synced_at")
+    private LocalDateTime lastSyncedAt;
+
+    @Column(name = "last_error", columnDefinition = "TEXT")
+    private String lastError;
+
     @Column(name = "is_active", nullable = false)
     private boolean isActive = true;
 
@@ -67,110 +84,18 @@ public class AppFirebaseConfig {
 
     @PrePersist
     public void onCreate() {
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now();
+
+        if (this.provisioningStatus == null) {
+            this.provisioningStatus = FirebaseProvisioningStatus.PENDING;
+        }
+
+        this.createdAt = now;
+        this.updatedAt = now;
     }
 
     @PreUpdate
     public void onUpdate() {
         this.updatedAt = LocalDateTime.now();
     }
-
-	public Long getId() {
-		return id;
-	}
-
-	public void setId(Long id) {
-		this.id = id;
-	}
-
-	public Long getOwnerProjectLinkId() {
-		return ownerProjectLinkId;
-	}
-
-	public void setOwnerProjectLinkId(Long ownerProjectLinkId) {
-		this.ownerProjectLinkId = ownerProjectLinkId;
-	}
-
-	public String getFirebaseProjectId() {
-		return firebaseProjectId;
-	}
-
-	public void setFirebaseProjectId(String firebaseProjectId) {
-		this.firebaseProjectId = firebaseProjectId;
-	}
-
-	public String getFirebaseProjectName() {
-		return firebaseProjectName;
-	}
-
-	public void setFirebaseProjectName(String firebaseProjectName) {
-		this.firebaseProjectName = firebaseProjectName;
-	}
-
-	public String getAndroidPackageName() {
-		return androidPackageName;
-	}
-
-	public void setAndroidPackageName(String androidPackageName) {
-		this.androidPackageName = androidPackageName;
-	}
-
-	public String getIosBundleId() {
-		return iosBundleId;
-	}
-
-	public void setIosBundleId(String iosBundleId) {
-		this.iosBundleId = iosBundleId;
-	}
-
-	public String getServiceAccountSecretRef() {
-		return serviceAccountSecretRef;
-	}
-
-	public void setServiceAccountSecretRef(String serviceAccountSecretRef) {
-		this.serviceAccountSecretRef = serviceAccountSecretRef;
-	}
-
-	public String getAndroidFirebaseAppId() {
-		return androidFirebaseAppId;
-	}
-
-	public void setAndroidFirebaseAppId(String androidFirebaseAppId) {
-		this.androidFirebaseAppId = androidFirebaseAppId;
-	}
-
-	public String getIosFirebaseAppId() {
-		return iosFirebaseAppId;
-	}
-
-	public void setIosFirebaseAppId(String iosFirebaseAppId) {
-		this.iosFirebaseAppId = iosFirebaseAppId;
-	}
-
-	public boolean isActive() {
-		return isActive;
-	}
-
-	public void setActive(boolean isActive) {
-		this.isActive = isActive;
-	}
-
-	public LocalDateTime getCreatedAt() {
-		return createdAt;
-	}
-
-	public void setCreatedAt(LocalDateTime createdAt) {
-		this.createdAt = createdAt;
-	}
-
-	public LocalDateTime getUpdatedAt() {
-		return updatedAt;
-	}
-
-	public void setUpdatedAt(LocalDateTime updatedAt) {
-		this.updatedAt = updatedAt;
-	}
-    
-    
 }
