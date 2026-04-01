@@ -468,28 +468,18 @@ public class OwnerAppRequestController {
                     homeJson,
                     enabledFeaturesJson,
                     brandingJson,
-                    apiBaseUrlOverride
+                    apiBaseUrlOverride,
+                    ownerEmail,
+                    ownerName
             );
 
             link = aupRepo.findById(link.getId()).orElse(link);
 
             Map<String, Object> body = new HashMap<>();
-            queuedBuildAsyncService.dispatchBoth(
-                    link.getId(),
-                    apiBaseUrlOverride,
-                    navJson,
-                    homeJson,
-                    enabledFeaturesJson,
-                    brandingJson,
-                    ownerEmail,
-                    ownerName
-            );
-
-            body.put("message", "Android + iOS builds queued");
+            body.put("message", "Android + iOS builds started");
             body.put("buildStatusUrl", "/api/owner/apps/" + link.getId() + "/build-status");
             body.put("buildJobsUrl", "/api/owner/apps/" + link.getId() + "/build-jobs/latest");
 
-          
             body.put("adminId", ownerId);
             body.put("projectId", projectId);
             body.put("ownerProjectLinkId", link.getId());
